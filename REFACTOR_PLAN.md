@@ -64,7 +64,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 9 — inheritance/virtual *(cut line)* | **done** — gate green |
 | 10 — RFC-0002 iterator protocol | **done** — gate green |
 | 11 — RFC-0003 `for each` | **done** — gate green |
-| 12 — RFC-0004 containers | **in progress** — Array + Map done, Set/LinkedList owed |
+| 12 — RFC-0004 containers | **done** — gate green, no compiler change |
 | 13 — weak/COMDAT | not started |
 | 14 — docs + merge | not started |
 
@@ -738,8 +738,7 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-11 complete and gated; Phase 12 is
-in progress and its gate has not been run (it adds no compiler code).
+Branch `feat/generics`, **nothing pushed**. Phases 0-12 complete and gated.
 
 Last commits:
 
@@ -752,18 +751,24 @@ de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
 
 ### What to do next
 
-Finish Phase 12. `Array` and `Map` are written and verified by probe; `Set`,
-`LinkedList`, `inc/containers.bi`, the fbcunit suites and `doc/containers.txt`
-are owed, then the gate. Approval to proceed was given, along with the naming:
-Vector→**Array**, Dictionary→**Map**, Set→Set, List→**LinkedList**.
+Phase 13 — weak symbols / COMDAT, then Phase 14 — docs and merge.
 
-Two rules the phase established the hard way, and both bind the remaining work:
+Phase 13 is the last piece of engineering: an instantiation emitted in two
+translation units currently produces a duplicate symbol at link time. Every test
+so far has been single-module or has taken care not to instantiate the same
+thing twice across modules (`tests/generics/member-mangling/` is the exception,
+and it splits deliberately). Until that is done, generics work within one module
+and are fragile across several, which is the last thing between this branch and
+being usable.
 
-- **A container member may not constrain T beyond what the container needs.**
-  Every member is instantiated whether called or not, so anything requiring `=`
-  or `<` on T has to be a free generic procedure.
-- **A type parameter must not case-collide with any parameter or local**, since
-  FreeBASIC is case-insensitive. `Map` uses `TK`/`TV` for exactly this reason.
+Phase 14 is `doc/`, the changelog and the merge. `doc/` already has
+`generics`-adjacent pages from Phases 10-12: `iterator-protocol.txt`,
+`for-each.txt`, `containers.txt`. **`REFACTOR_PLAN.md` is internal and is
+deleted at merge time.**
+
+Carried since Phase 4 and still open: readable debug names, in-body line
+numbers, function-template return types not mangled, and the LLVM backend not
+being in the gate.
 
 ### Test standard for this phase — the author's instruction
 
@@ -811,7 +816,7 @@ outer directory reports "No rule to make target 'compiler'".
   A 16th failure is a regression.
 - **Reconcile the log-test count, do not just read "no failures".**
   `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 11: **1718 passed / 4 failed / 1722 logs**.
+  tests added. Baseline after Phase 12: **1726 passed / 4 failed / 1730 logs**.
   Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
@@ -861,9 +866,9 @@ outer directory reports "No rule to make target 'compiler'".
 
 ---
 
-## Phase 12 — IN PROGRESS: two of four containers
+## Phase 12 — what landed
 
-RFC-0004, with the author's naming:
+RFC-0004, all four containers, with the author's naming:
 
 | RFC | here |
 | --- | --- |
@@ -872,53 +877,40 @@ RFC-0004, with the author's naming:
 | `Set` | `Set` |
 | `List` | **`LinkedList`** |
 
-**No compiler change**, as the RFC promised — everything below is ordinary
-FreeBASIC in `fbc-master/inc/fb/`, consuming Phases 1-11.
+**No compiler change** — `git diff HEAD -- src` is empty for the whole phase.
+That was the point of the RFC and it is the strongest evidence Phases 1-11 are
+good enough to write a real library in.
 
-### Landed and verified by probe
-
-| File | What |
+| File | |
 | --- | --- |
-| `inc/fb/hash.bi` | the hash contract: `FB.HashOf` overloads for every built-in type, FNV-1a for strings, splitmix64 finaliser for integers |
-| `inc/fb/array.bi` | `FB.Array( of T )` + `ArrayIterator( of T )`, and free `IndexOf` / `Contains` / `Sort` |
-| `inc/fb/map.bi` | `FB.Map( of TK, TV )` + `MapIterator` + `KeyValuePair`, open-addressed |
-
-`Array`: Push, Pop, Insert, Remove, RemoveSwap, Clear, Reserve, Shrink, `[]` as
-an lvalue, `for each` and `for each byref`, deep copy, **nested containers**
-(`Array( of Array( of long ) )`), Sort, IndexOf, Contains.
-
-`Map`: Add vs Put vs the inserting indexer, TryGet and Contains not inserting,
-the `counts[ w ] += 1` idiom, iteration, removal through tombstones, 1000
-entries with rehashing, deep copy, Clear, Keys/Values snapshots.
-
-### Still owed
-
-- `inc/fb/set.bi` — `Set( of T )` plus `UnionWith` / `IntersectWith` /
-  `ExceptWith`. A `Map` with the value machinery removed.
-- `inc/fb/linkedlist.bi` — `LinkedList( of T )`, doubly linked.
-- `inc/containers.bi` — the single include.
-- fbcunit suites asserting behaviour **and complexity** — 100k appends must not
-  be O(n²), which is the entire point of the phase.
-- `doc/containers.txt`, and the gate.
+| `inc/containers.bi` | the single include |
+| `inc/fb/hash.bi` | the hash contract; `HashOf` overloads for every built-in |
+| `inc/fb/array.bi` | `Array( of T )`, `ArrayIterator`, free `Sort`/`IndexOf`/`Contains` |
+| `inc/fb/map.bi` | `Map( of TK, TV )`, `MapIterator`, `KeyValuePair` |
+| `inc/fb/set.bi` | `Set( of T )`, `SetIterator`, union/intersect/except |
+| `inc/fb/linkedlist.bi` | `LinkedList( of T )`, `LinkedNode`, `LinkedListIterator` |
+| `doc/containers.txt` | the whole surface, the complexities, and the traps |
 
 ### Storage: a dynamic array, redim'd only on growth
 
-The elements live in an ordinary FreeBASIC dynamic array field, `redim
-preserve`d only when the capacity doubles — never per push. That keeps the
-append amortised O(1) while letting the language do element construction,
-copying and destruction, so a deep copy, an assignment and a destructor all fall
-out for free and there is no manual memory to get wrong.
+`Array`, `Map` and `Set` keep their elements in ordinary FreeBASIC dynamic array
+fields, `redim preserve`d only when the capacity doubles — never per push. That
+keeps the append amortised O(1) while letting the language do element
+construction, copying and destruction, so **deep copy, assignment and the
+destructor all fall out for free** and there is no manual memory to get wrong.
 
 RFC-0004 rejects "wrap the existing redim array" because it would inherit the
 O(n²) append — but that objection is about redim'ing per append, not about the
-storage. Measured before it was chosen: a dynamic array field inside a generic
-redims correctly, deep-copies on both construction and assignment, and carries
-T's constructors.
+storage. Measured before it was chosen.
 
-### Three findings, all from writing real code against the feature
+`LinkedList` is the exception: it holds raw node pointers, so its copy
+constructor, `operator let` and destructor are hand-written. A shallow copy
+would leave two lists sharing one chain and double-free it, and that is exactly
+what the copy section of its test exists to catch.
 
-**1. `typeof( T )` does not see through a type parameter.** This decided the
-hash design:
+### Four findings
+
+**1. `typeof( T )` does not see through a type parameter.**
 
 ```freebasic
 type Alias1 as long
@@ -926,55 +918,121 @@ type Alias1 as long
 #if typeof( T ) = typeof( long )        '' does NOT match, with T bound to long
 ```
 
-An ordinary TYPEDEF is transparent to `typeof`; the TYPEDEF a generic
-instantiation binds is not. So a generic body cannot branch on what its type
-parameter is bound to, and the hash contract cannot be `#if`-dispatched. It is
-an overloaded `FB.HashOf` instead, extended by re-opening the namespace — which
-also gives ordinary overload resolution at the instantiation site, where every
-overload is in scope. Worth fixing in the compiler later; it is not needed here.
+An ordinary TYPEDEF is transparent to `typeof`; the one a generic instantiation
+binds is not. So a generic body cannot branch on what its type parameter is
+bound to. This decided the hash design: `HashOf` is an overloaded plain
+function, extended by re-opening the namespace, which gives ordinary overload
+resolution at the instantiation site where every overload is in scope. Worth
+fixing in the compiler later; nothing here needs it.
 
 **2. Every member of a generic is instantiated whether it is called or not.**
 There is no lazy member instantiation, so a member that needs `=` on `T` makes
 the *whole type* unusable for any `T` without one. As members, `IndexOf`,
-`Contains` and `Sort` made `Array( of Array( of long ) )` fail to instantiate:
+`Contains` and `Sort` made `Array( of Array( of long ) )` fail to instantiate.
+They are free generic **procedures** instead, so the requirement lands on the
+call that needs it, with `T` inferred from the nested `Array( of T )` position.
 
-```
-array.bi(224) error 20: Type mismatch
-  in instantiation of 'Array( of Array( of long ) )'
-```
+That is now a design rule: **a container member may not constrain T beyond what
+the container itself needs.** It is also the strongest practical argument yet
+for adding constraints to RFC-0001.
 
-They are free generic **procedures** instead, which are instantiated only where
-they are called, so the requirement lands on the call site that actually needs
-it. `T` is inferred from the nested `Array( of T )` position — the inference
-Phase 8 added. This is the strongest practical argument yet for constraints, and
-it is a design rule for the rest of the phase: *a container member may not
-constrain T beyond what the container itself needs.*
+**3. Strict inference bites on untyped literals.** `IndexOf( nums, 3 )` over an
+`Array( of long )` cannot infer: the nested position binds `T` to `long` and the
+bare literal is an INTEGER. `IndexOf( nums, 3L )` works. Correct per RFC-0001
+§5, and documented rather than hidden.
 
-**3. Strict inference bites on untyped literals.** `IndexOf( nums, 3 )` where
-`nums` is an `Array( of long )` fails: the nested position binds `T` to `long`
-and the bare literal `3` is an INTEGER, so the two positions conflict and
-RFC-0001 §5 forbids picking. `IndexOf( nums, 3L )` works. Correct, and a
-usability wart worth documenting rather than hiding.
+**4. `new`/`delete` on a generic instantiation works**, including a
+self-referential `Node( of T ) ptr` field. Phase 7 recorded this as not covered;
+`LinkedList` covers it now.
 
 ### And the twelfth identifier false alarm
 
-`Map` originally had type parameters `K, V` and a method `Put( byref k as TK,
-... )`. Every member body declaring a local of type `K` failed with
+`Map` originally had type parameters `K, V` and a method `Put( byref k as K )`.
+Every member body declaring a local of type `K` failed with
 
 ```
 error 14: Expected identifier, found 'K'
   in instantiation of 'Map( of string, long )'
 ```
 
-Bisecting suggested "exactly two type parameters breaks; one and three are
-fine", which is a nonsense shape for a compiler bug and should have been the
-clue. It is not a compiler bug: FreeBASIC is case-insensitive, so the parameter
-`k` and the type parameter `K` are **the same name**, and inside the body `K`
-resolved to the parameter. The same `A`/`a` collision Phase 2 hit.
+Bisecting suggested "exactly two type parameters break; one and three are fine",
+which is a nonsense shape for a compiler bug and should have been the clue. It
+is not one: FreeBASIC is case-insensitive, so the parameter `k` and the type
+parameter `K` are the **same name**, and inside the body `K` resolved to the
+parameter. The `A`/`a` collision from Phase 2, again.
 
-The type parameters are now `TK` / `TV`, so ordinary parameter names stay
-natural. **The rule for the rest of the phase: a type parameter must not
-case-collide with any parameter or local in any member body.**
+Type parameters are now `TK`/`TV`. **A type parameter must not case-collide with
+any parameter or local in any member body.**
+
+Also found on the way: `HashBytes` looped `for i = 0 to n-1` with `n` unsigned,
+so an empty string counted to 4294967295 and walked off the end — reached
+through the `zstring ptr` overload, which a `""` argument prefers over the
+`string` one. It segfaulted on the first run.
+
+### Tests — exhaustive, per the author's instruction
+
+Not a representative sample. Each container test covers every declared member;
+empty, one-element and many-element states; boundary indices including
+one-past-the-end and negative; the growth path; every removal form followed by
+re-insertion; deep copy and assignment independence checked in **both**
+directions; destructor balance with a counting element type; element types that
+stretch it (scalar, `string`, a UDT, and a nested container); and both `for
+each` binding forms with `exit`/`continue for`.
+
+**Complexity is asserted, not assumed** — which is the entire point of RFC-0004:
+
+- 100k `Array` pushes must produce **≤ 20 reallocations** (log₂(100000/8)+1 = 15)
+  and a final capacity under 2n, which is what "amortised O(1) append" means.
+- 100k `Map` and `Set` insertions must respect the 0.75 load factor, and
+  overwriting all 100k must not grow the table at all.
+- An add/remove churn loop must not let tombstones grow the capacity, which only
+  holds because rehashing drops them.
+
+| Path | Kind |
+| --- | --- |
+| `tests/generics/container-array.bas` | `COMPILE_AND_RUN_OK` |
+| `tests/generics/container-map.bas` | `COMPILE_AND_RUN_OK` |
+| `tests/generics/container-set.bas` | `COMPILE_AND_RUN_OK` |
+| `tests/generics/container-linkedlist.bas` | `COMPILE_AND_RUN_OK` |
+| `tests/generics/fail-container-nohash.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-container-nohash-set.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-container-nosort.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-container-noequals.bas` | `COMPILE_ONLY_FAIL` |
+
+The four fail-tests pin the unconstrained-generics diagnostics, which are the
+weakest part of the design and the ones most likely to rot:
+
+```
+error 99: No matching overloaded function, HASHOF()
+  in instantiation of 'Map( of NOHASH, long )'
+error 20: Type mismatch
+  in instantiation of 'Sort( of NOLESS )'
+```
+
+### Phase 12 gate
+
+| Check | Result |
+| --- | --- |
+| compiler | **untouched** — `git diff HEAD -- src` empty |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1726 passed / 4 failed / 1730 logs** — 1718 + 8 new; none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean |
+| `tests/errors` golden, 5 targets | clean |
+
+All four container tests were additionally run by hand under **both** backends.
+
+### Not implemented, deliberately
+
+- **A comparer argument for `Sort`.** Needs a procedure pointer over a generic
+  parameter; `Sort( a )` on `<` is what RFC-0004 asks for.
+- **Allocator parameters**, RFC §Unresolved-4. A significant API cost for a
+  capability most users never need, and the question most likely to be regretted
+  either way.
+- **`-exx` iterator-invalidation checking**, RFC §8. A per-container counter and
+  a comparison in `MoveNext`; cheap and valuable, and not required.
+- **Move semantics**, which is the fix for the deep-copy cost and a language
+  feature, not a library one.
 
 ---
 
