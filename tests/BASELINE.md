@@ -1,6 +1,6 @@
 # fbc test-suite baseline (before any ustring compiler changes)
 
-Captured against `fbc-master` with **Phase 0 only** (new rtlib files, which are not yet
+Captured against `src` with **Phase 0 only** (new rtlib files, which are not yet
 reachable from any FB source) — so this is effectively the stock 1.20.0 tree.
 
 ```
@@ -33,7 +33,7 @@ Two environment workarounds are required; neither is related to ustring.
    Bypass it:
 
    ```
-   cd tests && make unit-tests FBC="C:/dev/ustring/fbc-master/bin/fbc.exe -i C:/dev/ustring/fbc-master/inc"
+   cd tests && make unit-tests FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
    ```
 
 2. **A stub `libffi.a`.** fbc emits `-lffi` whenever a `ThreadCall` appears
@@ -65,8 +65,8 @@ cross-assembler is needed) and is the only cross-target coverage available here.
 ### Running them
 
 ```
-cd tests && make log-tests FBC="C:/dev/ustring/fbc-master/bin/fbc.exe -i C:/dev/ustring/fbc-master/inc -p C:/dev/utils/mingw64/lib"
-cd tests/warnings && FBC="C:/dev/ustring/fbc-master/bin/fbc.exe" bash ./test.sh
+cd tests && make log-tests FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc -p C:/dev/utils/mingw64/lib"
+cd tests/warnings && FBC="C:/dev/FBC-Modern/src/bin/fbc.exe" bash ./test.sh
 ```
 
 Two environment notes, neither related to ustring:
@@ -82,7 +82,7 @@ Two environment notes, neither related to ustring:
 
 ## Trap: `clean-tests` is a ROOT makefile target
 
-`clean-tests` is defined in `fbc-master/makefile`, **not** in `tests/Makefile`.
+`clean-tests` is defined in `src/makefile`, **not** in `tests/Makefile`.
 Running `make clean-tests` from inside `tests/` silently does nothing, and since
 the `.bas` sources have not changed, make then treats all ~670 `.o` files as up
 to date and re-runs the *previous* `fbc-tests.exe` unchanged.

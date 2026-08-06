@@ -30,8 +30,8 @@ Log: `<scratchpad>/baseline-unit-main.log`
 tree, so **both** the compiler build and the test runs need an explicit `-i`:
 
 ```
-make compiler -j8 FBC="C:/dev/USTRING/fbc-master/bin/fbc.exe -i C:/dev/USTRING/fbc-master/inc"
-cd tests && make unit-tests FBC="C:/dev/USTRING/fbc-master/bin/fbc.exe -i C:/dev/USTRING/fbc-master/inc"
+make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
+cd tests && make unit-tests FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
 ```
 
 Full compiler rebuild: **~6 s at `-j8`** (146 modules). Touching any `.bi`
@@ -86,11 +86,11 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 `BASELINE.md`'s figure was captured against a `bin/fbc.exe` built at 05:49,
 **six minutes before** `c90abfa` (which modified compiler sources). So a
 straight diff against it would have conflated `c90abfa`'s changes with this
-phase's. `fbc-master/bin/fbc.exe` is gitignored, so a stale binary can silently
+phase's. `src/bin/fbc.exe` is gitignored, so a stale binary can silently
 outlive a source commit — worth remembering.
 
 Closed by rebuilding the compiler from `c90abfa` with these fixes reverted
-(`git checkout HEAD~1 -- fbc-master/src/compiler`) and re-running, **with the
+(`git checkout HEAD~1 -- src/src/compiler`) and re-running, **with the
 same test files present in both runs**, so only the compiler differs:
 
 | | assertions | passed | failed | tests |
@@ -803,12 +803,12 @@ Phase 4, listed at the end of the Phase 11 section.
 ### Gate protocol — do not skip
 
 ```
-make compiler -j8 FBC="C:/dev/USTRING/fbc-master/bin/fbc.exe -i C:/dev/USTRING/fbc-master/inc"
+make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
 cd tests && make unit-tests [GEN=gas64] ... && make log-tests ...
 tests/warnings/test.sh  and  tests/errors/test.sh   then  git diff on r/
 ```
 
-The repository root is **`fbc-master/`**, not `C:/dev/USTRING/` — `make` from the
+The makefile root is **`src/`**, not `C:/dev/FBC-Modern/` — `make` from the
 outer directory reports "No rule to make target 'compiler'".
 
 - **Environmental floor: 11 `threadcall_` + 4 `cpp`.** The 4 are missing
@@ -821,7 +821,7 @@ outer directory reports "No rule to make target 'compiler'".
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
 - **A new test FILE in an existing directory is not picked up** without
-  `make clean-tests` **from `fbc-master/`** — the generated list is cached.
+  `make clean-tests` **from `src/`** — the generated list is cached.
   This silently hid two Phase 6 tests behind a green-looking gate.
 - Check no log lacks a `RESULT=` line; a timed-out run leaves one truncated.
 - Never run two `make log-tests` concurrently — they race and invent failures.
@@ -836,7 +836,7 @@ outer directory reports "No rule to make target 'compiler'".
 ### Traps this project has actually hit
 
 - `git` without `-C <abspath>` runs against the wrong repo. Always
-  `git -C /c/dev/USTRING`.
+  `git -C /c/dev/FBC-Modern`.
 - **`git stash push -- <file>` reverts the WHOLE file, not the hunk you had in
   mind.** Reached for to check whether one fix had teeth, it silently backed out
   the rest of the phase's work in that file too. To neutralise a single

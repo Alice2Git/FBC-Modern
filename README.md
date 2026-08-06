@@ -474,21 +474,36 @@ ARM, JS and DOS.
 ## Layout
 
 ```
-fbc-master/     fbc 1.20.0 with USTRING implemented
-                  src/compiler/  48 files involved, 1 new (rtl-ustring.bas)
-                  src/rtlib/     21 new files (ustr_*.c, fb_ustring.h, ...)
-                  src/gfxlib2/   DRAW STRING support, 2 new files
-                  doc/ustring.txt   user documentation
-fbc-win/        prebuilt: fbc32.exe + fbc64.exe, shared toolchain, inc, libs
-fbc-linux/      prebuilt: bin/fbc, inc, lib/freebasic/linux-x86_64
-tests/          USTRING's own suites and the append benchmark (see above)
-tools/          generators for the Unicode case table and the CP437 table,
-                plus the LLVM verification harness
-NOTES.md        implementation notes, design decisions, and every bug found
-LICENSE         licensing, inherited from FreeBASIC (see below)
+src/                    the fbc tree, with everything this project adds
+    src/compiler/       the compiler
+    src/rtlib/          the runtime
+    src/gfxlib2/        the graphics library
+    inc/fb/             the standard containers (array, map, set,
+                        linkedlist, hash)
+    inc/containers.bi   the single include for all four
+    tests/generics/     the generics, for-each and container suites
+    makefile            'make compiler' and the test targets run from HERE
+
+toolchains/
+    fbc-modern-windows/ prebuilt: fbc32.exe + fbc64.exe, inc, libs
+    fbc-modern-linux/   prebuilt: bin/fbc, inc, lib/freebasic/linux-x86_64
+
+docs/
+    ustring/            USTRING reference and implementation notes
+    for_each/           FOR EACH and the iterator protocol
+    array/  map/        the standard containers, one folder each
+    set/    linkedlist/
+
+tests/                  USTRING's own suites and the append benchmark
+tools/                  generators for the Unicode case table and the CP437
+                        table, plus the LLVM verification harness
+LICENSE                 licensing, inherited from FreeBASIC (see below)
 ```
 
-`NOTES.md` is worth reading if you are reviewing this. It records the design
+Note that the makefile lives in `src/`, not at the top level: builds and test
+runs are `cd src && make compiler`, not `make` from the repository root.
+
+`docs/ustring/implementation-notes.md` is worth reading if you are reviewing this. It records the design
 decisions *and* the mistakes — several bugs in this work compiled cleanly, ran,
 and produced plausible output (an empty generated destructor, a silently
 disabled copy-back, a no-op `LSET`, a `READ` that assigned nothing). They were
