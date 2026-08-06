@@ -1,0 +1,2 @@
+=== no GetIterator at all ===
+	error 342: Type is not iterable, it needs: declare function GetIterator( ) as <iterator>, PLAIN

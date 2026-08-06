@@ -2320,3 +2320,61 @@ private sub cAutoVarDecl( byval baseattrib as FB_SYMBATTRIB )
 		lexSkipToken( )
 	loop
 end sub
+
+'' Declare a local variable initialised from an ALREADY-PARSED expression.
+''
+'' FOR EACH needs this and cannot use cVarDecl: its loop variable is declared by
+'' the statement, but the initializer is an element expression the for-each
+'' parser built itself -- a call to the iterator's Value( ), or an array
+'' subscript -- rather than something still sitting in the token stream.
+''
+'' Everything here is what cAutoVarDecl does once the expression is in hand, so
+'' the two cannot drift: the same hAddVar, the same byref-vs-copy split, the same
+'' initializer builders and the same flush.
+function cDeclLocalFromExpr _
+	( _
+		byval id as zstring ptr, _
+		byval dtype as integer, _
+		byval subtype as FBSYMBOL ptr, _
+		byval isref as integer, _
+		byval expr as ASTNODE ptr _
+	) as FBSYMBOL ptr
+
+	static as FBARRAYDIM dTB(0 to 0)
+	dim as integer dimensions = 0, have_bounds = FALSE
+	dim as longint lgt = symbCalcLen( dtype, subtype )
+	dim as FB_SYMBATTRIB attrib = FB_SYMBATTRIB_NONE
+	dim as integer vdtype = dtype
+	dim as FBSYMBOL ptr vsubtype = subtype
+
+	function = NULL
+
+	if( expr = NULL ) then
+		exit function
+	end if
+
+	if( isref ) then
+		attrib or= FB_SYMBATTRIB_REF
+	end if
+
+	dim as FBSYMBOL ptr sym = hAddVar( NULL, NULL, id, NULL, vdtype, vsubtype, lgt, _
+	                                   FALSE, attrib, dimensions, have_bounds, dTB(), FB_TK_DIM )
+	if( sym = NULL ) then
+		astDelTree( expr )
+		exit function
+	end if
+
+	dim as ASTNODE ptr initree = any
+	if( symbIsRef( sym ) ) then
+		initree = hCheckAndBuildByrefInitializer( sym, expr )
+	else
+		initree = hCheckAndBuildAutoVarInitializer( sym, expr )
+	end if
+
+	dim as ASTNODE ptr var_decl = astNewDECL( sym, FALSE )
+	symbSetIsDeclared( sym )
+
+	astAdd( hFlushInitializer( sym, var_decl, initree, symbHasDtor( sym ) ) )
+
+	function = sym
+end function

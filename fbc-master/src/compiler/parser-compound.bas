@@ -65,7 +65,11 @@ function cCompoundStmt as integer
 
 	case FB_TK_FOR
 		CHECK_CODEMASK( FB_TK_FOR, FB_TK_NEXT )
-		cForStmtBegin( )
+		if( cForIsEach( ) ) then
+			cForEachStmtBegin( )
+		else
+			cForStmtBegin( )
+		end if
 
 	case FB_TK_DO
 		CHECK_CODEMASK( FB_TK_DO, FB_TK_LOOP )
@@ -596,6 +600,19 @@ function cCompStmtPush _
 	case FB_TK_FOR
 		stk->for.last = parser.stmt.for
 		parser.stmt.for = stk
+
+		'' The stack nodes are POOLED and only id/allowmask/scopenode are reset
+		'' above -- every statement kind is expected to fill in its own fields.
+		'' An ordinary FOR fills cnt/end/stp/ispos and the labels, so it never
+		'' touched these two, and a FOR that followed a FOR EACH in the same
+		'' procedure inherited the FOR EACH's iterator: hForStmtClose then took
+		'' the for-each arm and emitted MoveNext/IsValid on a stale temp instead
+		'' of advancing the counter.
+		''
+		'' Cleared here rather than in cForStmtBegin so a future third entry
+		'' point cannot forget it.
+		stk->for.iseach = FALSE
+		stk->for.eachit = NULL
 
 	case FB_TK_SELECT
 		stk->select.last = parser.stmt.select

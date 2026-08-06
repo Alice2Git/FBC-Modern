@@ -63,7 +63,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 8 — operators + properties | **done** — gate green |
 | 9 — inheritance/virtual *(cut line)* | **done** — gate green |
 | 10 — RFC-0002 iterator protocol | **done** — gate green |
-| 11 — RFC-0003 `for each` | **in progress** — uncommitted, known bug |
+| 11 — RFC-0003 `for each` | **done** — gate green |
 | 12 — RFC-0004 containers | not started |
 | 13 — weak/COMDAT | not started |
 | 14 — docs + merge | not started |
@@ -738,27 +738,30 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-10 complete and gated.
-
-**Phase 11 is IN PROGRESS and its compiler changes are UNCOMMITTED and NOT
-GATED.** They are working-tree only, and there is a known miscompilation — see
-*Phase 11 — in progress* below before doing anything else with them. Do not run
-a gate against them expecting green, and do not commit them as they stand.
+Branch `feat/generics`, **nothing pushed**. Phases 0-11 complete and gated.
 
 Last commits:
 
 ```
+539a19f  Phase 11 in progress: for each -- state recorded, compiler changes NOT committed
 522a047  Phase 10: the RFC-0002 iterator protocol
 de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
 0562db4  Phase 8: operators and properties on generics
-96d5066  Phase 6: generic procedures, with type-argument inference
 ```
 
 ### What to do next
 
-Finish Phase 11: find the iterator-temp lifetime bug described below, then tests,
-docs and the gate. Phase 12 (containers) still needs the author's approval
-before it starts.
+Phase 12 — RFC-0004 containers. **Get the author's approval before starting it**,
+and before anything naming Vector, Dictionary, Set or List.
+
+It is expected to need **no compiler change**: new `fbc-master/inc/fb/`
+(`vector.bi`, `dictionary.bi`, `set.bi`, `list.bi`, `iterator.bi`) written in
+ordinary FreeBASIC on top of Phases 1-11. The tests are fbcunit suites asserting
+behaviour **and complexity** — 100k appends must not be O(n²), which is the
+entire point.
+
+Nothing is owed from Phase 11. The items still open are the ones carried since
+Phase 4, listed at the end of the Phase 11 section.
 
 ### Gate protocol — do not skip
 
@@ -776,7 +779,7 @@ outer directory reports "No rule to make target 'compiler'".
   A 16th failure is a regression.
 - **Reconcile the log-test count, do not just read "no failures".**
   `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 10: **1712 passed / 4 failed / 1716 logs**.
+  tests added. Baseline after Phase 11: **1718 passed / 4 failed / 1722 logs**.
   Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
@@ -785,11 +788,13 @@ outer directory reports "No rule to make target 'compiler'".
   This silently hid two Phase 6 tests behind a green-looking gate.
 - Check no log lacks a `RESULT=` line; a timed-out run leaves one truncated.
 - Never run two `make log-tests` concurrently — they race and invent failures.
-- **Run behaviour tests under BOTH backends by hand.** Phase 9's bug 4 was
-  invisible to gas64, and Phase 11's current bug is invisible to a short
-  function. `-gen gcc` catching it as a C compile error and `-gen gas64` catching
-  it as a segfault is how it was identified as an AST problem rather than an
-  emission one.
+- **Run behaviour tests under BOTH backends by hand.** Phase 9's emission-order
+  bug was invisible to gas64; Phase 11's stale-stack bug showed up as a C compile
+  error under gcc and a segfault under gas64, and it was the difference between
+  the two that identified it as an AST problem rather than an emission one.
+- **Golden error files: one case per file.** The compiler stops at the first
+  error in many situations, so a file with several independent cases silently
+  reports only the first.
 
 ### Traps this project has actually hit
 
@@ -808,137 +813,196 @@ outer directory reports "No rule to make target 'compiler'".
   trio, `x is T` requires a genuine DOWNCAST, an override must itself be
   `virtual` to be overridden AGAIN a level down, and constness alone does NOT
   distinguish an overload. Reserved so far: `base`, `Fix`, `Mid`. Ten false
-  alarms now. Check the plain-FB control first — every one of these looked
-  exactly like a compiler regression.
-- **A construct that works in isolation can still be broken in context.** Phase
-  11's bug does not reproduce in any short program; it needs a function with
-  many preceding loops. Bisect the *test file*, not the construct.
+  alarms now. Check the plain-FB control first.
+- **A construct that works in isolation can still be broken in context.** All
+  three Phase 11 bugs needed a procedure with several preceding loops and none
+  reproduced on its own. Bisect the TEST FILE, not the construct.
+- **Compiler-internal scratch is not always safe to reuse.** `symbAddImplicitVar`
+  registers no construction or destruction; the compound-statement stack is
+  pooled and only three fields are reset on push; `cProcHeader`'s name buffer was
+  a function-static and the function re-enters itself. Three separate phases
+  found three of these.
+- An unreferenced `declare ... alias "..."` emits no relocation and links against
+  any mangling at all. Take its address, and mutate the name to prove the test
+  fails.
+- Empty output is not a pass; look for the summary line.
 
 ---
 
-## Phase 11 — IN PROGRESS, uncommitted, has a known bug
+## Phase 11 — what landed
 
-RFC-0003 `for each`. Everything below is in the working tree and builds clean
-with zero warnings, but **it miscompiles in one case and must not be committed
-as it stands.**
-
-### The bug
-
-`tests/generics/for-each.bas` (written, in the tree, not yet registered as
-passing) fails at 427 lines:
-
-```
--gen gcc     error: 'TMP$86$1' undeclared (first use in this function)
-             _ZN13ArrayIteratorIiE8MOVENEXTEv( &TMP$86$1 );
--gen gas64   compiles, then segfaults at run time
-```
-
-The iterator temp is referenced by the `MoveNext` call after the scope that
-declares it has closed. gas64 failing at run time rather than at compile time is
-what says this is an **AST/scope problem, not a C-emission artifact** — check
-both backends before theorising.
-
-**It does not reproduce in isolation.** Bisected by prefix: 370 lines pass, 378
-fail, and the construct in between —
+RFC-0003 `for each`, complete: user collections, fixed and dynamic arrays, and
+var-len strings, with `byref` binding, element-type inference, `exit`/`continue
+for`, nesting, and five specific diagnostics.
 
 ```freebasic
-for i as long = 1 to 2
-    for each v in b2
-        if v = 2 then exit for
-        t += v * i
-    next
-next
+for each n as string in names     for each v in arr
+for each byref v as long in arr   for each kv in someCollection
 ```
 
-— compiles and runs correctly on its own, with a generic collection, with a
-non-generic one, and after an array `for each` using `continue for`/`exit for`.
-So the trigger is accumulated context, not that shape. Bisect the test file
-further; do not keep re-testing the construct.
+No new AST node, no IR node, no code generator change and no runtime call — it
+is a parser rule and a desugaring, as the RFC promised.
 
-First place to look: `hStoreTemp` puts the iterator in whatever scope is current
-when `cForEachStmtBegin` calls it, which is the for-each's own outer scope
-(opened immediately before). `hForStmtClose` emits `MoveNext` after
-`astScopeEnd( stk->scopenode )` (the body) and before
-`astScopeEnd( stk->for.outerscopenode )`, so it should still be inside the
-declaring scope. Something in a longer function is closing that outer scope
-early, or the temp is being placed elsewhere.
+### The two lowerings
 
-### What works
+A **user collection** satisfying RFC-0002 becomes
 
-Verified by probe, both backends unless noted:
+```
+dim __it = c.GetIterator( ) : goto test
+ini:   scope : dim x = __it.Value( ) : BODY : end scope
+cmp:   __it.MoveNext( )                     '' CONTINUE FOR lands here
+test:  if __it.IsValid( ) then goto ini
+```
 
-| | |
+An **array or string** becomes an ordinary `FOR` over a hidden counter with the
+element bound at the top of the body. It fills the same compound-statement entry
+an ordinary `FOR` does, so the existing scalar close advances and tests it and
+the emitted code is what the hand-written index loop emits. That case is the one
+the RFC exists for, so it must not be slower.
+
+Both share the `FB_TK_FOR` stack entry, which is what makes `exit for`,
+`continue for` and their multi-level forms work with nothing new: they count a
+`for each` as a `for` without knowing it exists.
+
+### Backward compatibility — verified, not assumed
+
+`each` and `in` are matched by TEXT via `hMatchIdOrKw`, exactly as `of` is in the
+generics parser. Neither enters the keyword table.
+
+| probe | result |
 | --- | --- |
-| `for each x as E in <user collection>` | works |
-| `for each x in <user collection>` — element type inferred from `Value()` | works |
-| `for each byref x as E in <user collection>` | works, mutates through `Value() byref` |
-| fixed array, lbound 0 and lbound 3 | works |
-| dynamic array, including unallocated (0 iterations) | works |
-| `byref` over fixed and dynamic arrays | works |
-| var-len `string` → `ubyte` per iteration | works; empty string iterates 0 times |
-| `exit for` / `continue for` | works, including `continue for` still advancing |
-| nesting: for-each in for-each | works |
-| the collection evaluated exactly once | works |
-| an iterator with a destructor, incl. on `exit for` | works |
-| loop variable scoped to the body | works |
+| `for each as long = 1 to 3` | still compiles, prints 1 2 3 |
+| `dim each as long : for each = 1 to 3` | still compiles |
+| `dim in as long` | still compiles |
+| `for each(0) = 1 to 3` | `error 52`, as before |
+| `for each.v = 1 to 3` | `error 52`, as before |
 
-Backward compatibility verified against the compiler, not assumed:
+Those last two are the whole disambiguation argument: FreeBASIC's `for` needs a
+simple scalar counter, so after `for <identifier>` the only tokens the old
+grammar accepts are `as` and `=`, and a `for each`'s next token is always `byref`
+or an identifier. One token of look-ahead, nothing left over.
 
-```
-for each as long = 1 to 3      still compiles, prints 1 2 3
-dim each as long : for each = 1 to 3    still compiles
-dim in as long                 still compiles
-for each(0) = 1 to 3           error 52 (as before)
-for each.v  = 1 to 3           error 52 (as before)
-```
+### Three bugs, and the shape they share
 
-That last pair is the whole disambiguation argument: FreeBASIC's `for` needs a
-simple scalar counter, so after `for <identifier>` the only legal next tokens are
-`as` and `=`, and a `for each` never has either. `each` and `in` are matched by
-TEXT via `hMatchIdOrKw`, exactly as `of` is in the generics parser, so neither
-becomes a keyword.
+All three were **invisible in a short program** and only appeared in a long
+procedure with several loops. Bisect the *test file*, not the construct — every
+one of them compiled and ran correctly in isolation.
 
-Diagnostics, all verified:
+**1. The compound-statement stack is pooled and is not cleared.**
+`cCompStmtPush` resets `id`, `allowmask`, `scopenode` and the `last` link, and
+nothing else: each statement kind fills in its own fields. An ordinary `FOR`
+fills the counter fields and the labels, so it never touched the two new ones —
+and a `FOR` that followed a `FOR EACH` in the same procedure **inherited the for
+each's iterator**. `hForStmtClose` then took the for-each arm and emitted
+`MoveNext`/`IsValid` on a stale temp instead of advancing the counter:
 
 ```
-error 344: Cannot FOR EACH over a multi-dimensional array, iterate one dimension explicitly
-error 342: Type is not iterable, it needs: declare function GetIterator( ) as <iterator>, P
-error 343: Not an iterator type, ... missing, MoveNext( )        '' the RFC-0002 §7 near-miss
-error 345: Cannot bind BYREF in FOR EACH, the iterator's Value( ) returns by value
-error 346: NEXT cannot name the FOR EACH variable, it is scoped to the loop body
+-gen gcc     error: 'TMP$86$1' undeclared    _ZN13ArrayIteratorIiE8MOVENEXTEv( &TMP$86$1 )
+-gen gas64   compiles, then segfaults
 ```
 
-### What is deliberately not implemented
+Found by reading the generated C and noticing one temp used by two loops.
+gas64 failing at *run* time rather than compile time is what identified it as an
+AST problem rather than a C-emission artifact — **check both backends before
+theorising.** Cleared in `cCompStmtPush`'s `FB_TK_FOR` arm rather than in
+`cForStmtBegin`, so a future third entry point cannot forget it.
 
-- **`zstring` and `wstring`.** Refused with a diagnostic pointing at `string`. A
+**2. `symbAddImplicitVar` registers no construction or destruction.**
+It produces a plain local slot. That is right for a `FOR` counter, which is what
+`hStoreTemp` was written for, and wrong for anything with a lifetime:
+
+- the string collection was copied into an implicit var, whose descriptor was
+  assigned into and then never cleaned up. The symptom was a crash in a **later,
+  unrelated string declaration**.
+- the iterator was stored the same way, so an iterator with a destructor was
+  never destroyed. The symptom was a `constructed = destroyed` assertion failing
+  at the end of the test.
+
+The iterator is now declared through `cDeclLocalFromExpr`, the same path the loop
+variable takes, which routes through `hFlushInitializer` with `symbHasDtor`. The
+string is not copied at all: its data pointer and length are taken into two
+scalar temps.
+
+Because the pointer and the length are read separately, a **string expression
+with side effects is refused** rather than evaluated twice — RFC-0003 §3 promises
+the collection is evaluated exactly once, and that promise is worth more than the
+convenience.
+
+**3. `astNewIDX` takes a BYTE OFFSET, and the base convention differs.**
+A fixed array wants `index * sizeof(elem)`, with the lbound bias folded into the
+base by `astNewIDX` itself. A dynamic array wants `index * sizeof(elem)` **plus**
+the descriptor's `data` field, which is already biased. One shape for both read
+the fixed case correctly and segfaulted on the dynamic one. Both are lifted from
+`cVariableEx`, the only place they are written down.
+
+Also worth not re-deriving: **a byref-returning function is
+`symbIsReturnByref`, not `symbIsRef`.** `symbIsRef` is for reference *variables*,
+and using it made every `byref` binding over a conforming iterator report
+"Value( ) returns by value".
+
+### One new shared entry point
+
+`cDeclLocalFromExpr` in `parser-decl-var.bas` — declare a local from an
+already-parsed expression. `for each` needs it and cannot use `cVarDecl`: its
+loop variable is declared by the statement, but the initializer is an element
+expression the for-each parser built itself, not something still in the token
+stream. Lifted from `cAutoVarDecl` so the two cannot drift, and used for both the
+loop variable and the iterator.
+
+### Not implemented, deliberately
+
+- **`zstring` and `wstring`**, refused with a diagnostic pointing at `string`. A
   var-len `string` carries its own length; a fixed-length buffer does not, and
   RFC-0003 §5 wants a `zstring` walked to its terminating NUL rather than to its
   declared size — a different loop, not a different bound. The first attempt
-  copied the buffer into a temp, read a length of 0, and iterated zero times
-  silently, which is exactly the kind of thing this project refuses to ship.
+  copied the buffer into a temp, read a length of 0 and iterated zero times
+  silently.
+- **`end for`** as an alternative closer (§Unresolved-3). `next` matches every
+  other FreeBASIC loop and is what the RFC proposes preferring.
+- **An index binding** (`for each i, v in c`) — RFC *Future possibilities*.
 
-### Where the changes are
+### Tests added
 
-| File | What |
+| Path | Kind |
 | --- | --- |
-| `parser-compound-for.bas` | `cForIsEach`, `cForEachStmtBegin`, `hProtoMember`, `hIsIteratorType`, `hCallMember`, `hForEachClose`; `hForStmtClose` gains the for-each arm; `cForStmtEnd` rejects `next x` |
-| `parser-compound.bas` | the one-token look-ahead at the `FB_TK_FOR` dispatch |
-| `parser-decl-var.bas` | new `cDeclLocalFromExpr` — declare a local from an already-parsed expression, lifted from `cAutoVarDecl` so the two cannot drift |
-| `parser.bi` | `FB_CMPSTMT_FOR.iseach` / `.eachit`, and the three declarations |
-| `error.bi` / `error.bas` | five messages appended before the sentinel |
-| `tests/generics/for-each.bas` | the test, written, currently failing as above |
+| `tests/generics/for-each.bas` | `COMPILE_AND_RUN_OK` — ~45 assertions: the three backward-compatibility forms; fixed arrays at lbound 0 and 3; dynamic and unallocated arrays; `byref` over both; conversion via an explicit `as`; string and empty string; user collections generic and not, `byref` and by-value `Value`; `exit`/`continue for` over both lowerings; nesting with itself, with `for` and inside `while`; iterator destructor balance including on `exit for`; the collection evaluated exactly once; the loop variable not escaping |
+| `tests/generics/fail-foreach-not-iterable.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-foreach-nearmiss.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-foreach-multidim.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-foreach-nextvar.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-foreach-byref.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/errors/foreach-*.bas` | five golden files, 5 targets each |
 
-Two shapes in there were got wrong once and are worth not re-deriving:
+The golden files are **one case per file**, because the compiler stops at the
+first error in many situations and a single file reported only the first
+diagnostic — the readme warns about exactly this.
 
-- **`astNewIDX` takes a BYTE OFFSET, not an element index**, and the base
-  convention differs: a FIXED array wants `index * sizeof(elem)` with the lbound
-  bias folded into the base by `astNewIDX` itself, while a DYNAMIC array wants
-  `index * sizeof(elem)` **plus** the descriptor's `data` field. One shape for
-  both read the fixed case correctly and segfaulted on the dynamic one. Both are
-  lifted from `cVariableEx`, the only place they are written down.
-- **A byref-returning function is `symbIsReturnByref`, not `symbIsRef`.**
-  `symbIsRef` is for reference *variables*, and using it made every `byref`
-  binding over a conforming iterator report "Value( ) returns by value".
+### Documentation
+
+`doc/for-each.txt`, a sibling to `doc/iterator-protocol.txt` and
+`doc/ustring.txt`.
+
+### Phase 11 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1718 passed / 4 failed / 1722 logs** — 1712 + 6 new; none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean — zero content change |
+| `tests/errors` golden, 5 targets | additions only; no existing golden moved |
+
+`for-each.bas` was additionally run by hand under both backends, which is how
+bug 1 was distinguished from a C-emission problem.
+
+### Still open
+
+- **Readable debug names** (carried from Phase 4).
+- **In-body line numbers** (carried from Phase 4).
+- **Function-template return types are not mangled** (from Phase 6).
+- `new` / `delete` on an instantiation (carried from Phase 7).
+- **The LLVM backend** is not in the gate (noted in Phase 9).
 
 ---
 

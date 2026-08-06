@@ -53,6 +53,18 @@ type FB_CMPSTMT_FOR
 	endlabel        as FBSYMBOL ptr
 	last            as FB_CMPSTMTSTK_ ptr
 	explicit_step   as integer
+
+	'' FOR EACH shares this stack entry, and the FB_TK_FOR stack kind, on
+	'' purpose: EXIT FOR, CONTINUE FOR and their multi-level forms then count a
+	'' FOR EACH as a FOR without knowing it exists, which is what RFC-0003 §8
+	'' asks for.
+	''
+	'' iseach   this is a FOR EACH -- NEXT may not name the variable
+	'' eachit   the iterator variable, for a user collection.  NULL for an array
+	''          or string, which lower to an ordinary hidden-counter FOR and so
+	''          are closed by the existing scalar path with nothing new.
+	iseach          as integer
+	eachit          as FBSYMBOL ptr
 end type
 
 type FB_CMPSTMT_IF
@@ -427,6 +439,22 @@ declare sub cIfStmtBegin( )
 declare sub cIfStmtNext( )
 declare sub cIfStmtEnd( )
 declare sub cForStmtBegin( )
+
+'' FOR EACH -- RFC-0003.  cForIsEach() is the one token of look-ahead that tells
+'' 'for each n in c' from the still-legal 'for each as long = 1 to 3'.
+declare function cForIsEach( ) as integer
+declare sub cForEachStmtBegin( )
+
+'' Declare a local initialised from an already-parsed expression (see the body
+'' in parser-decl-var.bas).
+declare function cDeclLocalFromExpr _
+	( _
+		byval id as zstring ptr, _
+		byval dtype as integer, _
+		byval subtype as FBSYMBOL ptr, _
+		byval isref as integer, _
+		byval expr as ASTNODE ptr _
+	) as FBSYMBOL ptr
 declare sub cForStmtEnd( )
 declare sub cDoStmtBegin( )
 declare sub cDoStmtEnd( )

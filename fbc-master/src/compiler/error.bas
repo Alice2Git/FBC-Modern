@@ -456,6 +456,11 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_INSTDEPTHTOODEEP                   '/ @"Generic instantiation too deep", _
 		/'FB_ERRMSG_CANTINFERTYPEARGS                  '/ @"Unable to infer type arguments, specify them explicitly", _
 		/'FB_ERRMSG_TYPEPARAMMISMATCH                  '/ @"Type parameter list does not match the generic's declaration", _
+		/'FB_ERRMSG_NOTITERABLE                        '/ @"Type is not iterable, it needs: declare function GetIterator( ) as <iterator>", _
+		/'FB_ERRMSG_NOITERATORMEMBER                   '/ @"Not an iterator type, an iterator needs IsValid( ) as boolean, Value( ) [byref] as E and MoveNext( ), missing", _
+		/'FB_ERRMSG_FOREACHMULTIDIM                    '/ @"Cannot FOR EACH over a multi-dimensional array, iterate one dimension explicitly", _
+		/'FB_ERRMSG_FOREACHNOBYREF                     '/ @"Cannot bind BYREF in FOR EACH", _
+		/'FB_ERRMSG_FOREACHNEXTVAR                     '/ @"NEXT cannot name the FOR EACH variable, it is scoped to the loop body", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 
