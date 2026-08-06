@@ -1,0 +1,7 @@
+=== duplicate type parameter ===
+	error 334: Duplicated type parameter, T
+=== no type parameter at all ===
+	error 333: Expected type parameter name, found ')'
+=== type parameter is not an identifier ===
+	error 333: Expected type parameter name
+=== done ===

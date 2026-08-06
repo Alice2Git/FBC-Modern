@@ -182,6 +182,18 @@ sub genReplayEnd( byref st as FB_PARSERSTATE )
 	genRestoreState( st )
 end sub
 
+'' The generic's name as the user wrote it.
+''
+'' id.name is up-cased, so reporting from it makes every diagnostic shout the
+'' type name.  The alias holds the source-case form.
+private function hGenericName( byval gensym as FBSYMBOL ptr ) as zstring ptr
+	dim as zstring ptr n = gensym->id.alias
+	if( n = NULL ) then
+		n = gensym->id.name
+	end if
+	function = n
+end function
+
 '' TypeArgList = '(' OF TypeRef (',' TypeRef)* ')'
 ''
 '' On entry the generic's name has been consumed.  Returns the instantiated
@@ -197,20 +209,20 @@ function cGenericTypeArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
 
 	'' '('
 	if( lexGetToken( ) <> CHAR_LPRNT ) then
-		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, symbGetName( gensym ) )
+		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, hGenericName( gensym ) )
 		return NULL
 	end if
 	lexSkipToken( LEXCHECK_POST_SUFFIX )
 
 	'' OF -- matched by text, never a keyword
 	if( hMatchIdOrKw( "OF", LEXCHECK_POST_SUFFIX ) = FALSE ) then
-		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, symbGetName( gensym ) )
+		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, hGenericName( gensym ) )
 		return NULL
 	end if
 
 	do
 		if( argcount >= FB_MAXGENERICARGS ) then
-			errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, symbGetName( gensym ) )
+			errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, hGenericName( gensym ) )
 			return NULL
 		end if
 
@@ -419,13 +431,13 @@ function genInstantiateType _
 	'' larger argument never converges.  Vector( of Vector( of T ) ) is fine and
 	'' terminates; this catches the case that does not.
 	if( genctx2.depth >= env.clopt.maxinstdepth ) then
-		errReportEx( FB_ERRMSG_INSTDEPTHTOODEEP, symbGetName( gensym ) )
+		errReportEx( FB_ERRMSG_INSTDEPTHTOODEEP, hGenericName( gensym ) )
 		errHideFurtherErrors( )
 		return NULL
 	end if
 
 	if( argcount <> gensym->gen.paramcount ) then
-		errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, symbGetName( gensym ) )
+		errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, hGenericName( gensym ) )
 		return NULL
 	end if
 
@@ -512,11 +524,7 @@ function genInstantiateType _
 
 	'' Readable form for diagnostics, e.g. "Box( of MyStruct )".  Built from the
 	'' arguments as written, not from the mangled key, which is unreadable.
-	dim as zstring ptr gname = gensym->id.alias
-	if( gname = NULL ) then
-		gname = gensym->id.name
-	end if
-	desc = *gname + "( of "
+	desc = *hGenericName( gensym ) + "( of "
 	for i as integer = 0 to argcount-1
 		if( i > 0 ) then
 			desc += ", "

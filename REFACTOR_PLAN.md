@@ -306,6 +306,45 @@ not a pass — check that the log contains a `Total` line.
 | log-tests | **1700 passed, 0 failed** = 1698 + the 2 new tests |
 | `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
 
+### Golden error harness — built
+
+`tests/errors/`, a sibling to `tests/warnings/`. Same design: compile each
+`.bas` for five targets, capture the diagnostics into checked-in
+`r/<target>/*.txt`, and the test is `git diff`. `make error-tests` runs it.
+
+This is the net agreed in the interview. Before it, error text had **no**
+regression coverage: `tests/warnings` only captures lines matching `" warning "`,
+and the 1261 `COMPILE_ONLY_FAIL` log-tests assert nothing but `exit code == 1`.
+
+**Verified to have teeth.** The chain wording was deliberately mutated from
+`in instantiation of 'X'` to `while instantiating X`; the diff caught it on all
+five targets, and the goldens went clean again on revert. A golden test that has
+never been shown to fail is not evidence of anything.
+
+**It immediately found two defects** on paths that had not been checked:
+`Wrong number of type arguments, PAIR` and
+`Generic used without a type argument list, BOX` were reporting up-cased names.
+All diagnostics that name a generic now go through one `hGenericName` helper.
+
+Goldens read as expectation-then-result, via `#print` markers in the source:
+
+```
+=== two levels: the chain shows both ===
+	error 14: Expected identifier, found 'Gadgit'
+  in instantiation of 'Inner( of long )'
+  required from generic-inst-chain.bas(N)
+  in instantiation of 'Outer( of long )'
+  required from generic-inst-chain.bas(N)
+```
+
+**Documented limitation:** line numbers are normalised to `(N)`, so a diagnostic
+pointing at the *wrong line* is not caught here — the same trade-off
+`tests/warnings` makes, and the reason its goldens do not churn when unrelated
+lines move. Asserted: error number, wording, ordering, chain structure.
+
+Like `tests/warnings`, this does not return a non-zero exit code; it is a diff
+test. Both golden diffs are now part of the per-phase gate.
+
 ### Still open in Phase 4
 
 - **Readable debug names.** Every instantiation currently reports as `Box` to
@@ -315,9 +354,6 @@ not a pass — check that the log contains a `Total` line.
 - **Scope placement** per deviation D1: instantiations land in the current
   namespace rather than by `symbLookupInternallyMangledSubtype`'s rules. Fine at
   module level, which is what the tests cover.
-- **The chain's TEXT is not regression-tested.** The golden error harness agreed
-  in the interview does not exist yet; `fail-error-in-body.bas` only asserts that
-  compilation fails.
 - **In-body line numbers** — see above.
 
 ---

@@ -80,6 +80,7 @@
 #   unit-tests   (Convenience wrappers around tests/Makefile, running the tests
 #   log-tests     using the newly built fbc)
 #   warning-tests
+#   error-tests   (golden diagnostics; check `git diff tests/errors/r` after)
 #   clean-tests
 #
 #   bootstrap-dist      Create source package with precompiled fbc sources
@@ -1103,6 +1104,9 @@ log-tests:
 
 warning-tests:
 	cd tests/warnings && FBC="`pwd`/../../$(FBC_EXE)" ./test.sh
+
+error-tests:
+	cd tests/errors && FBC="`pwd`/../../$(FBC_EXE)" ./test.sh
 
 clean-tests:
 	cd tests && $(MAKE) clean
