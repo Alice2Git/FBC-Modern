@@ -1073,7 +1073,11 @@ function cProcHeader _
 		symbAddProc( proc, symbUniqueLabel( ), NULL, dtype, subtype, _
 				attrib, pattrib, mode, FB_SYMBOPT_DECLARING )
 
-	static as zstring * FB_MAXNAMELEN+1 id
+	'' The pending procedure name lives in PARSERCTX, not in a function-static
+	'' here: this function re-enters itself whenever a parameter or return type
+	'' names a generic, and a static buffer was silently overwritten by the
+	'' instantiated type's own member prototypes.  See PARSERCTX.procheaderid.
+	dim as zstring ptr pid = @parser.procheaderid
 	dim as zstring ptr palias = any
 	dim as FBSYMBOL ptr head_proc = any, proc = any, parent = any, subtype = any
 	dim as FBSYMBOL ptr param = any
@@ -1274,7 +1278,7 @@ function cProcHeader _
 
 	case else
 		'' Procedure/property ID
-		head_proc = hGetId( parent, @id, @dtype, _
+		head_proc = hGetId( parent, pid, @dtype, _
 				(tk = FB_TK_SUB) or (tk = FB_TK_PROPERTY) )
 
 		if( fbLangOptIsSet( FB_LANG_OPT_SUFFIX ) ) then
@@ -1283,7 +1287,7 @@ function cProcHeader _
 			end if
 		end if
 
-		proc = symbPreAddProc( @id )
+		proc = symbPreAddProc( pid )
 	end select
 
 	'' [NAKED]
@@ -1499,7 +1503,7 @@ function cProcHeader _
 					'' No suffix yet?
 					if( dtype = FB_DATATYPE_INVALID ) then
 						'' Then use type from DEF*
-						dtype = symbGetDefType( id )
+						dtype = symbGetDefType( *pid )
 					end if
 				else
 					errReportNotAllowed( FB_LANG_OPT_DEFTYPE, FB_ERRMSG_DEFTYPEONLYVALIDINLANG )
@@ -1522,7 +1526,7 @@ function cProcHeader _
 		case FB_TK_OPERATOR
 			proc = symbAddOperator( proc, op, palias, dtype, subtype, attrib, pattrib, mode )
 		case else
-			proc = symbAddProc( proc, @id, palias, dtype, subtype, attrib, pattrib, mode, FB_SYMBOPT_NONE )
+			proc = symbAddProc( proc, pid, palias, dtype, subtype, attrib, pattrib, mode, FB_SYMBOPT_NONE )
 		end select
 
 		if( proc = NULL ) then
@@ -1664,7 +1668,7 @@ function cProcHeader _
 			head_proc = symbAddOperator( proc, op, palias, dtype, subtype, _
 				attrib, pattrib, mode, FB_SYMBOPT_DECLARING )
 		case else
-			head_proc = symbAddProc( proc, @id, palias, dtype, subtype, _
+			head_proc = symbAddProc( proc, pid, palias, dtype, subtype, _
 				attrib, pattrib, mode, FB_SYMBOPT_DECLARING )
 
 		end select
@@ -1714,7 +1718,7 @@ function cProcHeader _
 				head_proc = symbAddOperator( proc, op, palias, dtype, subtype, _
 				                             attrib, pattrib, mode, FB_SYMBOPT_DECLARING )
 			case else
-				head_proc = symbAddProc( proc, @id, palias, dtype, subtype, _
+				head_proc = symbAddProc( proc, pid, palias, dtype, subtype, _
 				                         attrib, pattrib, mode, FB_SYMBOPT_DECLARING )
 			end select
 
@@ -1765,9 +1769,9 @@ function cProcHeader _
 
 		'' only warn if the symbol is global and in the global namespace
 		if( is_global ) then
-			if( (len(id) > 0) and (symbGetNamespace( proc ) = @symbGetGlobalNamespc( )) ) then
-				if( parserIsGlobalAsmKeyword( @id ) ) then
-					errReportWarnEx( FB_WARNINGMSG_RESERVEDGLOBALSYMBOL, @id , lexLineNum( ) )
+			if( (len(*pid) > 0) and (symbGetNamespace( proc ) = @symbGetGlobalNamespc( )) ) then
+				if( parserIsGlobalAsmKeyword( pid ) ) then
+					errReportWarnEx( FB_WARNINGMSG_RESERVEDGLOBALSYMBOL, pid , lexLineNum( ) )
 				end if
 			end if
 		end if

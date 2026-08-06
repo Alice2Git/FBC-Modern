@@ -190,6 +190,17 @@ type PARSERCTX
 	ctx_dtype       as integer                  '' used to resolve the address of overloaded procs
 	ctxsym          as FBSYMBOL ptr             '' /
 	have_eq_outside_parens  as integer
+
+	'' cProcHeader's pending procedure name.
+	''
+	'' Here rather than as a function-static because cProcHeader RE-ENTERS
+	'' ITSELF: a parameter or return type naming a generic instantiates it on
+	'' the spot, and the instantiated type's own member prototypes come back
+	'' through this same function.  symbPreAddProc() holds a pointer into this
+	'' buffer across that call, and symbAddProc() reads it afterwards, so the
+	'' inner declaration used to silently rename the outer one.  Saved and
+	'' restored by genSaveState/genRestoreState like the rest of parser state.
+	procheaderid    as zstring * FB_MAXNAMELEN+1
 end type
 
 '' cSymbolType flags

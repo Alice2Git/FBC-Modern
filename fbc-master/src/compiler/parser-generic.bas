@@ -53,6 +53,17 @@ type FB_PARSERSTATE
 	stmtcnt         as integer
 	stmttos         as any ptr                  '' compound-stmt stack top, for the balance assert
 
+	'' cProcHeader's pending procedure name.
+	''
+	'' A replay is triggered from the MIDDLE of cProcHeader whenever a parameter
+	'' or return type names a generic, and the instantiated type's own member
+	'' prototypes run through cProcHeader again.  Without this,
+	''     declare function GetIterator( ) as ArrayIterator( of T )
+	'' was added under the name of ArrayIterator's LAST member, and GetIterator
+	'' itself never existed -- the body then failed with 'error 158: Declaration
+	'' outside the original namespace or class'.
+	procheaderid    as zstring * FB_MAXNAMELEN+1
+
 	'' ast
 	astproc         as ASTNODE ptr
 	astblock        as ASTNODE ptr
@@ -81,6 +92,7 @@ sub genSaveState( byref st as FB_PARSERSTATE )
 	st.have_eq      = parser.have_eq_outside_parens
 	st.stmtcnt      = parser.stmt.cnt
 	st.stmttos      = parser.stmt.stk.tos
+	st.procheaderid = parser.procheaderid
 
 	st.astproc      = ast.proc.curr
 	st.astblock     = ast.currblock
@@ -105,6 +117,7 @@ sub genRestoreState( byref st as FB_PARSERSTATE )
 	parser.ctxsym       = st.ctxsym
 	parser.have_eq_outside_parens = st.have_eq
 	parser.stmt.cnt     = st.stmtcnt
+	parser.procheaderid = st.procheaderid
 
 	ast.proc.curr   = st.astproc
 	ast.currblock   = st.astblock

@@ -62,7 +62,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 7 — ctors/dtors/copy | **done** — gate green |
 | 8 — operators + properties | **done** — gate green |
 | 9 — inheritance/virtual *(cut line)* | **done** — gate green |
-| 10 — RFC-0002 iterator protocol | not started |
+| 10 — RFC-0002 iterator protocol | **done** — gate green |
 | 11 — RFC-0003 `for each` | not started |
 | 12 — RFC-0004 containers | not started |
 | 13 — weak/COMDAT | not started |
@@ -738,7 +738,7 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-9 complete and gated.
+Branch `feat/generics`, **nothing pushed**. Phases 0-10 complete and gated.
 
 Last commits:
 
@@ -751,19 +751,25 @@ e477cc5  Phase 5: generic types get methods
 
 ### What to do next
 
-Phase 10 — the RFC-0002 iterator protocol. Expected to need **no compiler
-change**: the contract is structural (`GetIterator()` returning a type with
-`IsValid()` / `Value()` / `MoveNext()`), so it is a specification, a conformance
-suite, and a page in `doc/`.
+Phase 11 — RFC-0003 `for each`. **Get the author's approval before starting it**,
+along with Phase 12 (containers) and anything naming Vector, Dictionary, Set or
+List.
 
-The cut line is behind us: everything Phases 10-12 need is in place.
+It lands almost entirely in `parser-compound-for.bas`, with an `each` look-ahead
+in `parser-compound.bas`; no AST, IR or backend change. `each` and `in` are
+contextual, not keywords. The backward-compatibility trap is the one to check
+first, exactly as in Phase 6: `for each as long = 1 to 3` compiles today and
+must keep compiling. One token of look-ahead separates the forms, and it needs
+an explicit golden test in both dialects.
 
-Nothing is owed from Phase 9. The items still open are the ones carried since
+Phase 11 is also where RFC-0002 §4 (built-in arrays and strings iterating
+intrinsically) and §7 (the near-miss "has IsValid and Value but no MoveNext"
+diagnostics) get built — Phase 10 deliberately left both, since neither is
+observable without the statement that consumes them.
+
+Nothing is owed from Phase 10. The items still open are the ones carried since
 Phase 4 (readable debug names, in-body line numbers), listed at the end of the
 Phase 8 and Phase 9 sections.
-
-**Before Phase 12 (containers), and before any `for each`, Vector, Dictionary,
-Set or List work: get the author's approval first.**
 
 ### Gate protocol — do not skip
 
@@ -781,7 +787,7 @@ outer directory reports "No rule to make target 'compiler'".
   A 16th failure is a regression.
 - **Reconcile the log-test count, do not just read "no failures".**
   `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 9: **1711 passed / 4 failed / 1715 logs**.
+  tests added. Baseline after Phase 10: **1712 passed / 4 failed / 1716 logs**.
   Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
@@ -806,13 +812,151 @@ outer directory reports "No rule to make target 'compiler'".
   `long + long` promotes to INTEGER, `str()` emits no leading space, a UDT used
   as a FOR variable needs a **default constructor** as well as its for/step/next
   trio, `x is T` requires a genuine DOWNCAST, and an override must itself be
-  `virtual` to be overridden AGAIN a level down. Reserved so far: `base`, `Fix`,
-  `Mid`. Nine false alarms now. Check the plain-FB control first — every one of
-  these looked exactly like a compiler regression.
+  `virtual` to be overridden AGAIN a level down, and constness alone does NOT
+  distinguish an overload. Reserved so far: `base`, `Fix`, `Mid`. Ten false
+  alarms now. Check the plain-FB control first — every one of these looked
+  exactly like a compiler regression.
 - An unreferenced `declare ... alias "..."` emits no relocation and links against
   any mangling at all. Take its address, and mutate the name to prove the test
   fails.
 - Empty output is not a pass; look for the summary line.
+
+---
+
+## Phase 10 — what landed
+
+RFC-0002, the iterator protocol: a specification, a conformance suite, and —
+against the plan's expectation of none — **one compiler fix**.
+
+The contract is structural. A type is iterable if it has
+`GetIterator() as I`; `I` is an iterator if it has `IsValid()`, `Value()` and
+`MoveNext()`. Nothing consumes it until RFC-0003's `for each`, so there is
+nothing for the compiler to enforce yet. What the phase had to establish is
+that every shape the RFC specifies is **expressible and behaves as written**.
+
+Two of them were not.
+
+### The bug: `cProcHeader` re-enters itself and renamed the outer procedure
+
+The single most important shape in the whole RFC — a generic collection
+returning a generic iterator, which is what every RFC-0004 container does —
+did not compile at all:
+
+```freebasic
+type Buf( of T )
+	declare function GetIterator( ) as ArrayIterator( of T )
+end type
+
+error 158: Declaration outside the original namespace or class
+```
+
+`cProcHeader` kept the pending procedure name in a **function-static** buffer,
+and `symbPreAddProc()` holds a pointer into it across the rest of the header.
+Parsing the return type `ArrayIterator( of T )` instantiates that generic on
+the spot, and the instantiated type's own member prototypes come straight back
+through `cProcHeader` — overwriting the buffer.
+
+So `Buf` acquired a member named after `ArrayIterator`'s **last** member, and
+`GetIterator` never existed. The out-of-line body then had no prototype to
+match, and the error surfaced two statements away from the cause. Confirmed by
+dumping the instantiated struct's member list: `X`, `GET_`, no `GET1`.
+
+The buffer moved to `PARSERCTX.procheaderid` and is saved and restored by
+`genSaveState`/`genRestoreState` along with the rest of parser state. That
+covers **every** re-entry path, not just return types — a parameter type naming
+a generic has the same shape.
+
+This is the third member of a family this project has now met: static scratch
+that is not re-entrant. Phase 3 audited `lexGetText`'s callers and found the
+per-context token ring safe; Phase 3 also found the one real hazard,
+`lexGetText`'s shared `tmpstr` for wide tokens. This is the first one that was
+actually reachable, and generics are what made it reachable — nothing else in
+FreeBASIC re-enters `cProcHeader` from inside `cProcHeader`.
+
+**Shown to have teeth**: with the restore disabled, `iterator-protocol.bas`
+fails to compile with exactly the error above.
+
+### The finding: `const` overloading is not available
+
+RFC-0002 §1 says of `GetIterator`:
+
+> may be `const`; if both a `const` and a non-`const` overload exist, the usual
+> overload rules select one against the constness of the collection expression.
+
+The second half is **not satisfiable in FreeBASIC**. Constness alone does not
+distinguish an overload:
+
+```
+declare function f( ) as long
+declare const function f( ) as long
+error 4: Duplicated definition
+```
+
+Checked against a plain non-generic control before it was believed, so it is a
+language limitation and not something generics introduced. Nothing depends on
+the pair: a single `const GetIterator` serves const and non-const collections
+alike, which is what a container wants anyway. Recorded in the doc under
+*Known limits* and pinned by the suite.
+
+### What the conformance suite covers
+
+`tests/generics/iterator-protocol.bas`, ~60 assertions:
+
+- the RFC's guide-level linked-list example, **verbatim** — if it stops
+  compiling, the RFC's own example is wrong
+- the generic `ArrayIterator( of T )` plus a generic collection returning it
+- `byref` `Value` mutating the collection in place, and by-value `Value`
+  yielding a copy
+- a `const GetIterator` reached from both a const and a non-const collection
+- §2's behavioural promises, as far as they are observable: `IsValid` repeatable
+  and still false after exhaustion; a fresh iterator already **on** the first
+  element (no "before the first" state, so `Value` is legal with no `MoveNext`);
+  `Value` callable twice for one element; an empty collection false immediately
+- two independent iterators over one collection not interfering
+- element types that are scalars, `string`, a UDT, and a **generic
+  instantiation** (`Buf( of Buf( of long ) )`)
+- §6: an iterator with a constructor/copy-constructor/destructor, asserting
+  `constructed = destroyed` at scope exit — the leak check written as an
+  assertion rather than a separate run
+- §5 and §Unresolved-2: one type carrying **both** protocols — `operator
+  for`/`next`/`step` *and* `IsValid`/`Value`/`MoveNext` — with the `for` loop
+  still working before and after, and a collection acting as its own iterator
+
+### Deliberately not covered
+
+- **§4, built-in arrays and strings iterating intrinsically.** Nothing to
+  conform to: no members exist on them, and it is `for each` that recognises
+  them. Phase 11.
+- **§7, the near-miss diagnostics** (*"has `IsValid` and `Value` but no
+  `MoveNext`"*). Those are produced by the statement that consumes the
+  protocol. Phase 11.
+- The other unresolved questions in the RFC (`Count()`, byte-vs-character
+  string iteration, `#pragma`-configurable member names) are decisions for
+  RFC-0003/0004, not conformance items.
+
+### Documentation
+
+`doc/iterator-protocol.txt`, a sibling to `doc/ustring.txt`: why the existing
+`operator for` protocol does not cover collections, the contract, what an
+implementer promises, `byref` vs by-value, the generic form, lifetime,
+coexistence with `operator for`, and the known limits above.
+
+### Phase 10 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1712 passed / 4 failed / 1716 logs** — 1711 + 1 new; none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean — zero content change |
+| `tests/errors` golden, 5 targets | clean — zero content change |
+
+`iterator-protocol.bas` was additionally run by hand under both backends.
+
+The `cProcHeader` change touches a function every declaration in the language
+goes through, which is why the unit-test figures being **unchanged** matters
+more here than usual: 1.15M assertions and 1712 log-tests all still agree.
 
 ---
 
