@@ -1188,6 +1188,11 @@ declare function genIsGenericOpDecl( ) as integer
 declare function cGenericOpDecl( byval tk as integer ) as integer
 declare function genGetGenericOps( ) as FB_GENOP ptr
 
+'' Called from hTypeAdd right after symbStructBegin: if a generic body is being
+'' replayed, this is the instantiated struct, and it needs its ALIAS and
+'' GENERICINST flag now rather than after its body is parsed.
+declare sub genTagInstantiation( byval sym as FBSYMBOL ptr )
+
 '' Instantiate whatever generic global operators can be inferred from these
 '' operand types, so ordinary overload resolution finds them a moment later.
 '' Silent: an operand that matches nothing is not an error here, it simply means

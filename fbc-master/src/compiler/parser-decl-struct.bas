@@ -653,6 +653,12 @@ private function hTypeAdd _
 		s = symbStructBegin( NULL, NULL, parent, symbUniqueLabel( ), NULL, isunion, align, (baseSubtype <> NULL), 0, 0 )
 	end if
 
+	'' A generic instantiation must carry its final identity from here, before
+	'' anything can mangle it: an EXTENDS clause makes symbStructEnd build RTTI,
+	'' and that bakes the mangled name into the string oop_istypeof compares.
+	'' No-op for every ordinary TYPE.
+	genTagInstantiation( s )
+
 	select case baseStringType
 	case FB_DATATYPE_CHAR
 		symbSetUdtIsZstring( s )

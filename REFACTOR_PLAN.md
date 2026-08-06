@@ -61,7 +61,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 6 — generic procedures + inference | **done** — gate green |
 | 7 — ctors/dtors/copy | **done** — gate green |
 | 8 — operators + properties | **done** — gate green |
-| 9 — inheritance/virtual *(cut line)* | not started |
+| 9 — inheritance/virtual *(cut line)* | **done** — gate green |
 | 10 — RFC-0002 iterator protocol | not started |
 | 11 — RFC-0003 `for each` | not started |
 | 12 — RFC-0004 containers | not started |
@@ -738,7 +738,7 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-8 complete and gated.
+Branch `feat/generics`, **nothing pushed**. Phases 0-9 complete and gated.
 
 Last commits:
 
@@ -751,12 +751,19 @@ e477cc5  Phase 5: generic types get methods
 
 ### What to do next
 
-Phase 9 — inheritance / virtual. This is the **cut line** in the plan: decide
-whether v1 ships without it before building any of it.
+Phase 10 — the RFC-0002 iterator protocol. Expected to need **no compiler
+change**: the contract is structural (`GetIterator()` returning a type with
+`IsValid()` / `Value()` / `MoveNext()`), so it is a specification, a conformance
+suite, and a page in `doc/`.
 
-Nothing is owed from Phase 8. The items still open are the ones carried since
+The cut line is behind us: everything Phases 10-12 need is in place.
+
+Nothing is owed from Phase 9. The items still open are the ones carried since
 Phase 4 (readable debug names, in-body line numbers), listed at the end of the
-Phase 8 section.
+Phase 8 and Phase 9 sections.
+
+**Before Phase 12 (containers), and before any `for each`, Vector, Dictionary,
+Set or List work: get the author's approval first.**
 
 ### Gate protocol — do not skip
 
@@ -774,7 +781,7 @@ outer directory reports "No rule to make target 'compiler'".
   A 16th failure is a regression.
 - **Reconcile the log-test count, do not just read "no failures".**
   `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 8: **1708 passed / 4 failed / 1712 logs**.
+  tests added. Baseline after Phase 9: **1711 passed / 4 failed / 1715 logs**.
   Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
@@ -796,13 +803,190 @@ outer directory reports "No rule to make target 'compiler'".
   output that looked like a passing fix.
 - **An unexpected result is more often the test than the compiler** — `base` is
   reserved, `A`/`a` collide case-insensitively, `K` cannot be a parameter type,
-  `long + long` promotes to INTEGER, `str()` emits no leading space, and a UDT
-  used as a FOR variable needs a **default constructor** as well as its
-  for/step/next trio. Six false alarms now. Check the plain-FB control first.
+  `long + long` promotes to INTEGER, `str()` emits no leading space, a UDT used
+  as a FOR variable needs a **default constructor** as well as its for/step/next
+  trio, `x is T` requires a genuine DOWNCAST, and an override must itself be
+  `virtual` to be overridden AGAIN a level down. Reserved so far: `base`, `Fix`,
+  `Mid`. Nine false alarms now. Check the plain-FB control first — every one of
+  these looked exactly like a compiler regression.
 - An unreferenced `declare ... alias "..."` emits no relocation and links against
   any mangling at all. Take its address, and mutate the name to prove the test
   fails.
 - Empty output is not a pass; look for the summary line.
+
+---
+
+## Phase 9 — what landed
+
+Inheritance, `virtual`, `abstract` and RTTI. All three directions work:
+
+| | |
+| --- | --- |
+| generic extends concrete | `type Sq( of T ) extends Shape` |
+| concrete extends an instantiation | `type IntBox extends Box( of integer )` |
+| generic extends generic | `type Der( of T ) extends Root( of T )` |
+
+Also working: a base pinned to a fixed argument
+(`type Pinned( of T ) extends Root( of integer )`), three levels of generic
+hierarchy, `abstract` implemented per instantiation, and `extends` reached
+through a `_` continuation.
+
+Nothing about this phase was scoped as "build a feature". Every one of the four
+bugs below was already sitting in the tree, and three of them produced **wrong
+code with no diagnostic**.
+
+### 1. The header clause was pushed onto its own line
+
+Every inheriting generic failed at its first use with a syntax error reported
+against the *generic's* declaration line.
+
+Capture starts immediately after the `( of ... )` clause, so per cTypeDecl's
+grammar the captured chain may still carry the rest of the HEADER —
+`alias "..."`, `extends Base`, `field = n`. The replay joined the name and the
+body with a newline unconditionally, so `extends Shape` landed on a line of its
+own and read as a field declaration.
+
+Phase 2 asserted this case worked (*"an `EXTENDS` or `ALIAS` clause on the header
+is captured too and simply re-parsed at instantiation"*) and
+`capture-boundary.bas` does declare such a generic — but never instantiates one,
+because that file's whole point is that capture consumed exactly the body.
+**The claim was never executed.**
+
+The separator is now chosen by two tests, because either alone has a hole. The
+line number settles it for ordinary source; a `_` continuation puts the clause on
+a later line, and there the leading keyword settles it. A field actually *named*
+`extends`/`alias`/`field` — legal in a TYPE without member procedures — is always
+followed by `as`, which none of the three clauses ever is.
+
+### 2. `union Foo( of T )` instantiated as a STRUCT
+
+The replay text was hardcoded to `type ... end type`, so a generic union's fields
+did not overlap. `sizeof( Pun( of double ) )` was 16 where the equivalent plain
+union is 8, and writing one field did not disturb the other. Silent wrong code
+since Phase 3.
+
+Hidden by the same gap as bug 1: `capture-boundary.bas` covers the `union` form
+at declaration and never instantiates it.
+
+### 3. The instantiation was tagged too late
+
+An instantiation used to get its ALIAS and `FB_SYMBATTRIB_GENERICINST` **after**
+its body was parsed. That is fine for a plain generic and fatal for an
+inheriting one: an `extends` clause makes `symbStructEnd` build RTTI, and
+`hReBuildRtti` bakes the **mangled name into a string constant** — the one
+`oop_istypeof` compares at run time — while `symbGetMangledName` caches its
+result besides. So the struct kept the internal name:
+
+```
+struct $11__FBGENINST { ... };   '' Box( of integer )
+struct $11__FBGENINST { ... };   '' Sq( of integer )
+struct $11__FBGENINST { ... };   '' Sq( of double )
+error: redefinition of struct or union 'struct $11__FBGENINST'
+```
+
+gcc rejected the file outright, which is the lucky case; the RTTI string would
+have made `is` compare the wrong names.
+
+Fixed by tagging at the only moment early enough: `hTypeAdd` calls
+`genTagInstantiation` immediately after `symbStructBegin`. The generic's name is
+held in `genctx2.pendalias`, **saved and restored around each replay** rather
+than being a single slot — `extends Inner( of T )` instantiates Inner *before*
+the outer struct is begun, so the inner replay would otherwise consume the
+outer's tag.
+
+A second defect surfaced alongside it. `symbAddFwdRef` publishes a forward
+reference under the same `__FBGENINST` name so that a self-referential body
+terminates, and it can still be on the hash chain — sometimes ahead of the real
+struct — after `symbStructEnd`. Taking `chain_->sym` unconditionally therefore
+picked the forward reference at random. The chain walk the Phase 8 gap-2 fix
+added inside `hCacheLookup` is now a shared `hFindInstStruct` used at both sites.
+
+### 4. gcc emitted a generic base after its generic derived
+
+```
+error: '_ZTSN4RootIu7INTEGEREE' undeclared here (not in a function)
+```
+
+`type Der( of T ) extends Root( of T )` creates Der's synthetic namespace first
+and then instantiates Root while replaying Der's header, so **Root's symbols land
+after Der's** in the global symbol table — and Der's RTTI initializer points at
+Root's. Ordinary FreeBASIC cannot reach that position: a base must be declared
+before it can be extended. That is exactly why `ir-hlc.bas`'s existing two-pass
+scheme only forward-declares PUBLIC/EXTERN/COMMON.
+
+The vtable and RTTI table of a **generic instantiation** are now declared in pass
+1 (a C tentative definition) and defined in pass 2. Deliberately confined by
+`symbIsGenericInst` on the owning UDT: every other program's emitted C is
+byte-for-byte what it was, verified against a non-generic OOP control.
+
+`gas64` was unaffected throughout — it does not care about declaration order.
+Both backends are in the gate for exactly this reason.
+
+### What the RTTI assertions actually assert
+
+`oop_istypeof` compares mangled-name strings, so two instantiations that collide
+on a name would answer `is` TRUE for each other. Every negative in
+`inheritance.bas` is as load-bearing as the positive beside it:
+
+```
+*p is Sq( of integer )   ->  TRUE     '' p points at an Sq( of integer )
+*p is Sq( of double )    ->  FALSE
+```
+
+and after `p = @sd` the two swap. That is a stronger check than a link-time
+alias test, because it runs the comparison the way user code does.
+
+Two instantiations of one generic are unrelated **statically** as well:
+`*r is Der( of string )` where `r` is a `Root( of integer ) ptr` is
+`error 298: Types have no hierarchical relation`, not a run-time FALSE.
+
+### Two controls that were wrong before the compiler was
+
+- `x is T` needs a genuine DOWNCAST. `dv is D` where `dv` is already a `D` is
+  error 298 in plain FreeBASIC too. Three probes were written against that
+  misunderstanding.
+- **An override must itself be `virtual` to be overridden again.** A three-level
+  hierarchy where the middle level writes plain `declare function nm( )`
+  silently never dispatches to the leaf — in plain FreeBASIC exactly as in
+  generics. Caught by the control, and the reason `Middle( of T ).nm` is
+  declared `virtual` in the test.
+
+Plus `Fix`, `Mid` and `Base` are all reserved. Three more identifier false
+alarms, on top of `base`, `A`/`a` and `K`.
+
+### Tests added
+
+| Path | Kind |
+| --- | --- |
+| `tests/generics/inheritance.bas` | `COMPILE_AND_RUN_OK` — 44 assertions: all three inheritance directions, a pinned base argument, three levels, `abstract` per instantiation, `_` continuation, generic union layout, and RTTI positives *and* negatives in both directions |
+| `tests/generics/fail-extends-uninstantiated.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-is-unrelated-instantiations.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/errors/generic-inherit-errors.bas` | golden diagnostics, 5 targets |
+
+### Phase 9 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1711 passed / 4 failed / 1715 logs** — 1708 + 3 new; none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean — zero content change |
+| `tests/errors` golden, 5 targets | additions only; no existing golden moved |
+| emitted C for a non-generic OOP program | unchanged — the split declaration fires only for generic instantiations |
+
+`inheritance.bas` was additionally run by hand under **both** backends, because
+bug 4 is invisible to gas64.
+
+### Not covered
+
+- `extends` combined with a generic **procedure** or global operator — nothing
+  connects the two, but it is untested.
+- Virtual method bodies that themselves instantiate a further generic.
+- `new` / `delete` on an instantiation (carried from Phase 7), which is where
+  the deleting-destructor vtable slot would be exercised.
+- The LLVM backend. Bug 4's fix is `ir-hlc.bas` only; `ir-llvm.bas` may carry
+  the same ordering hazard and is not in the gate.
 
 ---
 

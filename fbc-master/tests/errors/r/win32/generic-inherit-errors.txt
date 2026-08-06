@@ -1,0 +1,8 @@
+=== a generic cannot be extended without a type argument list ===
+	error 335: Generic used without a type argument list, A
+=== two instantiations are unrelated types, statically ===
+	error 298: Types have no hierarchical relation, found ')'
+=== extending an instantiation that does not compile ===
+	error 18: Element not defined, nosuchfield
+  in instantiation of 'Bad( of integer )'
+  required from generic-inherit-errors.bas(N)

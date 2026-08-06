@@ -380,6 +380,22 @@ type GENINSTCTX
 	pending         as TLIST                    '' of FB_GENPENDING
 	pendcount       as integer                  '' undrained entries; 0 is the fast path
 	draining        as integer                  '' genDrainProcBodies is not re-entrant
+
+	'' The generic's source-case name, while its body is being replayed.
+	''
+	'' An instantiation has to carry its final identity from the moment
+	'' symbStructBegin publishes it, not from after the body is parsed: an
+	'' EXTENDS clause makes symbStructEnd build RTTI, and hReBuildRtti bakes the
+	'' MANGLED NAME into a string constant -- the one oop_istypeof compares at
+	'' run time -- while symbGetMangledName caches its result besides.  Tagging
+	'' afterwards left every inheriting instantiation mangled as the internal
+	'' __FBGENINST, so they collided on one C struct tag and 'is' compared the
+	'' wrong strings.
+	''
+	'' Saved and restored around each replay rather than being a single slot:
+	'' 'extends Inner( of T )' instantiates Inner BEFORE the outer struct is
+	'' begun, so the inner replay would otherwise consume the outer's tag.
+	pendalias       as zstring ptr
 end type
 
 dim shared as GENINSTCTX genctx2
@@ -398,6 +414,68 @@ dim shared as GENINSTCTX genctx2
 '' replay creates it through the normal up-casing path, and it is looked up
 '' again afterwards by exact name.
 #define GENPROC_NAME "__FBGENPROC"
+
+'' Give the struct a replay has just begun its permanent identity.
+''
+'' Called from hTypeAdd immediately after symbStructBegin, which is the last
+'' moment before anything can mangle it (see GENINSTCTX.pendalias).  Silent and
+'' cheap when no replay is in progress, which is every ordinary TYPE in the
+'' module.
+sub genTagInstantiation( byval sym as FBSYMBOL ptr )
+	if( genctx2.pendalias = NULL ) then
+		exit sub
+	end if
+	if( sym = NULL ) then
+		exit sub
+	end if
+	if( symbIsStruct( sym ) = FALSE ) then
+		exit sub
+	end if
+	if( *symbGetName( sym ) <> GENINST_NAME ) then
+		exit sub
+	end if
+
+	'' hMangleUdtId() encodes the type arguments as an Itanium I...E template
+	'' argument list once this is set, reading them back from the TYPEDEFs in the
+	'' synthetic namespace; the ALIAS supplies the readable part, so
+	'' Box( of integer ) comes out as 3BoxIiE and not as the internal name.
+	sym->attrib or= FB_SYMBATTRIB_GENERICINST
+
+	if( sym->id.alias = NULL ) then
+		sym->id.alias = ZstrAllocate( len( *genctx2.pendalias ) )
+		*sym->id.alias = *genctx2.pendalias
+	end if
+
+	genctx2.pendalias = NULL
+end sub
+
+'' The instantiated STRUCT inside a synthetic namespace, or NULL.
+''
+'' The name is not unique in that hash table: symbAddFwdRef() publishes a
+'' FORWARD REFERENCE under the same id so that a self-referential body
+'' terminates, and depending on what the body did the forward reference can
+'' still be sitting on the chain -- sometimes ahead of the real struct -- after
+'' symbStructEnd has run.  Taking chain_->sym unconditionally therefore picks the
+'' forward reference at random, which is how an inheriting generic ended up with
+'' FB_SYMBATTRIB_GENERICINST set on the wrong symbol: the struct then mangled as
+'' the internal __FBGENINST and every instantiation in the module collided on one
+'' C struct tag.
+private function hFindInstStruct( byval nsp as FBSYMBOL ptr ) as FBSYMBOL ptr
+	dim as FBSYMCHAIN ptr c = symbLookupAt( nsp, @GENINST_NAME, FALSE, FALSE )
+
+	while( c )
+		dim as FBSYMBOL ptr s = c->sym
+		while( s )
+			if( symbIsStruct( s ) ) then
+				return s
+			end if
+			s = s->hash.next
+		wend
+		c = symbChainGetNext( c )
+	wend
+
+	function = NULL
+end function
 
 private function hCacheLookup _
 	( _
@@ -431,17 +509,10 @@ private function hCacheLookup _
 				'' Plain FreeBASIC has no such problem, because inside 'type Ctr'
 				'' the name Ctr is already bound to the real symbol.
 				if( n->inprogress andalso (n->nsp <> NULL) ) then
-					dim as FBSYMCHAIN ptr c = symbLookupAt( n->nsp, @GENINST_NAME, FALSE, FALSE )
-					while( c )
-						dim as FBSYMBOL ptr s = c->sym
-						while( s )
-							if( symbIsStruct( s ) ) then
-								return s
-							end if
-							s = s->hash.next
-						wend
-						c = symbChainGetNext( c )
-					wend
+					dim as FBSYMBOL ptr s = hFindInstStruct( n->nsp )
+					if( s ) then
+						return s
+					end if
 				end if
 
 				return n->inst
@@ -905,8 +976,50 @@ function genInstantiateType _
 	'' forward reference from the in-progress cache entry.
 	''
 	'' The external name is unaffected: mangling uses the ALIAS, set below.
-	text = "type " + GENINST_NAME + LFCHAR + _
-	       genFlattenTokens( gensym->gen.tokhead, firstline ) + LFCHAR + "end type"
+	''
+	'' TYPE or UNION -- the captured body stops BEFORE its own terminator, so the
+	'' keyword is supplied here at both ends.  It used to be hardcoded to 'type',
+	'' which silently instantiated every 'union Foo( of T )' as a struct: fields
+	'' that should overlap did not, and sizeof came out 16 where the equivalent
+	'' plain union is 8.  Wrong code, not a diagnostic -- capture-boundary.bas
+	'' declares a generic union but never instantiates one, so nothing caught it.
+	dim as string kw = "type"
+	if( gensym->gen.kind = FB_GENERICKIND_UNION ) then
+		kw = "union"
+	end if
+
+	'' The captured body starts immediately after the '( of ... )' clause, so it
+	'' may still carry the rest of the HEADER: per cTypeDecl's grammar,
+	'' 'alias "..."', 'extends Base' and 'field = n' all live on that line.  They
+	'' have to STAY on it -- pushed onto a line of their own, 'extends Shape'
+	'' reads as a field declaration and every instantiation of an inheriting
+	'' generic failed with a syntax error reported against the generic's own line.
+	''
+	'' Two tests, because either alone has a hole.  The line number settles it for
+	'' ordinary source; a '_' continuation puts the clause on a later line, and
+	'' there the leading keyword settles it.  A FIELD actually named
+	'' extends/alias/field -- legal in a TYPE without member procedures -- is
+	'' always followed by 'as', which none of the three clauses ever is.
+	dim as string bodytext = genFlattenTokens( gensym->gen.tokhead, firstline )
+	dim as string sep = LFCHAR
+
+	if( gensym->gen.tokhead <> NULL ) then
+		if( firstline = gensym->gen.srcline ) then
+			sep = " "
+		else
+			select case ucase( *gensym->gen.tokhead->text )
+			case "EXTENDS", "ALIAS", "FIELD"
+				dim as FB_GENTOK ptr nx = gensym->gen.tokhead->next
+				if( nx = NULL ) then
+					sep = " "
+				elseif( ucase( *nx->text ) <> "AS" ) then
+					sep = " "
+				end if
+			end select
+		end if
+	end if
+
+	text = kw + " " + GENINST_NAME + sep + bodytext + LFCHAR + "end " + kw
 
 	'' Readable form for diagnostics, e.g. "Box( of MyStruct )".  Built from the
 	'' arguments as written, not from the mangled key, which is unreadable.
@@ -939,6 +1052,9 @@ function genInstantiateType _
 
 	errPushInstLocation( descz, @env.inf.name, lexLineNum( ) )
 
+	dim as zstring ptr savedpend = genctx2.pendalias
+	genctx2.pendalias = genGenericName( gensym )
+
 	if( genReplayBegin( st, text, gensym->gen.srcline, gensym->gen.srcfile ) ) then
 		genctx2.depth += 1
 		cTypeDecl( FB_SYMBATTRIB_NONE )
@@ -946,17 +1062,19 @@ function genInstantiateType _
 		genReplayEnd( st )
 	end if
 
+	genctx2.pendalias = savedpend
+
 	errPopInstLocation( )
 
 	symbNestEnd( FALSE )
 
-	'' find what the replay built
-	chain_ = symbLookupAt( nsp, @GENINST_NAME, FALSE, FALSE )
-	if( chain_ = NULL ) then
+	'' find what the replay built -- the STRUCT, never the forward reference that
+	'' may still be sharing the name (see hFindInstStruct)
+	inst = hFindInstStruct( nsp )
+	if( inst = NULL ) then
 		genLeaveGlobalScope( gs )
 		return NULL
 	end if
-	inst = chain_->sym
 
 	'' hMangleUdtId() encodes the type arguments as an Itanium I...E template
 	'' argument list once this is set, reading them back from the TYPEDEFs in

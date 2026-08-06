@@ -894,6 +894,39 @@ private sub hAllocGlobalVar( byval sym as FBSYMBOL ptr )
 	end if
 end sub
 
+'' Does this global have to be declared in pass 1 and defined in pass 2, even
+'' though it is not PUBLIC?
+''
+'' Only a generic instantiation's vtable and RTTI table.  Their initializers
+'' point at the BASE type's tables, and for generics the base can be emitted
+'' after the derived:
+''
+''     type Der( of T ) extends Root( of T )
+''
+'' creates Der's synthetic namespace first, then instantiates Root while
+'' replaying Der's header, so Root's symbols land AFTER Der's in the global
+'' symbol table.  gcc then rejects the file --
+''     '_ZTSN4RootIu7INTEGEREE' undeclared here
+'' -- while gas64, which does not care about declaration order, links fine.
+''
+'' Ordinary FreeBASIC cannot reach this position: a base must be declared before
+'' it can be extended.  That is why the existing two-pass scheme covers only
+'' PUBLIC/EXTERN/COMMON, and why this stays confined to generic instantiations --
+'' every other program's emitted C is unchanged, byte for byte.
+private function hNeedsSplitDecl( byval sym as FBSYMBOL ptr ) as integer
+	if( (symbGetStats( sym ) and (FB_SYMBSTATS_RTTITABLE or FB_SYMBSTATS_VTABLE)) = 0 ) then
+		return FALSE
+	end if
+
+	'' the table lives inside its UDT, so the UDT is its namespace
+	dim as FBSYMBOL ptr udt = symbGetNamespace( sym )
+	if( udt = NULL ) then
+		return FALSE
+	end if
+
+	function = symbIsGenericInst( udt )
+end function
+
 private sub hMaybeEmitGlobalVar( byval sym as FBSYMBOL ptr )
 	assert( symbIsLocal( sym ) = FALSE )
 
@@ -913,6 +946,9 @@ private sub hMaybeEmitGlobalVar( byval sym as FBSYMBOL ptr )
 			'' Emit externs as prototypes only for now;
 			'' their initializers may reference other not-yet-emitted globals
 			hEmitVarDecl( TRUE, sym, NULL )
+		elseif( hNeedsSplitDecl( sym ) ) then
+			'' a tentative definition; the real one follows in pass 2
+			hEmitVarDecl( FALSE, sym, NULL )
 		else
 			'' Emitted other globals normally
 			hAllocGlobalVar( sym )
@@ -921,6 +957,8 @@ private sub hMaybeEmitGlobalVar( byval sym as FBSYMBOL ptr )
 	case 2
 		'' Emit allocated externs
 		if( symbGetAttrib( sym ) and (FB_SYMBATTRIB_COMMON or FB_SYMBATTRIB_PUBLIC) ) then
+			hAllocGlobalVar( sym )
+		elseif( hNeedsSplitDecl( sym ) ) then
 			hAllocGlobalVar( sym )
 		end if
 
