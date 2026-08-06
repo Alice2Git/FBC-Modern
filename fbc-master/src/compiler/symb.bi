@@ -127,6 +127,8 @@ enum FB_SYMBCLASS
 	FB_SYMBCLASS_SCOPE
 	FB_SYMBCLASS_RESERVED                   '' reserved symbol
 	FB_SYMBCLASS_NSIMPORT                   '' namespace import (an USING)
+	'' Append only -- classnames() and classnamesPretty() are indexed by this.
+	FB_SYMBCLASS_GENERIC                    '' generic TYPE/UNION/procedure (a template, not a type)
 end enum
 
 '' symbol state mask
@@ -198,6 +200,8 @@ enum FB_SYMBATTRIB
 	FB_SYMBATTRIB_VIS_PROTECTED    = &h00400000  '' UDT members only
 	FB_SYMBATTRIB_INTERNAL         = &h00800000  '' default UDT members / vtable / rtti - affects name mangling
 	FB_SYMBATTRIB_ANONYMOUS        = &h01000000  '' anonymous / unnamed id
+	FB_SYMBATTRIB_GENERICSCOPE     = &h02000000  '' synthetic namespace holding one instantiation's type params
+	FB_SYMBATTRIB_GENERICINST      = &h04000000  '' an instantiation of a generic - affects name mangling
 end enum
 
 '' proc symbol attributes mask
@@ -789,6 +793,45 @@ type FBS_NSIMPORT
 	exp_next        as FBSYMBOL_ ptr
 end type
 
+'' What a FB_SYMBCLASS_GENERIC symbol is a template for
+enum FB_GENERICKIND
+	FB_GENERICKIND_TYPE = 0                     '' type Foo( of T )
+	FB_GENERICKIND_UNION                        '' union Foo( of T )
+	FB_GENERICKIND_PROC                         '' sub/function/operator/property Foo( of T )( ... )
+end enum
+
+'' One captured token of a generic's body.
+''
+'' Shaped like FB_DEFTOK, but deliberately NOT reusing it: the macro reader
+'' drops comments, collapses whitespace and eats '##', all of which are wrong
+'' for a body that has to be re-parsed as declarations.  Carries its own line
+'' number because UPDATE_LINENUM is suppressed while replaying from deftext.
+type FB_GENTOK
+	type            as FB_DEFTOK_TYPE           '' TEX / TEXW only; type params bind as TYPEDEFs, not PARAM slots
+	union
+		text        as zstring ptr
+		textw       as wstring ptr
+	end union
+	linenum         as integer
+	prev            as FB_GENTOK ptr
+	next            as FB_GENTOK ptr
+end type
+
+'' A generic TYPE/UNION or procedure.  This is a template, not a type: it has
+'' no size, no fields and no layout, and referring to it without a type
+'' argument list is an error.  The body is retained as a captured token chain
+'' and replayed once per instantiation (see the instantiation cache below).
+type FBS_GENERIC
+	kind            as FB_GENERICKIND
+	paramcount      as integer
+	paramhead       as FBSYMBOL_ ptr            '' type-parameter placeholder symbols, chained via .next
+	tokhead         as FB_GENTOK ptr            '' captured body, NULL until Phase 2 fills it
+	toktail         as FB_GENTOK ptr
+	instances       as THASH ptr                '' instantiation cache: canonical type-arg key -> FBSYMBOL ptr
+	srcline         as integer                  '' where the generic itself was declared, for the
+	srcfile         as zstring ptr              '' "in instantiation of" chain
+end type
+
 ''
 type FB_SYMBID
 	name            as zstring ptr              '' upper-cased name, shared by hash tb
@@ -828,6 +871,7 @@ type FBSYMBOL
 		scp         as FBS_SCOPE
 		nspc        as FBS_NAMESPACE
 		nsimp       as FBS_NSIMPORT
+		gen         as FBS_GENERIC
 	end union
 
 	hash            as FBSYMHASH                '' hash tb (namespace) it's part of
@@ -2302,6 +2346,9 @@ declare function symbGetUstrLength( byval sym as FBSYMBOL ptr ) as longint
 
 #define symbIsNameSpace(s) (s->class = FB_SYMBCLASS_NAMESPACE)
 
+'' An uninstantiated generic: a template, not a type
+#define symbIsGeneric(s) (s->class = FB_SYMBCLASS_GENERIC)
+
 #define symbGetConstVal( sym )   (@((sym)->val.value))
 #define symbGetConstStr( sym )   ((sym)->val.s)
 #define symbGetConstInt( sym )   ((sym)->val.i)
@@ -2620,6 +2667,14 @@ declare sub symbProcRecalcRealType( byval proc as FBSYMBOL ptr )
 #define symbIsMethod(s) ((s->pattrib and FB_PROCATTRIB_METHOD) <> 0)
 
 #define symbIsDescriptor(s) ((s->attrib and FB_SYMBATTRIB_DESCRIPTOR) <> 0)
+
+'' An instantiation of a generic, e.g. Vector(of integer).  Like a descriptor
+'' type, it mangles its type arguments as an Itanium template argument list.
+#define symbIsGenericInst(s) ((s->attrib and FB_SYMBATTRIB_GENERICINST) <> 0)
+
+'' The synthetic namespace wrapping one instantiation, holding its type-parameter
+'' TYPEDEFs.  Skipped by name mangling and by symbGetDBGName.
+#define symbIsGenericScope(s) ((s->attrib and FB_SYMBATTRIB_GENERICSCOPE) <> 0)
 
 #define symbIsConstant(s) ((s->attrib and FB_SYMBATTRIB_CONST) <> 0)
 

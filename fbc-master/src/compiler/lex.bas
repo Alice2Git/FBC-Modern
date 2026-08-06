@@ -34,13 +34,27 @@ dim shared as string pponly_ln
 
 '':::::
 '' only update the line count if not inside a multi-line macro
-#define UPDATE_LINENUM( )            _
-	if( lex.ctx->deflen = 0 ) then  :_
-		lex.ctx->linenum += 1       :_
+''
+'' A generic body is replayed from DEFTEXT like a macro, but unlike a macro it
+'' is real source that has to report real line numbers -- an error inside an
+'' instantiated body must point at the line in the generic, not at the
+'' instantiation site.  The capture keeps one LFCHAR per source line, so
+'' counting them here tracks the original exactly.
+#define UPDATE_LINENUM( )                                       _
+	if( (lex.ctx->deflen = 0) orelse                             _
+	    (lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC) ) then      :_
+		lex.ctx->linenum += 1                                   :_
 	end if
 
 '':::::
 sub lexPushCtx( )
+
+	'' ctxTB has FB_MAXINCRECLEVEL+1 slots.  Every caller is expected to have
+	'' checked its own recursion limit first (fbIncludeFile checks
+	'' env.includerec, the macro evaluators check it too, and generic
+	'' instantiation checks its own depth), so running off the end would be a
+	'' compiler bug rather than a user error.
+	assert( lex.ctx < @lex.ctxTB(FB_MAXINCRECLEVEL) )
 
 	lex.ctx += 1
 
@@ -117,8 +131,10 @@ sub lexInit _
 
 	lex.ctx->kind = ctx_kind
 
-	'' preprocessor evaluation?
-	if( ctx_kind = LEX_TKCTX_CONTEXT_EVAL ) then
+	'' preprocessor evaluation, or a generic body replay?
+	'' (a generic replay overrides linenum right after this, with the line the
+	'' captured body actually started on)
+	if( lexCtxIsInMemory( ctx_kind ) ) then
 		lex.ctx->linenum = (lex.ctx-1)->linenum
 		lex.ctx->reclevel = (lex.ctx-1)->reclevel
 		lex.ctx->currmacro = (lex.ctx-1)->currmacro
@@ -137,7 +153,7 @@ sub lexInit _
 	lex.ctx->deflen = 0
 
 	if( env.inf.format = FBFILE_FORMAT_ASCII ) then
-		lex.ctx->buffptr = iif( ctx_kind = LEX_TKCTX_CONTEXT_EVAL, @lex.ctx->buff, NULL )
+		lex.ctx->buffptr = iif( lexCtxIsInMemory( ctx_kind ), @lex.ctx->buff, NULL )
 		lex.ctx->defptr = NULL
 		DZstrAllocate( lex.ctx->deftext, 0 )
 	else
@@ -146,8 +162,8 @@ sub lexInit _
 		DWstrAllocate( lex.ctx->deftextw, 0 )
 	end if
 
-	'' preprocessor evaluation?
-	if( ctx_kind = LEX_TKCTX_CONTEXT_EVAL ) then
+	'' preprocessor evaluation, or a generic body replay?
+	if( lexCtxIsInMemory( ctx_kind ) ) then
 		lex.ctx->filepos = (lex.ctx-1)->filepos
 		lex.ctx->lastfilepos = (lex.ctx-1)->lastfilepos
 		lex.ctx->physfilepos = (lex.ctx-1)->physfilepos
@@ -162,7 +178,7 @@ sub lexInit _
 	'' only if it's not on an inc file
 	'' !!!TODO!!! - determine if env.includerec check can be removed
 	'' if( ctx_kind <> LEX_TKCTX_CONTEXT_INCLUDE ) then
-	if( (env.includerec = 0) or (ctx_kind = LEX_TKCTX_CONTEXT_EVAL) ) then
+	if( (env.includerec = 0) orelse lexCtxIsInMemory( ctx_kind ) ) then
 		DZstrAllocate( lex.ctx->currline, 0 )
 		lex.insidemacro = FALSE
 	end if
@@ -240,7 +256,7 @@ private function hReadChar _
 			end if
 		end if
 
-	elseif( lex.ctx->kind = LEX_TKCTX_CONTEXT_EVAL ) then
+	elseif( lexCtxIsInMemory( lex.ctx->kind ) ) then
 		char = 0
 
 	else
@@ -2178,6 +2194,38 @@ function lexGetLookAheadClass _
 	end if
 
 	function = lex.ctx->tail->class
+
+end function
+
+'':::::
+'' Text of the k'th look-ahead token.
+''
+'' Needed by the contextual keywords -- 'of' is deliberately not in the keyword
+'' table (a QUIRKWD could not be used as a variable name, which would break
+'' 'dim of as long'), so it is recognised by text, and the positions that must
+'' decide before committing need to peek that text rather than a token id.
+''
+'' Returns the raw token text, in source case; compare case-insensitively.
+function lexGetLookAheadText _
+	( _
+		byval k as integer, _
+		byval flags as LEXCHECK _
+	) as zstring ptr static
+
+	if( k > FB_LEX_MAXK ) then
+		exit function
+	end if
+
+	if( k > lex.ctx->k ) then
+		lex.ctx->k = k
+		lex.ctx->tail = lex.ctx->tail->next
+	end if
+
+	if( lex.ctx->tail->id = INVALID ) then
+		lexNextToken( lex.ctx->tail, flags )
+	end if
+
+	function = @lex.ctx->tail->text
 
 end function
 

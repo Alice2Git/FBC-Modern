@@ -1911,6 +1911,7 @@ enum
 	OPT_M
 	OPT_MAP
 	OPT_MAXERR
+	OPT_MAXINSTDEPTH
 	OPT_MT
 	OPT_NODEFLIBS
 	OPT_NOERRLINE
@@ -1997,6 +1998,7 @@ dim shared as FBC_CMDLINE_OPTION cmdlineOptionTB(0 to (OPT__COUNT - 1)) = _
 	( TRUE , TRUE , TRUE , TRUE  ), _ '' OPT_M            affects major initialization for all modules
 	( TRUE , TRUE , FALSE, FALSE ), _ '' OPT_MAP          affects output files
 	( TRUE , TRUE , FALSE, FALSE ), _ '' OPT_MAXERR       affects compile process
+	( TRUE , TRUE , TRUE , FALSE ), _ '' OPT_MAXINSTDEPTH affects compile process (generic instantiation depth)
 	( FALSE, TRUE , TRUE , FALSE ), _ '' OPT_MT           affects link, __FB_MT__
 	( FALSE, TRUE , FALSE, FALSE ), _ '' OPT_NODEFLIBS    affects link
 	( FALSE, TRUE , FALSE, FALSE ), _ '' OPT_NOERRLINE    affects compiler output display
@@ -2261,6 +2263,13 @@ private sub handleOpt _
 		end if
 
 		fbSetOption( FB_COMPOPT_MAXERRORS, value )
+
+	case OPT_MAXINSTDEPTH
+		dim as integer value = clng( arg )
+		if( value <= 0 ) then
+			hFatalInvalidOption( arg, is_source )
+		end if
+		fbSetOption( FB_COMPOPT_MAXINSTDEPTH, value )
 
 	case OPT_MT
 		fbSetOption( FB_COMPOPT_MULTITHREADED, TRUE )
@@ -2633,6 +2642,7 @@ private function parseOption(byval opt as zstring ptr) as integer
 		ONECHAR(OPT_M)
 		CHECK("map", OPT_MAP)
 		CHECK("maxerr", OPT_MAXERR)
+		CHECK("maxinstdepth", OPT_MAXINSTDEPTH)
 		CHECK("mt", OPT_MT)
 
 	case asc("n")
@@ -4515,6 +4525,7 @@ private sub hPrintOptions( byval verbose as integer )
 	print "  -m <name>        Specify main module (default if not -c: first input .bas)"
 	print "  -map <file>      Save linking map to file"
 	print "  -maxerr <n>      Only show <n> errors"
+	print "  -maxinstdepth <n> Max generic instantiation depth (default " & FB_DEFAULT_MAXINSTDEPTH & ")"
 	print "  -mt              Use thread-safe FB runtime"
 	print "  -nodeflibs       Do not include the default libraries when linking"
 	print "  -noerrline       Do not show source context in error messages"

@@ -2631,7 +2631,7 @@ private function hGetNamespacePrefix( byval sym as FBSYMBOL ptr ) as string
 end function
 
 #if (__FB_DEBUG__ <> 0) orelse defined(__GAS64_DEBUG__)
-static shared as zstring ptr classnames(FB_SYMBCLASS_VAR to FB_SYMBCLASS_NSIMPORT) = _
+static shared as zstring ptr classnames(FB_SYMBCLASS_VAR to FB_SYMBCLASS_GENERIC) = _
 { _
 	@"var"      , _
 	@"const"    , _
@@ -2649,7 +2649,8 @@ static shared as zstring ptr classnames(FB_SYMBCLASS_VAR to FB_SYMBCLASS_NSIMPOR
 	@"fwdref"   , _
 	@"scope"    , _
 	@"reserved" , _
-	@"nsimport"   _
+	@"nsimport" , _
+	@"generic"    _
 }
 
 '' For debugging
@@ -2880,6 +2881,8 @@ function symbDumpToStr _
 	checkAttrib( VIS_PRIVATE )
 	checkAttrib( VIS_PROTECTED )
 	checkAttrib( SUFFIXED )
+	checkAttrib( GENERICSCOPE )
+	checkAttrib( GENERICINST )
 
 	#macro checkPattrib( ID )
 		if( sym->pattrib and FB_PROCATTRIB_##ID ) then
@@ -3178,7 +3181,7 @@ sub symbDumpLookup( byval id as zstring ptr )
 end sub
 #endif '' __FB_DEBUG__
 
-dim shared as zstring ptr classnamesPretty(FB_SYMBCLASS_VAR to FB_SYMBCLASS_NSIMPORT) = _
+dim shared as zstring ptr classnamesPretty(FB_SYMBCLASS_VAR to FB_SYMBCLASS_GENERIC) = _
 { _
 	@"variable", _
 	@"constant", _
@@ -3196,7 +3199,8 @@ dim shared as zstring ptr classnamesPretty(FB_SYMBCLASS_VAR to FB_SYMBCLASS_NSIM
 	@"forward reference", _
 	@"scope", _
 	@"reserved", _
-	@"namespace import" _
+	@"namespace import", _
+	@"generic type or procedure" _
 }
 
 function symbDumpPrettyToStr( byval sym as FBSYMBOL ptr ) as string

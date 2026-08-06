@@ -53,7 +53,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | Phase | State |
 | --- | --- |
 | 0 — pre-work: mangler + hUcase | **done** — gate green (see below) |
-| 1 — scaffolding (semantic no-op) | not started |
+| 1 — scaffolding (semantic no-op) | **done** — gate green (see below) |
 | 2 — body capture + structural pre-scan | not started |
 | 3 — parser save/restore + replay harness | not started |
 | 4 — type instantiation engine | not started |
@@ -110,22 +110,106 @@ exactly, so nothing is unexplained.
 
 ---
 
+## Phase 1 — what landed
+
+Pure scaffolding; nothing parses `(of T)` yet. Every addition is append-only.
+
+| Change | Where |
+| --- | --- |
+| `FB_SYMBCLASS_GENERIC` (appended) + both class-indexed name tables extended | `symb.bi:112`, `symb.bas:2634`, `symb.bas:3181` |
+| `FB_GENERICKIND`, `FB_GENTOK`, `FBS_GENERIC` + `gen` union member | `symb.bi` |
+| `FB_SYMBATTRIB_GENERICSCOPE` `&h02000000`, `_GENERICINST` `&h04000000` (bits 25-26; `FB_SYMBSTATS` untouched — it is nearly full and already aliases values) | `symb.bi:172` |
+| `symbIsGeneric` / `symbIsGenericInst` / `symbIsGenericScope` + `#dump` attrib rows | `symb.bi`, `symb.bas:2883` |
+| 8 `FB_ERRMSG_*` appended before the sentinel, strings at matching ordinals | `error.bi:340`, `error.bas:437` |
+| `LEX_TKCTX_CONTEXT_GENERIC` + `lexCtxIsInMemory()` predicate | `lex.bi:81` |
+| `UPDATE_LINENUM` fires for GENERIC even while replaying from `deftext` | `lex.bas:37` |
+| `lexGetLookAheadText( k, flags )` | `lex.bas`, `lex.bi` |
+| `assert` bound in `lexPushCtx` | `lex.bas:43` |
+| `-maxinstdepth <n>`, default `FB_DEFAULT_MAXINSTDEPTH` = 64 | `fb.bi`, `fb.bas`, `fbc.bas` |
+
+`lexCtxIsInMemory()` replaces four `= LEX_TKCTX_CONTEXT_EVAL` tests that meant
+"stream comes from DEFTEXT, never the file" — including the containment point in
+`hReadChar` that stops a replay running off into the real source. Each
+substitution is a provable no-op today because nothing constructs a GENERIC
+context yet.
+
+### Phase 1 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | 1688 passed, **0 failed** — identical to Phase 0 |
+| `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
+| cross-target mangling vs Phase 0 | **byte-identical** on win32, win64, linux-x86, linux-x86_64, dos |
+| `FBSYMBOL` size | **320 bytes before and after** (measured, not inferred) |
+| error numbering | unchanged — `error 14` still `error 14`; enum ↔ table verified aligned |
+
+Delta vs Phase 0 (`1154415 / 1154404 / 11 / 2304`) is **+5 assertions / +4 tests**,
+exactly the new `identifier-of.bas`. Failures unchanged at 11.
+
+### Deferred out of Phase 1, deliberately
+
+- The `-g` "Macro Expansion" marker in `lex.ctx->currline` (`lex.bas:250`) will
+  read wrong for a generic replay. Cosmetic, `-g` only, unreachable until
+  Phase 3 constructs a GENERIC context — fix it there.
+- `lexPushCtx` got a debug `assert`, not a hard error. Making it return a status
+  would change a shared function's contract and risk unbalancing existing
+  `lexPopCtx` callers for no present gain; every caller already pre-checks its
+  own recursion limit. The real protection is the Phase 4 instantiation-depth
+  counter.
+
+---
+
 ## Phase 1 — prep already verified (read-only, during the Phase 0 gate)
 
 Both items the spec listed as *unverified assumptions* are now checked:
 
-- **`FB_TK_OF` can be appended safely.** `FB_TOKENS` is *derived*
-  (`fbint.bi:498`: `FB_TOKENS = FB_TK_THREADCALL - FB_TK_EOF`), not a literal, so
-  appending after `FB_TK_THREADCALL` also requires updating that expression to
-  reference the new last token. Only **one** array is dimensioned by it —
-  `kwdTb( 0 to FB_TOKENS-1 )` (`symb-keyword.bas:27`) — and it is a *list* whose
-  rows each carry their own token id, never indexed by token id. Nothing is
-  renumbered.
+- **`FB_TK_OF` could be appended safely** — `FB_TOKENS` is *derived*
+  (`fbint.bi:498`: `FB_TOKENS = FB_TK_THREADCALL - FB_TK_EOF`), not a literal, and
+  only `kwdTb( 0 to FB_TOKENS-1 )` (`symb-keyword.bas:27`) uses it, as a *list*
+  whose rows each carry their own id. **But see D4 below: we are not adding the
+  token at all.**
 - **`FB_SYMBCLASS_GENERIC` must extend two class-indexed tables.**
   `classnames()` (`symb.bas:2634`) and `classnamesPretty()` (`symb.bas:3181`) are
   bounded `FB_SYMBCLASS_VAR to FB_SYMBCLASS_NSIMPORT` and *are* indexed by
   `sym->class`. Appending the enum member means extending both bounds and adding
   a row to each — exactly as the comment at `symb.bi:111` warns.
+
+---
+
+## Deviation D4 — CORRECTED at the start of Phase 1
+
+The spec proposed registering `of` as a shadowable `FB_TKCLASS_QUIRKWD` with an
+identifier fallback. **That is wrong: QUIRKWDs cannot be used as variable
+names**, so it would have broken the exact case RFC-0001 promises to preserve.
+
+Measured:
+
+| probe | result |
+| --- | --- |
+| `dim of as long = 7 : print of` | OK — and must stay OK |
+| `dim len as long = 7` | `error 4: Duplicated definition` (LEN is a QUIRKWD) |
+| `dim screen as long = 7` | `error 4: Duplicated definition` (SCREEN is a QUIRKWD) |
+
+`symbLookup` hands back the keyword symbol, and `symbAddVar` then refuses the
+name. "Shadowable" does not mean what the spec assumed.
+
+**Corrected approach: `of` is never added to the keyword table.** It is purely
+contextual, matched by identifier text with the existing house helper
+`hMatchIdOrKw( "OF" )` (`lex.bas:2637`) — already used for `ONCE`, `LANG`,
+`ACCESS`, `READ`, `WRITE`, `LOCK`, `LEN`, none of which are reserved words. It
+accepts IDENTIFIER / QUIRKWD / KEYWORD class and compares `ucase( text )`.
+
+This is strictly stronger than the original plan: `Foo( of T )` parses even
+inside a scope where `of` is a declared variable, because only the token's
+*text* is consulted. No new token, no `kwdTb` row, no `FB_TOKENS` change, and
+nothing renumbered.
+
+Phase 1 therefore adds `lexGetLookAheadText( k, flags )` (mirroring the existing
+`lexGetLookAheadClass`) for the positions that need a text peek before
+committing — `as Foo(of T)` and `Max(of T)(...)` — rather than a token id.
 
 ---
 

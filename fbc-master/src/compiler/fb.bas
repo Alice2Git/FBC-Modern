@@ -590,6 +590,7 @@ sub fbGlobalInit()
 	env.clopt.warninglevel  = FB_WARNINGMSGS_DEFAULT_LEVEL
 	env.clopt.showerror     = TRUE
 	env.clopt.maxerrors     = FB_DEFAULT_MAXERRORS
+	env.clopt.maxinstdepth  = FB_DEFAULT_MAXINSTDEPTH
 	env.clopt.pdcheckopt    = FB_PDCHECK_NONE
 
 	env.clopt.gosubsetjmp   = FALSE
@@ -695,6 +696,8 @@ sub fbSetOption( byval opt as integer, byval value as integer )
 		env.clopt.showerror = value
 	case FB_COMPOPT_MAXERRORS
 		env.clopt.maxerrors = value
+	case FB_COMPOPT_MAXINSTDEPTH
+		env.clopt.maxinstdepth = value
 	case FB_COMPOPT_PEDANTICCHK
 		env.clopt.pdcheckopt = value
 
@@ -812,6 +815,8 @@ function fbGetOption( byval opt as integer ) as integer
 		function = env.clopt.showerror
 	case FB_COMPOPT_MAXERRORS
 		function = env.clopt.maxerrors
+	case FB_COMPOPT_MAXINSTDEPTH
+		function = env.clopt.maxinstdepth
 	case FB_COMPOPT_PEDANTICCHK
 		function = env.clopt.pdcheckopt
 

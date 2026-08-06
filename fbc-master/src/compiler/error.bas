@@ -434,6 +434,14 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_SSEREQUIRESX86                     '/ @"-fpu sse option can only be used on x86 and x86_64 architectures", _
 		/'FB_ERRMSG_NEONREQUIRESARM                    '/ @"-fpu neon option can only be used on arm architectures", _
 		/'FB_ERRMSG_UNDEFINEDBUILTINSYMBOL             '/ @"Undefined built-in symbol", _
+		/'FB_ERRMSG_EXPECTEDTYPEPARAM                  '/ @"Expected type parameter name", _
+		/'FB_ERRMSG_DUPTYPEPARAM                       '/ @"Duplicated type parameter", _
+		/'FB_ERRMSG_GENERICNEEDSTYPEARGS               '/ @"Generic used without a type argument list", _
+		/'FB_ERRMSG_WRONGTYPEARGCOUNT                  '/ @"Wrong number of type arguments", _
+		/'FB_ERRMSG_NOTAGENERIC                        '/ @"Type argument list given for something that is not generic", _
+		/'FB_ERRMSG_UNBALANCEDGENERICBODY              '/ @"Unbalanced block in generic body", _
+		/'FB_ERRMSG_INSTDEPTHTOODEEP                   '/ @"Generic instantiation too deep", _
+		/'FB_ERRMSG_CANTINFERTYPEARGS                  '/ @"Unable to infer type arguments, specify them explicitly", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

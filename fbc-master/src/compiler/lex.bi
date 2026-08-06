@@ -82,7 +82,13 @@ enum LEX_TKCTX_CONTEXT
 	LEX_TKCTX_CONTEXT_INIT = 0                  '' initializing, first time only
 	LEX_TKCTX_CONTEXT_INCLUDE = 1               '' include file
 	LEX_TKCTX_CONTEXT_EVAL = 2                  '' preprocessor evaluation
+	LEX_TKCTX_CONTEXT_GENERIC = 3               '' replaying a captured generic body
 end enum
+
+'' Contexts whose character stream comes only from DEFTEXT[W]: they never read
+'' from env.inf, and the end of that text is a hard EOF.  Both push a context
+'' on top of a live file being parsed, so both inherit its position state.
+#define lexCtxIsInMemory( k ) (((k) = LEX_TKCTX_CONTEXT_EVAL) orelse ((k) = LEX_TKCTX_CONTEXT_GENERIC))
 
 type LEX_TKCTX
 	tokenTB(0 to FB_LEX_MAXK) as FBTOKEN
@@ -216,6 +222,12 @@ declare function lexGetLookAhead _
 		byval k as integer, _
 		byval flags as LEXCHECK = LEXCHECK_EVERYTHING _
 	) as integer
+
+declare function lexGetLookAheadText _
+	( _
+		byval k as integer, _
+		byval flags as LEXCHECK = LEXCHECK_EVERYTHING _
+	) as zstring ptr
 
 declare sub lexReadLine _
 	( _

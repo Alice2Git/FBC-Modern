@@ -56,6 +56,8 @@ const FB_MAXSCOPEDEPTH      = 128
 
 const FB_DEFAULT_MAXERRORS  = 10
 
+const FB_DEFAULT_MAXINSTDEPTH = 64      '' generic instantiation depth, -maxinstdepth
+
 const FB_ERR_INFINITE       = &h7fffffff
 
 const INVALID               = -1
@@ -100,6 +102,7 @@ enum FB_COMPOPT
 	FB_COMPOPT_WARNINGLEVEL         '' integer
 	FB_COMPOPT_SHOWERROR            '' boolean: show source code line containing error?
 	FB_COMPOPT_MAXERRORS            '' -maxerr integer
+	FB_COMPOPT_MAXINSTDEPTH         '' -maxinstdepth integer
 	FB_COMPOPT_PEDANTICCHK          '' FB_PDCHECK_* flags
 
 	'' the rest
@@ -318,6 +321,7 @@ type FBCMMLINEOPT
 	warninglevel    as integer              '' (default = FB_WARNINGMSGS_DEFAULT_LEVEL)
 	showerror       as integer              '' show line giving error (default = true)
 	maxerrors       as integer              '' max number errors the parser will show
+	maxinstdepth    as integer              '' max generic instantiation depth
 	pdcheckopt      as FB_PDCHECK           '' pedantic checks
 
 	'' the rest
