@@ -18,6 +18,7 @@ end type
 type FB_MANGLECTX
 	flist               as TFLIST                   '' of FB_MANGLEABBR
 	cnt                 as integer
+	noabbrevget         as integer                  '' see hMangleUdtId's template argument lists
 
 	tempstr             as zstring * 6 + 10 + 1
 	uniqueidcount       as integer
@@ -43,6 +44,11 @@ declare sub hMangleNamespace _
 		byval dohashing as integer, _
 		byval isconst as integer _
 	)
+declare function hAbbrevAdd _
+	( _
+		byval dtype as integer, _
+		byval subtype as FBSYMBOL ptr _
+	) as FB_MANGLEABBR ptr
 
 '' inside a namespace or class?
 ''
@@ -245,6 +251,39 @@ private sub hMangleUdtId( byref mangled as string, byval sym as FBSYMBOL ptr )
 			if( symbIsGenericScope( nsp ) ) then
 				mangled += "I" '' begin of template argument list
 
+				'' Type arguments are always spelled out, never emitted as a
+				'' substitution.
+				''
+				'' hMangleNamespace() mangles a parent namespace TWICE: once
+				'' into a throwaway string, purely to populate the abbreviation
+				'' table ("just doing hAbbrevFind()/hAbbrevAdd() is not enough"),
+				'' and once for real.  That warm-up pass reaches this loop and
+				'' registers each type argument, so the real pass then found them
+				'' already present and emitted 'S_' -- a back-reference to
+				'' something that had never been written.  Every instantiation
+				'' whose argument was abbreviation-eligible collapsed onto the
+				'' same external name: Box(of integer), Box(of string),
+				'' Box(of MyUdt) and Box(of long ptr) all mangled as
+				'' _ZN3BoxIS_E..., which c++filt reads back as Box<Box>.  Four
+				'' different types, one symbol, and the linker silently keeps
+				'' one of them.
+				ctx.noabbrevget += 1
+
+				'' Reserve the slot the template NAME occupies.
+				''
+				'' Itanium counts <unscoped-template-name> as a substitution
+				'' candidate in its own right, so in 'Box<FBSTRING>' the
+				'' demangler numbers Box as 0 and FBSTRING as 1.  fbc was not
+				'' reserving it, so every later reference came out one too low --
+				'' g++ writes _ZN3BoxI8FBSTRINGE4takeES0_S0_ for a method taking
+				'' two of them, and fbc wrote S_S_, which demangles to
+				'' 'Box<FBSTRING>::take(Box, Box)'.
+				''
+				'' The entry can never be found by a real lookup: nothing mangles
+				'' a type whose dtype is FB_DATATYPE_INVALID.  It exists only to
+				'' keep our numbering and the demangler's in step.
+				hAbbrevAdd( FB_DATATYPE_INVALID, sym )
+
 				dim as FBSYMBOL ptr t = symbGetCompSymbTb( nsp ).head
 				while( t <> NULL )
 					if( symbIsTypedef( t ) ) then
@@ -253,6 +292,8 @@ private sub hMangleUdtId( byref mangled as string, byval sym as FBSYMBOL ptr )
 					end if
 					t = t->next
 				wend
+
+				ctx.noabbrevget -= 1
 
 				mangled += "E" '' end of template argument list
 			end if
@@ -539,10 +580,12 @@ sub symbMangleType _
 	'' name already contains the type somewhere, it can be referred to
 	'' through an index instead of by repeating the full name, as specified
 	'' in the Itanium C++ ABI)
-	dim as integer idx = hAbbrevFind( dtype, subtype )
-	if( idx <> -1 ) then
-		hAbbrevGet( mangled, idx )
-		exit sub
+	if( ctx.noabbrevget = 0 ) then
+		dim as integer idx = hAbbrevFind( dtype, subtype )
+		if( idx <> -1 ) then
+			hAbbrevGet( mangled, idx )
+			exit sub
+		end if
 	end if
 
 	'' forward type?

@@ -71,10 +71,15 @@ sub genCaptureEnd( )
 	end if
 end sub
 
-'' Append one token node to a chain
-private function hAddTok _
+'' Append one token node to a chain.
+''
+'' The head/tail pair is passed byref rather than the owning record, because the
+'' same chain shape is used for a generic's type body (FBS_GENERIC) and for each
+'' of its out-of-line member bodies (FB_GENPROC).
+private function hAddTokTo _
 	( _
-		byval gen as FBS_GENERIC ptr, _
+		byref head as FB_GENTOK ptr, _
+		byref tail as FB_GENTOK ptr, _
 		byval text as const zstring ptr, _
 		byval linenum as integer _
 	) as FB_GENTOK ptr
@@ -89,16 +94,26 @@ private function hAddTok _
 	*n->text = *text
 	n->linenum = linenum
 	n->next = NULL
-	n->prev = gen->toktail
+	n->prev = tail
 
-	if( gen->toktail ) then
-		gen->toktail->next = n
+	if( tail ) then
+		tail->next = n
 	else
-		gen->tokhead = n
+		head = n
 	end if
-	gen->toktail = n
+	tail = n
 
 	function = n
+end function
+
+private function hAddTok _
+	( _
+		byval gen as FBS_GENERIC ptr, _
+		byval text as const zstring ptr, _
+		byval linenum as integer _
+	) as FB_GENTOK ptr
+
+	function = hAddTokTo( gen->tokhead, gen->toktail, text, linenum )
 end function
 
 '' Is the TYPE|UNION at the current token opening an inner UDT, rather than
@@ -367,6 +382,291 @@ sub cGenericTypeDecl _
 
 end sub
 
+'' ----------------------------------------------------------------------------
+'' Out-of-line member bodies
+'' ----------------------------------------------------------------------------
+
+'' Every member body captured so far, in source order per generic.  Kept here
+'' rather than in FBS_GENERIC so that FBSYMBOL does not grow: the union member is
+'' already the widest in the symbol, and a translation unit has tens of generics,
+'' not thousands.
+type GENPROCCTX
+	inited          as integer
+	list            as TLIST                    '' of FB_GENPROC
+end type
+
+dim shared as GENPROCCTX genprocctx
+
+sub genProcBodyEnd( )
+	if( genprocctx.inited ) then
+		dim as FB_GENPROC ptr n = listGetHead( @genprocctx.list )
+		while( n )
+			if( n->srcfile ) then
+				ZstrFree( n->srcfile )
+				n->srcfile = NULL
+			end if
+			n = listGetNext( n )
+		wend
+		listEnd( @genprocctx.list )
+		genprocctx.inited = FALSE
+	end if
+end sub
+
+'' The bodies belonging to one generic, oldest first
+function genGetProcBodies( byval gensym as FBSYMBOL ptr ) as FB_GENPROC ptr
+	if( genprocctx.inited = FALSE ) then
+		return NULL
+	end if
+
+	dim as FB_GENPROC ptr n = listGetHead( @genprocctx.list )
+	while( n )
+		if( n->gensym = gensym ) then
+			return n
+		end if
+		n = listGetNext( n )
+	wend
+
+	function = NULL
+end function
+
+private function hAddProcBody _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval kindtk as integer _
+	) as FB_GENPROC ptr
+
+	if( genprocctx.inited = FALSE ) then
+		listInit( @genprocctx.list, 32, len( FB_GENPROC ), LIST_FLAGS_NOCLEAR )
+		genprocctx.inited = TRUE
+	end if
+
+	dim as FB_GENPROC ptr n = listNewNode( @genprocctx.list )
+	n->gensym  = gensym
+	n->kindtk  = kindtk
+	n->tokhead = NULL
+	n->toktail = NULL
+	n->srcline = lexLineNum( )
+	n->nxt     = NULL
+
+	'' see cGenericTypeDecl: a private copy, in the file's original case
+	n->srcfile = ZstrAllocate( len( env.inf.name ) )
+	*n->srcfile = env.inf.name
+
+	'' chain onto the tail of this generic's list, so bodies replay in source
+	'' order and a later body cannot shadow an earlier one
+	dim as FB_GENPROC ptr head = genGetProcBodies( gensym )
+	if( head <> n ) then
+		while( head->nxt )
+			head = head->nxt
+		wend
+		head->nxt = n
+	end if
+
+	function = n
+end function
+
+'' Does the current token name a generic?  Cheap: the lexer has already attached
+'' the symbol chain, so this costs no extra look-ahead.
+function genLookupGeneric( ) as FBSYMBOL ptr
+	dim as FBSYMCHAIN ptr chain_ = lexGetSymChain( )
+
+	while( chain_ <> NULL )
+		dim as FBSYMBOL ptr sym = chain_->sym
+		while( sym <> NULL )
+			if( symbIsGeneric( sym ) ) then
+				return sym
+			end if
+			sym = sym->hash.next
+		wend
+		chain_ = symbChainGetNext( chain_ )
+	wend
+
+	function = NULL
+end function
+
+'' Is the parser looking at 'Foo( of ...' where Foo is a generic?
+''
+'' The symbol test comes first and the text peek second, deliberately.  Peeking
+'' two tokens ahead drives the lexer further than this path otherwise would,
+'' which disturbs macro expansion -- doing it unconditionally broke ordinary
+'' macro calls elsewhere.
+function genIsGenericMemberProc( ) as integer
+	if( lexGetClass( ) <> FB_TKCLASS_IDENTIFIER ) then
+		return FALSE
+	end if
+
+	if( genLookupGeneric( ) = NULL ) then
+		return FALSE
+	end if
+
+	if( lexGetLookAhead( 1 ) <> CHAR_LPRNT ) then
+		return FALSE
+	end if
+
+	function = (ucase( *lexGetLookAheadText( 2 ) ) = "OF")
+end function
+
+'' '(' OF ID (',' ID)* ')' on an out-of-line body, checked against the generic's
+'' own declaration.
+''
+'' The names must match positionally.  Binding is by name -- the type parameters
+'' live as TYPEDEFs in the instantiation's synthetic namespace, under the names
+'' the declaration used -- so a body that renames them would simply fail to
+'' resolve them, with a confusing error.  Rejecting it up front says what is
+'' actually wrong.
+private function hCheckProcTypeParams( byval gensym as FBSYMBOL ptr ) as integer
+
+	dim as FBSYMBOL ptr prm = gensym->gen.paramhead
+	dim as zstring * FB_MAXNAMELEN+1 id
+	dim as integer count = 0
+
+	'' '('
+	lexSkipToken( LEXCHECK_POST_SUFFIX )
+
+	'' OF -- matched by text, never a keyword
+	if( hMatchIdOrKw( "OF", LEXCHECK_POST_SUFFIX ) = FALSE ) then
+		errReportEx( FB_ERRMSG_EXPECTEDTYPEPARAM, genGenericName( gensym ) )
+		return FALSE
+	end if
+
+	do
+		if( lexGetClass( ) <> FB_TKCLASS_IDENTIFIER ) then
+			errReport( FB_ERRMSG_EXPECTEDTYPEPARAM )
+			return FALSE
+		end if
+
+		lexEatToken( @id )
+		count += 1
+
+		if( prm = NULL ) then
+			errReportEx( FB_ERRMSG_TYPEPARAMMISMATCH, genGenericName( gensym ) )
+			return FALSE
+		end if
+
+		if( ucase( *symbGetName( prm ) ) <> ucase( id ) ) then
+			errReportEx( FB_ERRMSG_TYPEPARAMMISMATCH, genGenericName( gensym ) )
+			return FALSE
+		end if
+
+		prm = prm->next
+
+		'' ','?
+		if( lexGetToken( ) <> CHAR_COMMA ) then
+			exit do
+		end if
+		lexSkipToken( LEXCHECK_POST_SUFFIX )
+	loop
+
+	'' ')'
+	if( hMatch( CHAR_RPRNT, LEXCHECK_POST_SUFFIX ) = FALSE ) then
+		errReport( FB_ERRMSG_EXPECTEDRPRNT )
+		return FALSE
+	end if
+
+	if( count <> gensym->gen.paramcount ) then
+		errReportEx( FB_ERRMSG_TYPEPARAMMISMATCH, genGenericName( gensym ) )
+		return FALSE
+	end if
+
+	function = TRUE
+end function
+
+'' Capture a procedure body up to and including its terminating END <kind>.
+''
+'' No depth counting, unlike genCaptureTypeBody: procedures cannot nest in
+'' FreeBASIC, and nothing else in a procedure body produces an 'END SUB' /
+'' 'END FUNCTION'.  A procedure-pointer declaration ('dim cb as sub( )') mentions
+'' the keyword but never terminates a block, which is exactly why counting
+'' openings -- what hSkipCompound does for error recovery -- would be wrong here.
+private function hCaptureProcBody _
+	( _
+		byval body as FB_GENPROC ptr, _
+		byval gensym as FBSYMBOL ptr, _
+		byval startline as integer _
+	) as integer
+
+	#define hAddProcTok( b, t, l ) hAddTokTo( (b)->tokhead, (b)->toktail, t, l )
+
+	do
+		select case as const lexGetToken( GENTOK_FLAGS )
+		case FB_TK_EOF
+			errReportEx( FB_ERRMSG_UNBALANCEDGENERICBODY, _
+			             genGenericName( gensym ), startline )
+			return FALSE
+
+		'' comments are not part of the body -- and an 'end sub' inside one
+		'' must not terminate it
+		case FB_TK_COMMENT, FB_TK_REM
+			do
+				lexSkipToken( GENTOK_FLAGS )
+				select case lexGetToken( GENTOK_FLAGS )
+				case FB_TK_EOL, FB_TK_EOF
+					exit do
+				end select
+			loop
+			continue do
+
+		case FB_TK_END
+			if( lexGetLookAhead( 1, GENTOK_FLAGS ) = body->kindtk ) then
+				'' record 'end' and the kind keyword together and stop
+				hAddProcTok( body, lexGetText( ), lexLineNum( ) )
+				lexSkipToken( GENTOK_FLAGS )
+				hAddProcTok( body, lexGetText( ), lexLineNum( ) )
+				lexSkipToken( GENTOK_FLAGS )
+				exit do
+			end if
+
+		end select
+
+		hAddProcTok( body, lexGetText( ), lexLineNum( ) )
+		lexSkipToken( GENTOK_FLAGS )
+	loop
+
+	function = TRUE
+end function
+
+'' SUB|FUNCTION|... ID '(' OF ... ')' '.' ID ... END SUB|FUNCTION|...
+''
+'' Called from cProcStmtBegin() once the kind keyword has been consumed and the
+'' current token is seen to name a generic followed by '( of'.  Returns TRUE if
+'' the statement was consumed here.
+''
+'' Capture starts at the token AFTER the ')' -- the '.' before the member name --
+'' so replaying only needs '<kind> __FBGENINST' pasted in front.  Re-parsing the
+'' 'Foo( of T )' part instead would mean teaching cParentId to accept a type
+'' argument list, for no gain: inside an instantiation 'T' is already bound, so
+'' the header can only ever name the instantiation being replayed into.
+function cGenericProcDecl( byval tk as integer ) as integer
+
+	dim as FBSYMBOL ptr gensym = genLookupGeneric( )
+	dim as integer startline = lexLineNum( )
+
+	if( gensym = NULL ) then
+		return FALSE
+	end if
+
+	'' skip the generic's name
+	lexSkipToken( LEXCHECK_NOPERIOD or LEXCHECK_POST_SUFFIX )
+
+	if( hCheckProcTypeParams( gensym ) = FALSE ) then
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	dim as FB_GENPROC ptr body = hAddProcBody( gensym, tk )
+
+	if( hCaptureProcBody( body, gensym, startline ) = FALSE ) then
+		return TRUE
+	end if
+
+	'' A body may be written after the type has already been instantiated, so
+	'' every existing instantiation retro-queues it.  Instantiations made later
+	'' pick it up from the generic's list instead.
+	genQueueProcBodies( gensym, NULL, body )
+
+	function = TRUE
+end function
+
 '' Flatten a captured chain back into source text.
 ''
 '' Tokens are separated by a single space, which is always safe because they
@@ -376,11 +676,11 @@ end sub
 '' hides the continuation, but the line number still advances across it.
 function genFlattenTokens _
 	( _
-		byval gen as FBS_GENERIC ptr, _
+		byval tokhead as FB_GENTOK ptr, _
 		byref firstline as integer _
 	) as string
 
-	dim as FB_GENTOK ptr n = gen->tokhead
+	dim as FB_GENTOK ptr n = tokhead
 	dim as string res
 	dim as integer curline = any
 

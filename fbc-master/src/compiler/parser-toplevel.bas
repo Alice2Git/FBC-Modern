@@ -214,6 +214,14 @@ sub cProgram()
 		'' A new statement starts behind EOL
 		'' (and EOF too, for implicitly generated code)
 		parser.stmt.cnt += 1  '' end-of-statement seen
+
+		'' Replay any generic member bodies that became due while parsing that
+		'' statement.  Only where a procedure could legitimately be written by
+		'' hand: nothing open on the compound-statement stack, and not inside a
+		'' procedure body -- this same loop parses those.
+		if( stackGetTOS( @parser.stmt.stk ) = NULL ) then
+			genDrainProcBodies( )
+		end if
 	loop while (lexGetToken() <> FB_TK_EOF)
 
 	'' EOF
@@ -224,6 +232,12 @@ sub cProgram()
 	end if
 
 	lexSkipToken( )
+
+	'' Last chance: a generic instantiated by the final statement of the module
+	'' still owes its member bodies, and the loop above exited before draining.
+	if( env.includerec = 0 ) then
+		genDrainProcBodies( )
+	end if
 
 	'' only check compound stmts if not parsing an include file
 	if (env.includerec = 0) then

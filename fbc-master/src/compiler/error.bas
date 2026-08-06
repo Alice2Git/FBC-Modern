@@ -455,6 +455,7 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_UNBALANCEDGENERICBODY              '/ @"Unbalanced block in generic body", _
 		/'FB_ERRMSG_INSTDEPTHTOODEEP                   '/ @"Generic instantiation too deep", _
 		/'FB_ERRMSG_CANTINFERTYPEARGS                  '/ @"Unable to infer type arguments, specify them explicitly", _
+		/'FB_ERRMSG_TYPEPARAMMISMATCH                  '/ @"Type parameter list does not match the generic's declaration", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

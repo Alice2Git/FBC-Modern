@@ -57,7 +57,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 2 — body capture + structural pre-scan | **done** — gate green (see below) |
 | 3 — parser save/restore + replay + minimal instantiation | **done** — gate green |
 | 4 — type instantiation engine | **part 1 done** — mangling, recursion, depth limit |
-| 5 — member protos + out-of-line bodies | not started |
+| 5 — member protos + out-of-line bodies | **done** — gate green |
 | 6 — generic procedures + inference | not started |
 | 7 — ctors/dtors/copy | not started |
 | 8 — operators + properties | not started |
@@ -355,6 +355,228 @@ test. Both golden diffs are now part of the per-phase gate.
   namespace rather than by `symbLookupInternallyMangledSubtype`'s rules. Fine at
   module level, which is what the tests cover.
 - **In-body line numbers** — see above.
+
+---
+
+## Phase 5 — what landed
+
+Generic types have methods. `sub Stack( of T ).Push( ... ) ... end sub` is
+captured once and replayed once per instantiation.
+
+Prototypes needed no work at all — the whole `type ... end type` is replayed, so
+`declare sub setv( byval x as T )` and the call type-check that follows it were
+already working at the end of Phase 4. Everything here is the body half.
+
+### How a body gets from source to code
+
+Hooked in `cProcStmtBegin` right after the SUB/FUNCTION keyword, before
+`cProcHeader`. Capture starts at the `.` **after** the `( of T )` clause, so
+replay only pastes `<kind> __FBGENINST` in front. Teaching `cParentId` to accept
+a type-argument list instead would buy nothing: inside an instantiation `T` is
+already bound, so the header can only ever name the instantiation being replayed
+into.
+
+No depth counting in the capture, unlike the type-body capture: procedures
+cannot nest in FreeBASIC and nothing else in a body produces `END SUB`. Counting
+openings — what `hSkipCompound` does for error recovery — would be actively
+wrong, because `dim cb as sub( )` mentions the keyword without opening a block.
+
+Bodies are then **deferred**: an instantiation happens mid-statement
+(`dim s as Stack( of long )`), and opening a procedure there is not something the
+parser supports. Each (instantiation, body) pair is queued and drained at a
+module-level statement boundary in `cProgram` — the position the body would have
+occupied had the user written it by hand — plus once more at end of module.
+Draining runs `cProgram()` over the replayed text rather than a hand-rolled
+statement loop, so it cannot drift out of step with the real one.
+
+Deferring is also what makes declaration order irrelevant, which was the point:
+a body written **after** the first instantiation retro-queues for every
+instantiation that already exists, and one written **before** is picked up by
+instantiations made later. Both directions are covered by `member-procs.bas`.
+
+Working: methods, `this`, fields, locals, `for`/`select` inside a body, a method
+calling a sibling method, two type parameters, `string` and UDT arguments,
+bodies in a separate `.bi`, a generic inside a namespace, and a member body that
+instantiates *another* generic.
+
+**Restriction, deliberate:** an out-of-line body must spell the type parameters
+the way the declaration did. Binding is by name — the parameters are TYPEDEFs
+under the declaration's names — so a renamed one would fail to resolve with a
+confusing error. `FB_ERRMSG_TYPEPARAMMISMATCH` says so instead. Liftable later
+by binding the body's own names too; nothing depends on it.
+
+### Deviation D1 settled — instantiations are always module level
+
+Phase 4 left instantiations in the *current* scope. That is unsurvivable once
+generics have methods: `hDisallowNestedClasses` rejects a UDT with member
+procedures below module level, because FreeBASIC has no nested procedures and
+their bodies could never be implemented. A member body that instantiates another
+generic is parsed inside a procedure, so **every generic with methods was
+rejected** the moment one was used from inside another's body.
+
+`genEnterGlobalScope`/`genLeaveGlobalScope` now move the parser and AST position
+to module level and the current symbol/hash table to the global namespace's, for
+the whole of an instantiation and each body replay.
+
+This settles D1 the opposite way from the shipped precedent for array descriptor
+types (`symbLookupInternallyMangledSubtype` goes local when inside a scope). The
+cost is that a type argument naming a procedure-local UDT now outlives that
+UDT's scope — the hazard the FBARRAY comment in `symb-var.bas` warns about. The
+trade is deliberate: descriptor types have no methods, so the local branch costs
+them nothing; for generics it costs everything.
+
+**`symbNestBegin` is not usable for this.** Called on a namespace already in
+scope — and the global one always is — it adds that namespace's hash table to
+the nested-hash list a second time. The list is threaded through the hash table
+itself, so the duplicate points at itself and every subsequent lookup spins
+forever. The first attempt hung the compiler on the simplest test in the suite.
+
+### Two mangling bugs, both pre-existing from Phase 4, both severe
+
+Found by dumping `-r -gen gcc` output for the new method symbols, not by review.
+
+**1. Every abbreviation-eligible type argument collapsed onto one name.**
+`Box(of integer)`, `Box(of string)`, `Box(of MyUdt)` and `Box(of long ptr)` all
+mangled as `_ZN3BoxIS_E...`, which `c++filt` reads back as `Box<Box>`. Four
+distinct types, **one external symbol** — the linker keeps one body and the
+others are silently discarded. Only `Box(of double)` differed, because plain
+built-in types are not abbreviation candidates.
+
+Cause: `hMangleNamespace` mangles a parent namespace **twice** — once into a
+throwaway string purely to populate the abbreviation table (*"just doing
+hAbbrevFind()/hAbbrevAdd() is not enough"*), then once for real. The warm-up
+pass reached the `I…E` loop and registered each type argument, so the real pass
+found them already present and emitted `S_` — a back-reference to something
+never written. Fixed by suppressing abbreviation *lookup* inside the
+template-argument list, so an argument is always spelled out.
+
+**2. The template name did not occupy substitution slot 0.** Itanium counts
+`<unscoped-template-name>` as a candidate in its own right, so in
+`Box<FBSTRING>` a demangler numbers `Box` 0 and `FBSTRING` 1. fbc was not
+reserving the slot, so every later reference came out one too low: for a method
+taking two arguments of the parameter type, g++ writes
+`_ZN3BoxI8FBSTRINGE4takeES0_S0_` and fbc wrote `S_S_`, demangling to
+`Box<FBSTRING>::take(Box, Box)`. Fixed by reserving the slot.
+
+Verified against `x86_64-w64-mingw32-g++` on the equivalent C++ template:
+single-level instantiations are now **byte-identical** apart from the method
+name, which fbc up-cases. Nested arguments diverge — fbc writes
+`_ZN3BoxI3BoxIiEE4TAKEES1_` where g++ abbreviates the inner `Box` to `S_` —
+because suppression applies inside the whole argument list. Both demangle to the
+same type, the slot numbering still agrees with `c++filt`, and fbc generics are
+not C++ templates to interoperate with. Recorded, not fixed.
+
+**Not touched:** the array-descriptor branch just above has the same shape and
+may carry the same latent defect. It is shipped behaviour with goldens pinning
+it, and Phase 0 established that existing mangled names must not move. Worth
+reporting upstream separately.
+
+### The Phase 3 balance assert was asserting the wrong thing
+
+`genRestoreState` asserted `parser.stmt.cnt`, described as the compound-statement
+depth. It is not — it is a running count of statement separators that lives next
+door in the same struct. It happened to hold because `cTypeDecl` never bumps it,
+so the assert had never once tested what it claimed. Replaying a procedure body
+runs `cProgram()`, which bumps it per line, and would have tripped it.
+
+Now asserts `parser.stmt.stk.tos` (stack nodes are pooled, so equal depth means
+the same pointer) and *copies* `cnt`.
+
+### Test-name trap worth remembering
+
+A type parameter named `K` cannot be used as a parameter type — `error 59:
+Illegal specification`. This has nothing to do with generics: plain
+`type K as long` plus `declare sub f( byval a as K )` is rejected identically.
+Cost twenty minutes chasing a phantom two-type-parameter bug. `T`, `V`, `U`,
+`W`, `Q`, `KK` and `ELEM` are all fine. Third time this project that an unlucky
+test identifier has looked like a compiler regression (`base`, then `A`/`a`,
+now `K`) — **check the control before concluding.**
+
+### Tests added
+
+| Path | Kind |
+| --- | --- |
+| `tests/generics/member-procs.bas` | `COMPILE_AND_RUN_OK` — 20 assertions over one and two type params, string/UDT/scalar args, control flow, sibling calls, both declaration orders, a nested instantiation, a namespace |
+| `tests/generics/member-mangling/` | `MULTI_MODULE_OK` — link-time assertion on three exact Itanium names |
+| `tests/generics/fail-memberproc-renamed-typeparam.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-memberproc-wrong-arity.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-memberproc-unbalanced.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/errors/generic-member-errors.bas` | golden diagnostics, 5 targets |
+
+The mangling test **had to be two modules**, and the first single-module version
+had no teeth at all. A `declare ... alias "…"` that is never referenced emits no
+relocation and links happily against any mangling whatsoever — the Phase 0
+lesson, met again in a new disguise. Taking the address forces resolution.
+Matching signatures then make fbc report `Duplicated definition` against the real
+method, and non-matching ones make gcc report a conflicting prototype since both
+land in one C file; a second module avoids both. Proven by mutating each of the
+three names in turn and confirming the link fails, on both backends.
+
+### A second environmental failure set — `tests/cpp`, four tests
+
+This run surfaced `cpp/call`, `cpp/call2`, `cpp/class` and `cpp/derived` failing,
+which earlier phases had recorded as 0 failures. They are **not** a regression:
+
+```
+ld.exe: cannot find -lstdc++: No such file or directory
+```
+
+`libstdc++` is simply absent from `C:\dev\utils\mingw64`. Exactly the four tests
+that `#inclib "stdc++"` fail; `cpp/bop` and `cpp/fastcall`, which do not, pass.
+No change to fbc's mangler can produce a missing-library error.
+
+Confirmed by controlled comparison rather than asserted — rebuilt the compiler
+at `7052c70` with the Phase 5 sources stashed, ran the four by hand, got the
+identical failures, restored and got them again. Same discipline as the Phase 0
+baseline.
+
+Why they appeared only now: this was the first run to invoke `make clean-tests`
+from the **repository root**. Earlier phases followed the procedure at the top of
+this file, which deletes `tests/**/*.o` but leaves other artifacts — and
+`clean-tests` run from inside `tests/` silently does nothing (see Traps). Stale
+artifacts had been masking these.
+
+**Treat 4 `cpp` + 11 `threadcall_` as the environmental floor from here on.** A
+fifteenth failure is a regression. Fixable by installing libstdc++ for this
+mingw64, which is a toolchain change and not part of this work.
+
+### Phase 5 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged from Phase 4 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1701 passed, 4 failed** — the 4 being the pre-existing `cpp` set above |
+| `tests/warnings` golden, 5 targets | clean — zero content change |
+| `tests/errors` golden, 5 targets | additions only; no existing golden moved |
+
+Unit-test figures are unchanged by design: every Phase 5 behaviour test is a
+log-test, so none of them adds an fbcunit assertion.
+
+The log-test count reconciles exactly: 1700 at Phase 4, **+5** new tests here,
+**-4** for the `cpp` set that stale artifacts had been hiding, = 1701. All five
+new tests are confirmed `RESULT=PASSED` individually, not merely absent from the
+failure list.
+
+### Still open
+
+- **Readable debug names** (carried from Phase 4). Every instantiation still
+  reports as `Box` to the debugger.
+- **In-body line numbers** (carried from Phase 4). An error inside a replayed
+  member body reports the body's `sub` line, not the offending line; the
+  instantiation chain supplies the detail.
+- **Modifiers before the kind keyword are dropped** — `private sub Box( of T ).f`
+  loses the `private`, because capture starts at the generic's name and the
+  replay re-enters `cProcStmtBegin` with no attributes. Checked rather than
+  assumed: both `private sub Box( of T ).setv` and
+  `const function Box( of T ).getv` compile and run correctly, because a method
+  BODY takes its attributes from the prototype anyway (`cProcHeader`: *"for
+  bodies it depends on the attributes inherited from the corresponding
+  prototype"*). Not currently covered by a test.
+- **A body for a member that was never declared** reports
+  `Expected End-of-Line, found '.'`. Confirmed identical in plain FreeBASIC for
+  `sub Box.nope()`, so pre-existing, not introduced here.
 
 ---
 

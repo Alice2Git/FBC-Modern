@@ -1128,9 +1128,38 @@ declare function genCaptureTypeBody _
 
 declare function genFlattenTokens _
 	( _
-		byval gen as FBS_GENERIC ptr, _
+		byval tokhead as FB_GENTOK ptr, _
 		byref firstline as integer _
 	) as string
+
+'' One out-of-line member body belonging to a generic, e.g.
+''     sub Stack( of T ).Push( byval x as T ) ... end sub
+'' The captured chain starts at the '.' (or at the '(' for a ctor), so replaying
+'' it only needs the kind keyword and the instantiated struct's internal name
+'' pasted in front.
+type FB_GENPROC
+	gensym          as FBSYMBOL ptr
+	kindtk          as integer                  '' FB_TK_SUB / FUNCTION / OPERATOR / ...
+	tokhead         as FB_GENTOK ptr
+	toktail         as FB_GENTOK ptr
+	srcline         as integer
+	srcfile         as zstring ptr
+	nxt             as FB_GENPROC ptr           '' next body of the SAME generic, in source order
+end type
+
+declare function genGenericName( byval gensym as FBSYMBOL ptr ) as zstring ptr
+declare function genLookupGeneric( ) as FBSYMBOL ptr
+declare function genIsGenericMemberProc( ) as integer
+declare function cGenericProcDecl( byval tk as integer ) as integer
+declare function genGetProcBodies( byval gensym as FBSYMBOL ptr ) as FB_GENPROC ptr
+declare sub genQueueProcBodies _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval nsp as FBSYMBOL ptr, _
+		byval body as FB_GENPROC ptr _
+	)
+declare sub genDrainProcBodies( )
+declare sub genProcBodyEnd( )
 
 ''
 '' inter-module globals

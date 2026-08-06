@@ -1909,6 +1909,15 @@ sub cProcStmtBegin( byval attrib as FB_SYMBATTRIB, byval pattrib as FB_PROCATTRI
 
 	lexSkipToken( LEXCHECK_POST_SUFFIX )
 
+	'' 'sub Foo( of T ).name( ... )' -- an out-of-line body belonging to a
+	'' generic.  There is nothing to declare yet: the body is captured and
+	'' replayed once per instantiation, so it is consumed entirely here.
+	if( genIsGenericMemberProc( ) ) then
+		if( cGenericProcDecl( tkn ) ) then
+			exit sub
+		end if
+	end if
+
 	'' ProcHeader
 	proc = cProcHeader( attrib, pattrib, is_nested, FB_PROCOPT_NONE, tkn )
 	if( proc = NULL ) then
