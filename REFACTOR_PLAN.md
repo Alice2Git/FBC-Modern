@@ -59,7 +59,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 4 — type instantiation engine | **part 1 done** — mangling, recursion, depth limit |
 | 5 — member protos + out-of-line bodies | **done** — gate green |
 | 6 — generic procedures + inference | **done** — gate green |
-| 7 — ctors/dtors/copy | not started |
+| 7 — ctors/dtors/copy | **done** — gate green |
 | 8 — operators + properties | not started |
 | 9 — inheritance/virtual *(cut line)* | not started |
 | 10 — RFC-0002 iterator protocol | not started |
@@ -731,6 +731,73 @@ misleading results. Delete the artifact before every probe.
 Tests added: `generic-procs.bas` (explicit and inferred, `T ptr`, two type
 parameters, return-type-only, generic calling generic, generic type method
 calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
+
+---
+
+## Phase 7 — what landed
+
+Almost nothing, and that is the finding.
+
+The plan said of `symbUdtDeclareDefaultMembers` / `symbUdtImplementDefaultMembers`:
+*"should run per instantiation automatically via `symbStructEnd` — **verify,
+don't assume**."* Verified. Three of the four things this phase was scoped to
+build already worked, because Phase 5 routes **every** member body — constructor,
+destructor, operator — through one capture-and-deferred-replay path, and
+`symbStructEnd` does the rest per instantiation.
+
+| probe | before any change |
+| --- | --- |
+| implicit ctor/dtor for a generic holding a `string` | worked |
+| out-of-line `destructor Box( of T )( )` | worked |
+| copy ctor + `operator Box( of T ).let` | worked — 2 copies, both invoked |
+| `Box( of long )( 42 )` as a temporary | **failed** |
+
+### The one real gap
+
+Constructing a temporary. The expression parser dispatches a bare type name to
+`cCtorCall` (`parser-expr-atom.bas`, the `FB_SYMBCLASS_STRUCT` arm) and had no
+arm for a generic, so `Box( of long )( 42 )` reported *"Variable not declared,
+Box"*.
+
+Fixed by mirroring that arm: consume the type argument list, instantiate, then
+hand the instantiated struct to the same `cCtorCall` path — rather than
+inventing a parallel route. Needed one new predicate,
+`genHasExplicitTypeArgsAfterId`, because the expression parser dispatches on the
+symbol while the identifier is still current, whereas the Phase 6 call-site hook
+asks the same question after consuming it.
+
+### Counts balance, which is the actual test
+
+```
+scope1   ctor(x) + copy ctor + default ctor   ->  3 ctors, 2 copies, 3 dtors
+scope2   Res( of Res( of string ) )           ->  5 ctors, 5 dtors
+```
+
+`ctors = dtors` throughout, and a temporary never bound to a variable is still
+destroyed. That is the memcheck the plan asked for, written as assertions rather
+than a separate run: a leak shows up as an imbalance. `ctor-dtor.bas` also covers
+a generic with **no user-declared members at all**, where a `string` field alone
+forces an implicit constructor and destructor per instantiation.
+
+### Phase 7 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged |
+| unit-tests, `GEN=gas64` | identical |
+| log-tests | **1704 passed / 4 failed** — 1703 + 1 new test; 1704 + 4 = 1708 logs, none missing a RESULT |
+| `tests/warnings` golden, 5 targets | clean |
+| `tests/errors` golden, 5 targets | clean |
+
+`ctor-dtor.log` confirmed `RESULT=PASSED` individually, not merely absent from
+the failure list.
+
+### Not covered
+
+- `new` / `delete` on an instantiation.
+- Assignment operators other than `let` (Phase 8 owns operators generally).
+- A destructor that itself instantiates another generic.
 
 ---
 

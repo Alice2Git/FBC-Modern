@@ -1184,6 +1184,9 @@ declare function cGenericProcInferredCall _
 '' Is the token after the consumed generic name an explicit '( of ...' list?
 declare function genHasExplicitTypeArgs( ) as integer
 
+'' The same, asked before the name is consumed.
+declare function genHasExplicitTypeArgsAfterId( ) as integer
+
 declare function genInstantiateProc _
 	( _
 		byval gensym as FBSYMBOL ptr, _

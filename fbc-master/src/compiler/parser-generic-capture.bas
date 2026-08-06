@@ -547,6 +547,17 @@ function genHasExplicitTypeArgs( ) as integer
 	function = (ucase( *lexGetLookAheadText( 1 ) ) = "OF")
 end function
 
+'' Same question as genHasExplicitTypeArgs, but asked BEFORE the name has been
+'' consumed -- the expression parser dispatches on the symbol while the
+'' identifier is still current.
+function genHasExplicitTypeArgsAfterId( ) as integer
+	if( lexGetLookAhead( 1 ) <> CHAR_LPRNT ) then
+		return FALSE
+	end if
+
+	function = (ucase( *lexGetLookAheadText( 2 ) ) = "OF")
+end function
+
 function genIsGenericProcDecl( ) as integer
 	if( lexGetClass( ) <> FB_TKCLASS_IDENTIFIER ) then
 		return FALSE

@@ -285,8 +285,37 @@ private function hFindId _
 			case FB_SYMBCLASS_PROC
 				return cFunctionEx( base_parent, sym, options )
 
-			'' generic procedure in an expression -- 'print Max( of long )( 1, 2 )'
 			case FB_SYMBCLASS_GENERIC
+				'' Constructing a temporary of a generic type --
+				'' 'dim b as Box( of long ) = Box( of long )( 42 )'.
+				''
+				'' Mirrors the FB_SYMBCLASS_STRUCT arm below, with the type
+				'' argument list consumed in between: instantiate first, then
+				'' hand the instantiated struct to the ordinary ctor-call path.
+				select case sym->gen.kind
+				case FB_GENERICKIND_TYPE, FB_GENERICKIND_UNION
+					if( genHasExplicitTypeArgsAfterId( ) ) then
+						'' skip ID, as the STRUCT arm does
+						lexSkipToken( LEXCHECK_POST_SUFFIX )
+
+						dim as FBSYMBOL ptr inst = cGenericTypeArgs( sym )
+						if( inst = NULL ) then
+							return NULL
+						end if
+
+						if( symbGetCompCtorHead( inst ) ) then
+							hComplainIfAbstractClass( FB_DATATYPE_STRUCT, inst )
+							return cStrIdxOrMemberDeref( cCtorCall( inst ) )
+						end if
+
+						'' no constructor: not a ctor call, and the type name
+						'' alone is not an expression
+						errReport( FB_ERRMSG_SYNTAXERROR )
+						return NULL
+					end if
+				end select
+
+				'' generic procedure in an expression -- 'print Max( of long )( 1, 2 )'
 				if( sym->gen.kind = FB_GENERICKIND_PROC ) then
 					'' ID, then either an explicit type argument list or an
 					'' inferred call
