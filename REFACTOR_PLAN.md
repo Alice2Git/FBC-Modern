@@ -765,7 +765,32 @@ Two rules the phase established the hard way, and both bind the remaining work:
 - **A type parameter must not case-collide with any parameter or local**, since
   FreeBASIC is case-insensitive. `Map` uses `TK`/`TV` for exactly this reason.
 
-The complexity tests are the point of the phase: 100k appends must not be O(n²).
+### Test standard for this phase — the author's instruction
+
+**Extremely comprehensive tests for each container, showing all possibilities.**
+Not a representative sample. Per container, at minimum:
+
+- every declared member, including the ones that look trivial (`Count`,
+  `IsEmpty`, `Capacity`)
+- empty, one-element and many-element states
+- boundary indices: first, last, one past the end, negative
+- the growth path — enough elements to force several reallocations or rehashes
+- removal in every form, and re-insertion afterwards
+- deep copy and assignment independence, checked in both directions
+- destructor balance (`constructed = destroyed`) with an element type that counts
+- element types that stretch it: a scalar, `string`, a UDT with a
+  constructor/destructor, and a nested container
+- `for each` in both binding forms, plus `exit for` / `continue for`
+- the documented failure modes, as `COMPILE_ONLY_FAIL` tests
+- **complexity asserted, not assumed** — 100k appends must not be O(n²), which
+  is the entire point of RFC-0004
+
+This is not belt-and-braces. A standard library is the one place a gap is
+expensive: once `Array` and `Map` are in the distribution every program depends
+on them, and a member that was never exercised is a bug shipped to everyone.
+The two defects this phase has already produced — an empty-string hash walking
+off the end of a buffer, and a member that silently constrained the whole type —
+were both found by exercising a case a sampled test would have skipped.
 
 Nothing is owed from Phase 11. The items still open are the ones carried since
 Phase 4, listed at the end of the Phase 11 section.
