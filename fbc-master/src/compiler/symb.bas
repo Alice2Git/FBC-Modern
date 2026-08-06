@@ -251,9 +251,9 @@ function symbCanDuplicate _
 		'' no dups allowed
 		exit function
 
-	'' struct, enum or typedef?
+	'' struct, enum, typedef or generic?
 	case FB_SYMBCLASS_STRUCT, FB_SYMBCLASS_ENUM, _
-	     FB_SYMBCLASS_TYPEDEF
+	     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_GENERIC
 
 		'' note: if it's a struct, we don't have to check if it's unique,
 		'' because that will be only set after the symbol is added
@@ -265,7 +265,7 @@ function symbCanDuplicate _
 			case FB_SYMBCLASS_DEFINE, FB_SYMBCLASS_NAMESPACE, _
 			     FB_SYMBCLASS_STRUCT, FB_SYMBCLASS_ENUM, _
 			     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_CLASS, _
-			     FB_SYMBCLASS_FIELD
+			     FB_SYMBCLASS_FIELD, FB_SYMBCLASS_GENERIC
 
 				exit function
 			end select
@@ -302,7 +302,8 @@ function symbCanDuplicate _
 			select case as const head_sym->class
 			'' only dup allowed are labels and UDTs
 			case FB_SYMBCLASS_LABEL, FB_SYMBCLASS_ENUM, _
-			     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_FWDREF
+			     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_FWDREF, _
+			     FB_SYMBCLASS_GENERIC
 
 			'' struct? only it's not unique
 			case FB_SYMBCLASS_STRUCT
@@ -354,7 +355,8 @@ function symbCanDuplicate _
 			select case as const head_sym->class
 			'' allow labels or UDTs as dups
 			case FB_SYMBCLASS_LABEL, FB_SYMBCLASS_ENUM, _
-			     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_FWDREF
+			     FB_SYMBCLASS_TYPEDEF, FB_SYMBCLASS_FWDREF, _
+			     FB_SYMBCLASS_GENERIC
 
 			'' struct? only it's not unique
 			case FB_SYMBCLASS_STRUCT

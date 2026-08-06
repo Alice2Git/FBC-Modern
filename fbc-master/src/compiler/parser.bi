@@ -1097,6 +1097,31 @@ declare function hIntegerTypeFromBitSize _
 #endmacro
 
 ''
+'' generics -- body capture (parser-generic-capture.bas)
+''
+
+declare sub genCaptureEnd( )
+
+declare sub cGenericTypeDecl _
+	( _
+		byval attrib as FB_SYMBATTRIB, _
+		byval id as const zstring ptr, _
+		byval isunion as integer _
+	)
+
+declare function genCaptureTypeBody _
+	( _
+		byval sym as FBSYMBOL ptr, _
+		byval startline as integer _
+	) as integer
+
+declare function genFlattenTokens _
+	( _
+		byval gen as FBS_GENERIC ptr, _
+		byref firstline as integer _
+	) as string
+
+''
 '' inter-module globals
 ''
 extern parser as PARSERCTX

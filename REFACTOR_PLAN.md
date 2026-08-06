@@ -54,7 +54,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | --- | --- |
 | 0 — pre-work: mangler + hUcase | **done** — gate green (see below) |
 | 1 — scaffolding (semantic no-op) | **done** — gate green (see below) |
-| 2 — body capture + structural pre-scan | not started |
+| 2 — body capture + structural pre-scan | **done** — gate green (see below) |
 | 3 — parser save/restore + replay harness | not started |
 | 4 — type instantiation engine | not started |
 | 5 — member protos + out-of-line bodies | not started |
@@ -159,6 +159,85 @@ exactly the new `identifier-of.bas`. Failures unchanged at 11.
   `lexPopCtx` callers for no present gain; every caller already pre-checks its
   own recursion limit. The real protection is the Phase 4 instantiation-depth
   counter.
+
+---
+
+## Phase 2 — what landed
+
+`type|union Foo( of T, U )` parses. The body is captured verbatim into an
+`FB_GENTOK` chain, block structure is validated at declaration time, and an
+`FB_SYMBCLASS_GENERIC` symbol is registered. Referring to `Foo( of long )`
+still errors — instantiation is Phase 4.
+
+New: `parser-generic-capture.bas`
+  `genCaptureTypeBody` — capture + structural pre-scan
+  `hTypeParamList`     — `( OF ID (, ID)* )`, `of` matched by text
+  `cGenericTypeDecl`   — creates the symbol, drives both
+  `genFlattenTokens`   — replay-side; written but **not yet exercised**
+  `genCaptureEnd`      — pool teardown, wired into fb.bas next to symbEnd
+
+Hooked from `cTypeDecl` (`parser-decl-struct.bas`) after the name is read: a
+`(` there is a syntax error today, and `of` is confirmed by one token of
+look-ahead text.
+
+Capture starts *after* the `(of ...)` clause and stops before the terminating
+`END TYPE|UNION`, so an `EXTENDS` or `ALIAS` clause on the header is captured
+too and simply re-parsed at instantiation.
+
+### Bugs found by the tests, not by review
+
+1. **Inner block ends were double-counted.** On a nested `end union` only the
+   `end` was consumed, so the following `union` was re-examined on the next
+   pass and counted as opening a new block. Every generic containing a nested
+   union or enum failed. Both tokens are now consumed and recorded together.
+
+2. **`symbCanDuplicate` did not know `FB_SYMBCLASS_GENERIC`.** Any class it
+   does not recognise falls to `case else` → reject, so declaring a generic `A`
+   made a later `dim a` fail with "Duplicated definition" — although `type A`
+   plus `dim a` is legal today. A generic occupies a type name, so it now
+   behaves exactly like `TYPEDEF`/`ENUM` in all four arms of that function.
+   Easy to miss: it only appears when a generic's name collides
+   case-insensitively with a later variable.
+
+3. **`env.inf.name` is a reused fixed buffer, not a stable pointer.** Storing
+   its address for the instantiation chain would have dangled as includes pop.
+   Now stores `env.inf.incfile`, the interned copy `ast-node-proc.bas` already
+   uses for debug info.
+
+Two failures that looked like regressions but were **my test bugs**, both
+confirmed against the Phase 1 compiler before drawing a conclusion: `type Base`
+fails because `base` is a reserved word, and `type A` + `dim a` collides
+because FB is case-insensitive. Worth the check — bug 2 above was a genuine
+regression sitting right beside them.
+
+### Phase 2 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — **identical to Phase 1** |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1694 passed, 0 failed** = 1688 + the 6 new generics tests |
+| `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
+
+Unit-test figures are expected to be unchanged: every Phase 2 test is a
+log-test, so none of them adds an assertion.
+
+Tests added — `tests/generics/` (and `generics` added to `dirlist.mk`, which
+needs a `make clean` to force the rescan):
+
+- `capture-boundary.bas` — ten shapes, each followed by ordinary code that must
+  still work. That is the assertion: the generic is never used, so the only
+  thing under test is whether capture consumed exactly the body. Covers
+  two type params, inner anonymous union, nested named enum, fields literally
+  named `end` and `type`, `extends` on the header, `end type` inside a comment,
+  `union` form, a `declare` prototype, and a generic inside a namespace.
+- 5 x `COMPILE_ONLY_FAIL` — unbalanced body, unbalanced inner block, duplicate
+  type parameter, empty `(of )`, non-identifier type parameter.
+
+Deliberately **not** tested: that `Foo( of long )` errors. That is transient
+Phase-2-only behaviour and would have to be deleted in Phase 4; enshrining it
+as a test would be a trap for the next phase.
 
 ---
 

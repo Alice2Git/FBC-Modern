@@ -1018,6 +1018,20 @@ sub cTypeDecl( byval attrib as FB_SYMBATTRIB )
 		id = *symbUniqueId( )
 	end if
 
+	'' '(' OF ...?  -- a generic type declaration
+	''
+	'' A '(' directly after the name is a syntax error today, which is what
+	'' makes this position unambiguous.  'of' is deliberately not a keyword
+	'' (a QUIRKWD could not be used as a variable name, which would break
+	'' 'dim of as long' -- see tests/dim/identifier-of.bas), so it is matched
+	'' by token text, one token of look-ahead.
+	if( lexGetToken( ) = CHAR_LPRNT ) then
+		if( ucase( *lexGetLookAheadText( 1 ) ) = "OF" ) then
+			cGenericTypeDecl( attrib, @id, isunion )
+			exit sub
+		end if
+	end if
+
 	'' AS?
 	if (lexGetToken() = FB_TK_AS) then
 		if( isunion ) then

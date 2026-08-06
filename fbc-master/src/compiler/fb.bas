@@ -536,6 +536,7 @@ sub fbEnd()
 	irEnd( )
 	astEnd( )
 	errEnd( )
+	genCaptureEnd( )
 	symbEnd( )
 
 	erase infileTb

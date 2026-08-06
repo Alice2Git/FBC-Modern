@@ -20,6 +20,7 @@ expressions \
 fbc-int \
 file \
 functions \
+generics \
 gfx \
 interactive \
 namespace \
