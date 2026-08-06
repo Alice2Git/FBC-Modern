@@ -253,11 +253,13 @@ type FB_GENINST
 	gensym          as FBSYMBOL ptr
 	key             as zstring ptr
 	inst            as FBSYMBOL ptr
+	inprogress      as integer                  '' body still being replayed
 end type
 
 type GENINSTCTX
 	inited          as integer
 	instcount       as integer
+	depth           as integer                  '' nested instantiation depth
 	list            as TLIST                    '' of FB_GENINST
 end type
 
@@ -303,7 +305,32 @@ private sub hCacheAdd _
 	n->key = ZstrAllocate( len( key ) )
 	*n->key = key
 	n->inst = inst
+	n->inprogress = FALSE
 end sub
+
+'' Find the cache entry itself, so an in-progress instantiation can be completed
+private function hCacheFind _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byref key as string _
+	) as FB_GENINST ptr
+
+	if( genctx2.inited = FALSE ) then
+		return NULL
+	end if
+
+	dim as FB_GENINST ptr n = listGetHead( @genctx2.list )
+	while( n )
+		if( n->gensym = gensym ) then
+			if( *n->key = key ) then
+				return n
+			end if
+		end if
+		n = listGetNext( n )
+	wend
+
+	function = NULL
+end function
 
 sub genInstCacheEnd( )
 	if( genctx2.inited ) then
@@ -317,6 +344,15 @@ sub genInstCacheEnd( )
 		genctx2.inited = FALSE
 	end if
 end sub
+
+'' Internal name of every instantiated struct, inside its own synthetic
+'' namespace.  Never user-visible: mangling goes through the ALIAS.
+'' Upper-case deliberately: symbAddFwdRef() passes FB_SYMBOPT_PRESERVECASE and
+'' documents that it expects an already-up-cased id, while the struct created
+'' by the replay goes through the normal up-casing path.  symbCheckFwdRef()
+'' resolves by walking the same-name hash chain, so the two must match exactly
+'' or the forward reference is never patched and the type stays incomplete.
+#define GENINST_NAME "__FBGENINST"
 
 '' Canonical key for one argument list.
 ''
@@ -366,17 +402,26 @@ function genInstantiateType _
 		byval argcount as integer _
 	) as FBSYMBOL ptr
 
-	dim as FBSYMBOL ptr nsp = any, inst = any, prm = any, parent = any
+	dim as FBSYMBOL ptr nsp = any, inst = any, prm = any, parent = any, fwd = any
 	dim as FBSYMBOLTB ptr symtb = any
 	dim as FBHASHTB ptr hashtb = any
 	dim as FBSYMCHAIN ptr chain_ = any
 	dim as FB_SYMBATTRIB attrib = FB_SYMBATTRIB_NONE
 	dim as FB_PROCATTRIB pattrib = FB_PROCATTRIB_NONE
 	dim as FB_PARSERSTATE st
-	dim as string id, aliasid, text, nspid
+	dim as string id, text, nspid
 	dim as integer firstline = any
 
 	function = NULL
+
+	'' Runaway guard: a generic whose body instantiates itself with a strictly
+	'' larger argument never converges.  Vector( of Vector( of T ) ) is fine and
+	'' terminates; this catches the case that does not.
+	if( genctx2.depth >= env.clopt.maxinstdepth ) then
+		errReportEx( FB_ERRMSG_INSTDEPTHTOODEEP, symbGetName( gensym ) )
+		errHideFurtherErrors( )
+		return NULL
+	end if
 
 	if( argcount <> gensym->gen.paramcount ) then
 		errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, symbGetName( gensym ) )
@@ -397,15 +442,6 @@ function genInstantiateType _
 	if( inst ) then
 		return inst
 	end if
-
-	'' The external name.  '<' and '>' are fine in the internal id, which is
-	'' never emitted, but not in the alias, which reaches C identifiers and
-	'' asm labels -- so the alias uses only what symbMangleType produces.
-	aliasid = *symbGetName( gensym ) + "$"
-	for i as integer = 0 to argcount-1
-		symbMangleType( aliasid, argdtype(i), argsubtype(i), FB_MANGLEOPT_KEEPTOPCONST )
-	next
-	symbMangleResetAbbrev( )
 
 	'' The namespace name must be DETERMINISTIC, not merely unique.
 	''
@@ -437,6 +473,20 @@ function genInstantiateType _
 
 	symbNestBegin( nsp, FALSE )
 
+	'' Publish a forward reference under the instantiated name BEFORE the body is
+	'' replayed, and cache it.  A generic whose body mentions itself --
+	''     type Node( of T ) : as Node( of T ) ptr nxt : end type
+	'' -- would otherwise start a second instantiation with the same key while the
+	'' first is still parsing.  FB's own FWDREF machinery then takes over: the
+	'' reference is legal behind a pointer, and symbStructEnd's symbCheckFwdRef
+	'' patches every user once the real struct is complete.
+	fwd = symbAddFwdRef( @GENINST_NAME )
+	hCacheAdd( gensym, id, fwd )
+	dim as FB_GENINST ptr entry = hCacheFind( gensym, id )
+	if( entry ) then
+		entry->inprogress = TRUE
+	end if
+
 	'' bind each type parameter
 	prm = gensym->gen.paramhead
 	for i as integer = 0 to argcount-1
@@ -446,32 +496,58 @@ function genInstantiateType _
 	next
 
 	'' replay 'type <genericname> <body> end type' inside that namespace
-	text = "type " + *symbGetName( gensym ) + LFCHAR + _
+	'' The instantiated struct is deliberately NOT given the generic's name.
+	'' symbStructBegin publishes the name before the body is parsed, so naming it
+	'' 'Node' would make a self-reference inside the body --
+	''     type Node( of T ) : as Node( of T ) ptr nxt : end type
+	'' -- resolve to the half-built struct rather than to the generic, and the
+	'' '( of T )' would never be consumed.  Under an internal name, 'Node' still
+	'' resolves outward to the generic, which re-enters here and gets the
+	'' forward reference from the in-progress cache entry.
+	''
+	'' The external name is unaffected: mangling uses the ALIAS, set below.
+	text = "type " + GENINST_NAME + LFCHAR + _
 	       genFlattenTokens( @gensym->gen, firstline ) + LFCHAR + "end type"
 
 	if( genReplayBegin( st, text, gensym->gen.srcline, gensym->gen.srcfile ) ) then
+		genctx2.depth += 1
 		cTypeDecl( FB_SYMBATTRIB_NONE )
+		genctx2.depth -= 1
 		genReplayEnd( st )
 	end if
 
 	symbNestEnd( FALSE )
 
 	'' find what the replay built
-	chain_ = symbLookupAt( nsp, symbGetName( gensym ), TRUE, FALSE )
+	chain_ = symbLookupAt( nsp, @GENINST_NAME, FALSE, FALSE )
 	if( chain_ = NULL ) then
 		return NULL
 	end if
 	inst = chain_->sym
 
+	'' hMangleUdtId() encodes the type arguments as an Itanium I...E template
+	'' argument list once this is set, reading them back from the TYPEDEFs in
+	'' the synthetic namespace.
 	inst->attrib or= FB_SYMBATTRIB_GENERICINST
+
+	'' carry the generic's source-case name into the mangled name, so
+	'' Box( of integer ) comes out as 3BoxIiE and not as the internal name
 	if( inst->id.alias = NULL ) then
-		inst->id.alias = ZstrAllocate( len( aliasid ) )
-		*inst->id.alias = aliasid
+		dim as zstring ptr src = gensym->id.alias
+		if( src = NULL ) then
+			src = gensym->id.name
+		end if
+		inst->id.alias = ZstrAllocate( len( *src ) )
+		*inst->id.alias = *src
 	end if
 
-	'' remember it for the next lookup of the same argument list
+	'' the forward reference has served its purpose; point the cache at the real
+	'' struct so later uses get a complete type
 	nsp->subtype = inst
-	hCacheAdd( gensym, id, inst )
+	if( entry ) then
+		entry->inst = inst
+		entry->inprogress = FALSE
+	end if
 
 	function = inst
 end function

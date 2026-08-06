@@ -56,7 +56,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 1 — scaffolding (semantic no-op) | **done** — gate green (see below) |
 | 2 — body capture + structural pre-scan | **done** — gate green (see below) |
 | 3 — parser save/restore + replay + minimal instantiation | **done** — gate green |
-| 4 — type instantiation engine | not started |
+| 4 — type instantiation engine | **part 1 done** — mangling, recursion, depth limit |
 | 5 — member protos + out-of-line bodies | not started |
 | 6 — generic procedures + inference | not started |
 | 7 — ctors/dtors/copy | not started |
@@ -159,6 +159,92 @@ exactly the new `identifier-of.bas`. Failures unchanged at 11.
   `lexPopCtx` callers for no present gain; every caller already pre-checks its
   own recursion limit. The real protection is the Phase 4 instantiation-depth
   counter.
+
+---
+
+## Phase 4 (part 1) — what landed
+
+Real template mangling, and generics that may refer to themselves.
+
+### Itanium `I…E` type-argument mangling
+
+Replaces the Phase 3 alias-suffix hack. `hMangleUdtId` now encodes an
+instantiation's type arguments exactly as it already did for array descriptor
+types, reading them back from the TYPEDEFs in the synthetic namespace — those
+bindings *are* the arguments, in order. They are re-mangled in place rather than
+stored as text, because Itanium abbreviation indices depend on the symbol being
+mangled.
+
+| tag | demangles to |
+| --- | --- |
+| `$3BoxIiE` | `Box<int>` |
+| `$3BoxIdE` | `Box<double>` |
+| `$3BoxI3BoxIiEE` | `Box<Box<int> >` |
+
+Byte-identical across declaration orders, and source-case (`Box`, not `BOX`),
+because the generic's source-case name is carried as the instantiation's ALIAS.
+
+Two sub-bugs fixed on the way:
+
+- `symbMangleType`'s STRUCT branch builds its **own** namespace chain, so it
+  bypassed the `hMangleNamespace` skip and the synthetic namespace still leaked
+  into nested names. It now skips `GENERICSCOPE` too.
+- `hIsNested` appended a closing `E` with no matching `N` — `hMangleNamespace`
+  emits nothing for a skipped namespace — producing malformed `3BoxIiEE`. It now
+  looks through generic scopes.
+
+### Self-referential generics
+
+`type Node( of T ) : as Node( of T ) ptr nxt : end type` works, and the pointer
+is usable, not merely declarable.
+
+Two things had to line up, and the first was not what the spec anticipated:
+
+1. **The instantiated struct must not carry the generic's name.**
+   `symbStructBegin` publishes the name *before* the body is parsed, so naming it
+   `Node` made the self-reference bind to the half-built struct and the
+   `( of T )` was never consumed — `error 14: Expected identifier, found '('`.
+   Instantiations now use an internal name (`__FBGENINST`) with the generic's
+   name carried in the ALIAS, so `Node` resolves outward to the generic and
+   re-enters the instantiation path.
+
+2. **The forward-reference name must be up-cased.** `symbAddFwdRef` passes
+   `FB_SYMBOPT_PRESERVECASE` and documents that it expects an already-up-cased
+   id, while the struct created by the replay goes through normal up-casing.
+   `symbCheckFwdRef` resolves by walking the same-name hash chain, so a
+   lower-case forward reference never matched and the type stayed permanently
+   incomplete — declarable, but `a.nxt->v` failed with `Incomplete type`.
+
+### Depth limit
+
+`-maxinstdepth` (default 64) now guards body replay, reporting
+`FB_ERRMSG_INSTDEPTHTOODEEP`.
+
+Nested type *arguments* deliberately do not accumulate depth — they are resolved
+before the outer body is replayed — which matches RFC-0001: `Vector(of Vector(of
+T))` is fine and terminates. Depth accrues only when one generic's *body* drives
+another, so `fail-instdepth.bas` chains `A3 → B3 → C3` through their bodies.
+
+Note the runaway case `Bad( of Bad( of T ) )` is caught by the forward-reference
+mechanism before the counter is reached, so the depth limit is a backstop rather
+than the primary guard. It was verified to fire rather than assumed.
+
+### Phase 4 (part 1) gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1698 passed, 0 failed** = 1696 + the 2 new tests |
+| `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
+| mangled names | `c++filt`-demanglable; identical across declaration orders |
+
+### Still open in Phase 4
+
+- instantiation-chain error notes (`in instantiation of X / required from Y`)
+- `sizeof( Box( of long ) )` — needs the `cTypeOrExpression` path
+- readable debug names, and scope placement per deviation D1
 
 ---
 

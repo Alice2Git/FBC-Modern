@@ -780,6 +780,12 @@ function cSymbolType _
 								'' error recovery: fake a type
 								dtype = FB_DATATYPE_INTEGER
 								lgt = typeGetSize( FB_DATATYPE_INTEGER )
+							elseif( symbIsFwdRef( subtype ) ) then
+								'' still being instantiated (a generic whose body
+								'' mentions itself); legal behind a pointer, and
+								'' symbCheckFwdRef patches it when the body completes
+								dtype = FB_DATATYPE_FWDREF
+								lgt = 0
 							else
 								dtype = FB_DATATYPE_STRUCT
 								lgt = symbGetSizeOf( subtype )

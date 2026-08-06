@@ -45,7 +45,20 @@ declare sub hMangleNamespace _
 	)
 
 '' inside a namespace or class?
-#define hIsNested(s) (symbGetNamespace( s ) <> @symbGetGlobalNamespc( ))
+''
+'' The synthetic namespace wrapping a generic instantiation does not count:
+'' hMangleNamespace skips it, so treating it as nesting would append a closing
+'' 'E' with no matching 'N'.
+private function hIsNested( byval s as FBSYMBOL ptr ) as integer
+	dim as FBSYMBOL ptr ns = symbGetNamespace( s )
+	while( ns <> NULL )
+		if( symbIsGenericScope( ns ) = FALSE ) then
+			exit while
+		end if
+		ns = symbGetNamespace( ns )
+	wend
+	function = (ns <> @symbGetGlobalNamespc( ))
+end function
 
 '' globals
 	dim shared as FB_MANGLECTX ctx
@@ -213,6 +226,37 @@ private sub hMangleUdtId( byref mangled as string, byval sym as FBSYMBOL ptr )
 		symbMangleType( mangled, arraydtype, arraysubtype, FB_MANGLEOPT_KEEPTOPCONST )
 
 		mangled += "E" '' end of template argument list
+	end if
+
+	''
+	'' Generic instantiation: same encoding, for the same reason.  Vector(of
+	'' integer) and Vector(of double) must get distinct external names, and a
+	'' C++ demangler should be able to read them back.
+	''
+	'' The arguments are recovered from the TYPEDEFs in the instantiation's
+	'' synthetic namespace -- those bindings ARE the type arguments, in
+	'' declaration order.  They are re-mangled here rather than stored as text
+	'' because the Itanium abbreviation indices depend on the symbol being
+	'' mangled, so a pre-rendered string would be wrong in most contexts.
+	''
+	if( symbIsStruct( sym ) and symbIsGenericInst( sym ) ) then
+		dim as FBSYMBOL ptr nsp = symbGetNamespace( sym )
+		if( nsp <> NULL ) then
+			if( symbIsGenericScope( nsp ) ) then
+				mangled += "I" '' begin of template argument list
+
+				dim as FBSYMBOL ptr t = symbGetCompSymbTb( nsp ).head
+				while( t <> NULL )
+					if( symbIsTypedef( t ) ) then
+						symbMangleType( mangled, symbGetFullType( t ), _
+						                symbGetSubtype( t ), FB_MANGLEOPT_KEEPTOPCONST )
+					end if
+					t = t->next
+				wend
+
+				mangled += "E" '' end of template argument list
+			end if
+		end if
 	end if
 end sub
 
@@ -592,6 +636,19 @@ sub symbMangleType _
 	select case( typeGetDtOnly( dtype ) )
 	case FB_DATATYPE_STRUCT, FB_DATATYPE_ENUM
 		ns = symbGetNamespace( subtype )
+
+		'' Skip the synthetic namespace holding a generic instantiation's type
+		'' parameters.  It is an implementation detail, its id is not a legal C
+		'' identifier, and letting it through would make the name depend on
+		'' instantiation order.  The type arguments reach the mangled name
+		'' through hMangleUdtId's I...E list instead.
+		while( ns <> NULL )
+			if( symbIsGenericScope( ns ) = FALSE ) then
+				exit while
+			end if
+			ns = symbGetNamespace( ns )
+		wend
+
 		if( ns = @symbGetGlobalNamespc( ) ) then
 			hMangleUdtId( mangled, subtype )
 		else

@@ -331,8 +331,10 @@ sub cGenericTypeDecl _
 	dim as FBSYMBOL ptr sym = any
 	dim as integer startline = lexLineNum( )
 
+	'' the source-case name is kept as the alias, so instantiations mangle the
+	'' way a hand-written type of the same name would
 	sym = symbNewSymbol( FB_SYMBOPT_DOHASH, NULL, NULL, NULL, _
-	                     FB_SYMBCLASS_GENERIC, id, NULL, _
+	                     FB_SYMBCLASS_GENERIC, id, id, _
 	                     FB_DATATYPE_VOID, NULL, _
 	                     attrib, FB_PROCATTRIB_NONE )
 
