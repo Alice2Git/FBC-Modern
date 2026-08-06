@@ -33,6 +33,17 @@ declare function probe_addrs( ) as integer
 	assert_( bn.take( inner ).v = 8 )
 	assert_( bn.v.v = 8 )
 
+	'' the generic global operator, on two argument lists
+	dim bl2 as Box( of long )
+	bl2.v = 5
+	dim as Box( of long ) sl = bl + bl2
+	assert_( sl.v = 8 )
+
+	dim bd2 as Box( of double )
+	bd.v = 0.25 : bd2.v = 0.5
+	dim as Box( of double ) sd = bd + bd2
+	assert_( sd.v = 0.75 )
+
 	'' resolving the ALIAS names is the actual test; this just makes sure the
 	'' other module is linked in and reached
-	assert_( probe_addrs( ) = 3 )
+	assert_( probe_addrs( ) = 5 )

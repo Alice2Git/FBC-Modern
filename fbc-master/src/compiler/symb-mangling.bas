@@ -864,8 +864,24 @@ private sub hMangleNamespace _
 		'' (just doing hAbbrevFind()/hAbbrevAdd() is not enough,
 		'' because the parent namespaces may need to be abbreviated too,
 		'' which symbMangleType() will do recursively)
-		dim as string unused
-		symbMangleType( unused, symbGetFullType( ns ), ns )
+		''
+		'' A generic scope is skipped, because the loop below emits nothing for
+		'' it: an abbreviation candidate that never appears in the output leaves
+		'' every later back-reference one index too high.  Measured against
+		'' x86_64-w64-mingw32-g++ on the equivalent C++ template -- for a global
+		'' operator taking two Box(of double), fbc wrote _ZplR3BoxIdES2_ where
+		'' g++ writes _ZplR3BoxIdES1_, and c++filt could not read fbc's at all.
+		'' The nearest non-generic ancestor is warmed up instead, since that is
+		'' the one that does get emitted.
+		dim as FBSYMBOL ptr h = ns
+		while( (h <> NULL) andalso symbIsGenericScope( h ) )
+			h = symbGetNamespace( h )
+		wend
+
+		if( (h <> NULL) andalso (h <> @symbGetGlobalNamespc( )) ) then
+			dim as string unused
+			symbMangleType( unused, symbGetFullType( h ), h )
+		end if
 	end if
 
 	'' create a stack

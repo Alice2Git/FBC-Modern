@@ -10,6 +10,7 @@
 #include once "ir.bi"
 #include once "rtl.bi"
 #include once "ast.bi"
+#include once "parser.bi"
 
 '':::::
 '' Make both sides of a ustring binop be ustrings.
@@ -646,6 +647,14 @@ end function
 	( _
 		op, l, r _
 	)
+
+	'' A generic global operator has nothing in globOpOvlTb until it is
+	'' instantiated, and it cannot be instantiated until the operand types are
+	'' known -- which is here.  Silent: an operand matching nothing simply means
+	'' this operator was never generic, and the ordinary diagnostics below (or
+	'' the built-in operator) are the right outcome.
+	genTryInstantiateGlobalOp( op, astGetFullType( l ), astGetSubtype( l ), _
+	                               astGetFullType( r ), astGetSubtype( r ) )
 
 	if( symb.globOpOvlTb(op).head <> NULL ) then
 		dim as FBSYMBOL ptr proc = any

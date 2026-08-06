@@ -1918,6 +1918,17 @@ sub cProcStmtBegin( byval attrib as FB_SYMBATTRIB, byval pattrib as FB_PROCATTRI
 		end if
 	end if
 
+	'' 'operator +( of T )( ... )' -- a generic global operator.  Checked AFTER
+	'' the member-body test above: 'operator Box( of T ).+=' matches the same
+	'' three-token shape, and that one is a member body, not a global operator.
+	if( tkn = FB_TK_OPERATOR ) then
+		if( genIsGenericOpDecl( ) ) then
+			if( cGenericOpDecl( tkn ) ) then
+				exit sub
+			end if
+		end if
+	end if
+
 	'' 'sub Swap2( of T )( ... )' -- a generic procedure.  Nothing is declared
 	'' yet: the header is replayed when a call site first needs it, and the body
 	'' at the next statement boundary.

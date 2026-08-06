@@ -397,6 +397,22 @@ end type
 
 dim shared as GENPROCCTX genprocctx
 
+'' Every generic global operator declared so far.  A plain list, walked once per
+'' candidate BOP -- there are single digits of these in a translation unit, and
+'' the walk only happens for an operator that has no ordinary overload yet.
+type GENOPCTX
+	inited          as integer
+	head            as FB_GENOP ptr
+	tail            as FB_GENOP ptr
+	list            as TLIST                    '' of FB_GENOP
+end type
+
+dim shared as GENOPCTX genopctx
+
+function genGetGenericOps( ) as FB_GENOP ptr
+	function = genopctx.head
+end function
+
 sub genProcBodyEnd( )
 	if( genprocctx.inited ) then
 		dim as FB_GENPROC ptr n = listGetHead( @genprocctx.list )
@@ -409,6 +425,13 @@ sub genProcBodyEnd( )
 		wend
 		listEnd( @genprocctx.list )
 		genprocctx.inited = FALSE
+	end if
+
+	if( genopctx.inited ) then
+		listEnd( @genopctx.list )
+		genopctx.inited = FALSE
+		genopctx.head = NULL
+		genopctx.tail = NULL
 	end if
 end sub
 
@@ -447,6 +470,7 @@ private function hAddProcBody _
 	n->hdrtail = NULL
 	n->tokhead = NULL
 	n->toktail = NULL
+	n->op      = INVALID
 	n->srcline = lexLineNum( )
 	n->nxt     = NULL
 
@@ -816,6 +840,146 @@ function cGenericProcDeclNew( byval tk as integer ) as integer
 	if( hCaptureProcBody( d, sym, startline ) = FALSE ) then
 		return TRUE
 	end if
+
+	function = TRUE
+end function
+
+'' ----------------------------------------------------------------------------
+'' Generic global operators
+'' ----------------------------------------------------------------------------
+
+'' 'operator <op>( of T )( ... )'.
+''
+'' Same three-token test as genIsGenericProcDecl, and for the same reason: 'of'
+'' is not a keyword, so 'operator +( of as Box, b as Box )' declares a parameter
+'' called 'of' and has to keep compiling.  A type parameter list always has an
+'' identifier after 'of'.
+''
+'' One token is enough for the operator's own name because every operator that
+'' can be global is spelled with exactly one token.  The multi-token forms --
+'' '[]', 'new[]', 'delete[]' -- are all self ops, and a self op is always a
+'' method, which this path rejects below.
+function genIsGenericOpDecl( ) as integer
+	'' 'operator Box( of T ).+=' is a member body of a generic type and matches
+	'' the same shape; it is handled before this is reached, and excluded here
+	'' too so the two tests cannot both claim the statement.
+	if( lexGetClass( ) = FB_TKCLASS_IDENTIFIER ) then
+		return FALSE
+	end if
+
+	if( lexGetLookAhead( 1 ) <> CHAR_LPRNT ) then
+		return FALSE
+	end if
+
+	if( ucase( *lexGetLookAheadText( 2 ) ) <> "OF" ) then
+		return FALSE
+	end if
+
+	function = (lexGetLookAheadClass( 3 ) = FB_TKCLASS_IDENTIFIER)
+end function
+
+'' OPERATOR <op> '(' OF ... ')' ParamList ... END OPERATOR
+''
+'' Called from cProcStmtBegin() once OPERATOR has been consumed.  Returns TRUE if
+'' the statement was consumed here.
+''
+'' Modelled exactly like cGenericProcDeclNew -- a generic owning one body, header
+'' replayed eagerly and body deferred -- with one difference: the operator token
+'' itself is prepended to the captured header, because there is no name to paste
+'' in front at replay time.
+function cGenericOpDecl( byval tk as integer ) as integer
+
+	dim as FBSYMBOL ptr sym = any
+	dim as integer startline = lexLineNum( )
+	dim as string optext = *lexGetText( )
+	dim as integer op = any
+
+	op = cOperator( TRUE )
+
+	select case op
+	case INVALID, _
+	     AST_OP_ANDALSO, AST_OP_ANDALSO_SELF, _
+	     AST_OP_ORELSE, AST_OP_ORELSE_SELF
+		errReport( FB_ERRMSG_EXPECTEDOPERATOR )
+		hSkipCompound( tk )
+		return TRUE
+	end select
+
+	'' A self op is always a method, and there is no parent type here to be a
+	'' method of.  'operator Box( of T ).+=' is the way to write that, and it
+	'' already works -- it is an ordinary member body of a generic type.
+	if( astGetOpIsSelf( op ) ) then
+		errReport( FB_ERRMSG_OPMUSTBEAMETHOD )
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	'' The internal name is never looked up -- the symbol is not hashed -- but
+	'' hArgKey() builds the instantiation cache key and the synthetic namespace
+	'' name out of it, so it has to be a legal identifier.  The readable form
+	'' goes in the ALIAS, which is what every diagnostic prints.
+	dim as string internalid = "__FBGENOP" + str( op )
+	dim as string readable = "operator " + optext
+
+	sym = symbNewSymbol( FB_SYMBOPT_NONE, NULL, NULL, NULL, _
+	                     FB_SYMBCLASS_GENERIC, strptr( internalid ), strptr( readable ), _
+	                     FB_DATATYPE_VOID, NULL, _
+	                     FB_SYMBATTRIB_NONE, FB_PROCATTRIB_NONE )
+
+	if( sym = NULL ) then
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	sym->gen.kind = FB_GENERICKIND_PROC
+	sym->gen.tokhead = NULL
+	sym->gen.toktail = NULL
+	sym->gen.instances = NULL
+	sym->gen.srcline = startline
+	sym->gen.srcfile = ZstrAllocate( len( env.inf.name ) )
+	*sym->gen.srcfile = env.inf.name
+
+	if( hTypeParamList( sym ) = FALSE ) then
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	dim as FB_GENPROC ptr d = hAddProcBody( sym, tk )
+	d->srcline = startline
+	d->op = op
+
+	'' the operator token leads the header, standing in for the name
+	hAddTokTo( d->hdrhead, d->hdrtail, strptr( optext ), startline )
+
+	hCaptureProcHeader( d )
+
+	select case lexGetToken( GENTOK_FLAGS )
+	case FB_TK_EOL, FB_TK_STMTSEP
+		lexSkipToken( GENTOK_FLAGS )
+	end select
+
+	if( hCaptureProcBody( d, sym, startline ) = FALSE ) then
+		return TRUE
+	end if
+
+	if( genopctx.inited = FALSE ) then
+		listInit( @genopctx.list, 8, len( FB_GENOP ), LIST_FLAGS_NOCLEAR )
+		genopctx.inited = TRUE
+		genopctx.head = NULL
+		genopctx.tail = NULL
+	end if
+
+	dim as FB_GENOP ptr g = listNewNode( @genopctx.list )
+	g->gensym = sym
+	g->op = op
+	g->nxt = NULL
+
+	if( genopctx.tail ) then
+		genopctx.tail->nxt = g
+	else
+		genopctx.head = g
+	end if
+	genopctx.tail = g
 
 	function = TRUE
 end function

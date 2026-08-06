@@ -1153,6 +1153,13 @@ type FB_GENPROC
 	hdrhead         as FB_GENTOK ptr
 	hdrtail         as FB_GENTOK ptr
 
+	'' AST_OP of a generic GLOBAL operator, or INVALID for everything else.
+	'' A global operator has no name to replay, so its captured header chain
+	'' starts with the operator's own token instead and the replay pastes only
+	'' the kind keyword in front -- 'operator' + '+ ( ... ) as ...' -- where a
+	'' named generic procedure gets 'function' + '__FBGENPROC' + '( ... )'.
+	op              as integer
+
 	tokhead         as FB_GENTOK ptr            '' body, through 'end sub'
 	toktail         as FB_GENTOK ptr
 	srcline         as integer
@@ -1165,6 +1172,35 @@ declare function genLookupGeneric( ) as FBSYMBOL ptr
 declare function genIsGenericMemberProc( ) as integer
 declare function genIsGenericProcDecl( ) as integer
 declare function cGenericProcDeclNew( byval tk as integer ) as integer
+
+'' One generic GLOBAL operator declaration.  Kept in a list of its own rather
+'' than in the symbol hash: a global operator has no name to be looked up by,
+'' and resolution starts from the AST_OP and the operand types.
+type FB_GENOP
+	gensym          as FBSYMBOL ptr
+	op              as integer
+	nxt             as FB_GENOP ptr
+end type
+
+'' Is the parser looking at 'operator <op>( of T )( ... )'?  The kind keyword has
+'' already been consumed and the current token is the operator itself.
+declare function genIsGenericOpDecl( ) as integer
+declare function cGenericOpDecl( byval tk as integer ) as integer
+declare function genGetGenericOps( ) as FB_GENOP ptr
+
+'' Instantiate whatever generic global operators can be inferred from these
+'' operand types, so ordinary overload resolution finds them a moment later.
+'' Silent: an operand that matches nothing is not an error here, it simply means
+'' this operator was never generic.  Pass rdtype = FB_DATATYPE_INVALID for a
+'' unary operator.
+declare sub genTryInstantiateGlobalOp _
+	( _
+		byval op as integer, _
+		byval ldtype as integer, _
+		byval lsubtype as FBSYMBOL ptr, _
+		byval rdtype as integer, _
+		byval rsubtype as FBSYMBOL ptr _
+	)
 
 '' Resolve 'Name( of long )' at a call site to the instantiated procedure.
 '' On entry the identifier has already been consumed and the current token is

@@ -413,6 +413,37 @@ private function hCacheLookup _
 	while( n )
 		if( n->gensym = gensym ) then
 			if( *n->key = key ) then
+				'' While the body is still being replayed the entry holds a
+				'' forward reference, so that a self-referential generic --
+				''     type Node( of T ) : as Node( of T ) ptr nxt : end type
+				'' -- terminates.  But once symbStructBegin has published the
+				'' real struct, a self-reference should get THAT, not the
+				'' forward reference.
+				''
+				'' They are not interchangeable.  Some parameter checks compare
+				'' symbol identity rather than the resolved type, and reject the
+				'' forward reference even though it prints the same:
+				''
+				''     declare operator next( byref e as Ctr( of T ) ) as integer
+				''     error 142: Invalid parameter type, it must be the same as
+				''                the parent TYPE/CLASS
+				''
+				'' Plain FreeBASIC has no such problem, because inside 'type Ctr'
+				'' the name Ctr is already bound to the real symbol.
+				if( n->inprogress andalso (n->nsp <> NULL) ) then
+					dim as FBSYMCHAIN ptr c = symbLookupAt( n->nsp, @GENINST_NAME, FALSE, FALSE )
+					while( c )
+						dim as FBSYMBOL ptr s = c->sym
+						while( s )
+							if( symbIsStruct( s ) ) then
+								return s
+							end if
+							s = s->hash.next
+						wend
+						c = symbChainGetNext( c )
+					wend
+				end if
+
 				return n->inst
 			end if
 		end if
@@ -614,7 +645,14 @@ private sub hReplayProcBody _
 	'' Either way the captured body already ends with its own terminator, unlike
 	'' a type body, so nothing is appended.
 	if( body->hdrhead ) then
-		text = hProcKeyword( body->kindtk ) + " " + GENPROC_NAME + _
+		'' A global operator has no name: its captured header already starts
+		'' with the operator token, which is what stands in for one.
+		dim as string nm = GENPROC_NAME
+		if( body->op <> INVALID ) then
+			nm = ""
+		end if
+
+		text = hProcKeyword( body->kindtk ) + " " + nm + _
 		       genFlattenTokens( body->hdrhead, firstline ) + LFCHAR + _
 		       genFlattenTokens( body->tokhead, firstline )
 	else
@@ -1070,8 +1108,15 @@ function genInstantiateProc _
 	'' enclosing FUNCTION stack entry refuses, reporting "Illegal inside a
 	'' NAMESPACE block".  cProcHeader itself has no such gate, and the prototype
 	'' is all we actually want from that statement.
-	text = hProcKeyword( body->kindtk ) + " " + GENPROC_NAME + _
+	dim as string nm = GENPROC_NAME
+	if( body->op <> INVALID ) then
+		nm = ""
+	end if
+
+	text = hProcKeyword( body->kindtk ) + " " + nm + _
 	       genFlattenTokens( body->hdrhead, firstline )
+
+	dim as FBSYMBOL ptr hdrproc = NULL
 
 	errPushInstLocation( descz, @env.inf.name, lexLineNum( ) )
 
@@ -1099,7 +1144,7 @@ function genInstantiateProc _
 			lexSkipToken( LEXCHECK_POST_SUFFIX )
 		end if
 
-		cProcHeader( attrib, 0, is_nested, FB_PROCOPT_ISPROTO, body->kindtk )
+		hdrproc = cProcHeader( attrib, 0, is_nested, FB_PROCOPT_ISPROTO, body->kindtk )
 		genctx2.depth -= 1
 		genReplayEnd( st )
 	end if
@@ -1108,23 +1153,41 @@ function genInstantiateProc _
 
 	symbNestEnd( FALSE )
 
-	chain_ = symbLookupAt( nsp, @GENPROC_NAME, FALSE, FALSE )
-	if( chain_ = NULL ) then
-		genLeaveGlobalScope( gs )
-		return NULL
-	end if
-	inst = chain_->sym
+	if( body->op <> INVALID ) then
+		'' A global operator is registered in symb.globOpOvlTb, not in any hash
+		'' table, so there is no name to look it back up by -- cProcHeader's
+		'' return value is the only handle on it.
+		inst = hdrproc
+		if( inst = NULL ) then
+			genLeaveGlobalScope( gs )
+			return NULL
+		end if
 
-	'' hMangleProc appends the type arguments as an 'I...E' list once this is
-	'' set, and takes the readable part of the name from the ALIAS.  id.name has
-	'' to stay __FBGENPROC: the deferred body replay finds its own prototype by
-	'' that name.
-	inst->attrib or= FB_SYMBATTRIB_GENERICINST
+		'' No FB_SYMBATTRIB_GENERICINST here, deliberately.  hMangleProc takes
+		'' the operator branch for the id, so the flag would only add an 'I...E'
+		'' list, and it is not needed to keep instantiations apart: an operator
+		'' living inside the synthetic namespace is C++-mangled (hDoCppMangling
+		'' returns TRUE for anything outside the global namespace), so its
+		'' parameter types are encoded, and those are exactly what differ.
+	else
+		chain_ = symbLookupAt( nsp, @GENPROC_NAME, FALSE, FALSE )
+		if( chain_ = NULL ) then
+			genLeaveGlobalScope( gs )
+			return NULL
+		end if
+		inst = chain_->sym
 
-	if( inst->id.alias = NULL ) then
-		dim as zstring ptr src = genGenericName( gensym )
-		inst->id.alias = ZstrAllocate( len( *src ) )
-		*inst->id.alias = *src
+		'' hMangleProc appends the type arguments as an 'I...E' list once this is
+		'' set, and takes the readable part of the name from the ALIAS.  id.name has
+		'' to stay __FBGENPROC: the deferred body replay finds its own prototype by
+		'' that name.
+		inst->attrib or= FB_SYMBATTRIB_GENERICINST
+
+		if( inst->id.alias = NULL ) then
+			dim as zstring ptr src = genGenericName( gensym )
+			inst->id.alias = ZstrAllocate( len( *src ) )
+			*inst->id.alias = *src
+		end if
 	end if
 
 	if( entry ) then
@@ -1165,6 +1228,20 @@ type FB_GENPARAMPAT
 	paramidx        as integer                  '' which type parameter, or -1
 	ptrlevels       as integer                  '' 'T ptr ptr' -> 2
 	matched         as integer                  '' pattern understood at all?
+
+	'' A nested position, 'G( of T )'.  Needed by generic global operators,
+	'' whose parameters are almost always of that shape -- there is no way to
+	'' write explicit type arguments at an operator's use site, so a nested
+	'' position is the only thing inference has to go on.
+	''
+	'' nestedcount = 0 means this is not one.  Otherwise the argument is
+	'' required to be an instantiation of a generic whose name is nestedname,
+	'' and nestedidx(i) says which of THIS generic's type parameters the
+	'' instantiation's i-th type argument binds (-1 = a concrete type, which
+	'' binds nothing and is not checked).
+	nestedcount     as integer
+	nestedname      as string
+	nestedidx       ( 0 to FB_MAXGENERICARGS-1 ) as integer
 end type
 
 '' Which type parameter does this name refer to?  -1 if none.
@@ -1187,6 +1264,76 @@ private function hTypeParamIndex _
 	wend
 
 	function = -1
+end function
+
+'' 'G( of A, B )' at the current header token.
+''
+'' On success fills the nested half of pat and returns the token holding the
+'' closing ')', so the caller can carry on past the whole clause without the
+'' outer paren-depth counter ever seeing it.  Returns NULL if this is not a
+'' nested generic position, or is one this does not model.
+private function hScanNested _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval n as FB_GENTOK ptr, _
+		byref p as FB_GENPARAMPAT _
+	) as FB_GENTOK ptr
+
+	dim as FB_GENTOK ptr w = n->next
+
+	if( w = NULL ) then
+		return NULL
+	end if
+	if( *w->text <> "(" ) then
+		return NULL
+	end if
+
+	w = w->next
+	if( w = NULL ) then
+		return NULL
+	end if
+	if( ucase( *w->text ) <> "OF" ) then
+		return NULL
+	end if
+
+	p.nestedname = ucase( *n->text )
+	p.nestedcount = 0
+
+	do
+		w = w->next
+		if( w = NULL ) then
+			return NULL
+		end if
+
+		if( p.nestedcount >= FB_MAXGENERICARGS ) then
+			return NULL
+		end if
+
+		'' Only a single-token argument is modelled: either one of this
+		'' generic's own type parameters, or a concrete type that binds nothing.
+		'' Anything else -- a further nesting, a pointer, a qualified name --
+		'' is not something inference can invert, so the whole position is
+		'' refused rather than guessed at.
+		p.nestedidx( p.nestedcount ) = hTypeParamIndex( gensym, w->text )
+		p.nestedcount += 1
+
+		w = w->next
+		if( w = NULL ) then
+			return NULL
+		end if
+
+		if( *w->text = ")" ) then
+			exit do
+		end if
+
+		if( *w->text <> "," ) then
+			return NULL
+		end if
+	loop
+
+	p.matched = TRUE
+
+	function = w
 end function
 
 '' Walk the captured header and describe each parameter's declared type.
@@ -1219,6 +1366,7 @@ private function hScanParamPatterns _
 	pat( 0 ).paramidx = -1
 	pat( 0 ).ptrlevels = 0
 	pat( 0 ).matched = FALSE
+	pat( 0 ).nestedcount = 0
 
 	while( n )
 		dim as string t = *n->text
@@ -1242,6 +1390,7 @@ private function hScanParamPatterns _
 			pat( count ).paramidx = -1
 			pat( count ).ptrlevels = 0
 			pat( count ).matched = FALSE
+			pat( count ).nestedcount = 0
 			sawas = FALSE
 		elseif( depth = 1 ) then
 			if( ucase( t ) = "AS" ) then
@@ -1250,6 +1399,7 @@ private function hScanParamPatterns _
 				pat( count ).paramidx = -1
 				pat( count ).ptrlevels = 0
 				pat( count ).matched = FALSE
+				pat( count ).nestedcount = 0
 			elseif( sawas ) then
 				select case ucase( t )
 				case "PTR", "POINTER"
@@ -1259,15 +1409,23 @@ private function hScanParamPatterns _
 				case "CONST"
 					'' ignore; CONST-ness does not participate
 				case else
-					if( pat( count ).paramidx = -1 ) then
+					if( (pat( count ).paramidx = -1) andalso (pat( count ).nestedcount = 0) ) then
 						dim as integer idx = hTypeParamIndex( gensym, strptr( t ) )
 						if( idx >= 0 ) then
 							pat( count ).paramidx = idx
 							pat( count ).matched = TRUE
 						else
-							'' a concrete type, or something more involved
-							'' (a nested generic); it binds nothing
-							pat( count ).matched = FALSE
+							'' 'G( of ... )' -- a nested generic position.
+							dim as FB_GENTOK ptr nn = hScanNested( gensym, n, pat( count ) )
+							if( nn <> NULL ) then
+								'' the whole clause is consumed here, so the
+								'' outer depth counter never sees its parens
+								n = nn
+							else
+								'' a concrete type, or something more involved;
+								'' it binds nothing
+								pat( count ).matched = FALSE
+							end if
 						end if
 					else
 						'' more tokens after the type name that this does not
@@ -1288,6 +1446,280 @@ private function hScanParamPatterns _
 
 	function = count + 1
 end function
+
+'' The generic an instantiated struct came from, or NULL if it is not one.
+''
+'' Recovered by walking the instantiation cache rather than from a field on the
+'' symbol: FBSYMBOL is a union of per-class records and its size was pinned in
+'' Phase 1, and this is asked only while resolving a generic global operator,
+'' which is rare.
+private function hGenericOfInst( byval inst as FBSYMBOL ptr ) as FBSYMBOL ptr
+	if( genctx2.inited = FALSE ) then
+		return NULL
+	end if
+
+	dim as FB_GENINST ptr n = listGetHead( @genctx2.list )
+	while( n )
+		if( n->inst = inst ) then
+			return n->gensym
+		end if
+		n = listGetNext( n )
+	wend
+
+	function = NULL
+end function
+
+'' The idx'th type argument of an instantiation.
+''
+'' Read back from the TYPEDEFs in its synthetic namespace -- those bindings ARE
+'' the type arguments, in declaration order.  The same recovery
+'' hMangleTemplateArgs() does for the 'I...E' list.
+private function hInstTypeArg _
+	( _
+		byval inst as FBSYMBOL ptr, _
+		byval idx as integer, _
+		byref dtype as integer, _
+		byref subtype as FBSYMBOL ptr _
+	) as integer
+
+	dim as FBSYMBOL ptr nsp = symbGetNamespace( inst )
+	if( nsp = NULL ) then
+		return FALSE
+	end if
+	if( symbIsGenericScope( nsp ) = FALSE ) then
+		return FALSE
+	end if
+
+	dim as FBSYMBOL ptr t = symbGetCompSymbTb( nsp ).head
+	dim as integer i = 0
+
+	while( t <> NULL )
+		if( symbIsTypedef( t ) ) then
+			if( i = idx ) then
+				dtype = symbGetFullType( t )
+				subtype = symbGetSubtype( t )
+				return TRUE
+			end if
+			i += 1
+		end if
+		t = t->next
+	wend
+
+	function = FALSE
+end function
+
+'' Unify one parameter pattern against one argument type.
+''
+'' Returns FALSE only on a real conflict -- two positions binding the same type
+'' parameter to different types, or an argument whose shape does not fit the
+'' pattern.  A pattern that binds nothing (a concrete parameter type) succeeds
+'' without doing anything.
+private function hBindPattern _
+	( _
+		byref p as FB_GENPARAMPAT, _
+		byval argdtype as integer, _
+		byval argsubtype as FBSYMBOL ptr, _
+		bounddtype() as integer, _
+		boundsubtype() as FBSYMBOL ptr, _
+		isbound() as integer _
+	) as integer
+
+	if( p.matched = FALSE ) then
+		return TRUE
+	end if
+
+	dim as integer dtype = argdtype
+	dim as FBSYMBOL ptr subtype = argsubtype
+
+	'' 'T ptr' binds T to the pointee
+	for k as integer = 1 to p.ptrlevels
+		if( typeIsPtr( dtype ) = 0 ) then
+			return FALSE
+		end if
+		dtype = typeDeref( dtype )
+	next
+
+	'' CONST-ness of the argument does not participate
+	dtype = typeUnsetIsConst( dtype )
+
+	'' 'G( of T )' -- the argument has to be an instantiation of G, and then
+	'' each of ITS type arguments binds in turn.
+	if( p.nestedcount > 0 ) then
+		if( typeGetDtOnly( dtype ) <> FB_DATATYPE_STRUCT ) then
+			return FALSE
+		end if
+		if( subtype = NULL ) then
+			return FALSE
+		end if
+
+		dim as FBSYMBOL ptr g = hGenericOfInst( subtype )
+		if( g = NULL ) then
+			return FALSE
+		end if
+
+		'' Matched by name.  The alternative -- resolving the header token to a
+		'' symbol -- would have to be done at the use site, where the name may
+		'' resolve differently than it did at the declaration.  Either way the
+		'' failure mode is the same and harmless: a wrong match instantiates
+		'' something whose parameters then do not fit, and overload resolution
+		'' reports an ordinary type mismatch.
+		if( ucase( *genGenericName( g ) ) <> p.nestedname ) then
+			return FALSE
+		end if
+
+		if( g->gen.paramcount <> p.nestedcount ) then
+			return FALSE
+		end if
+
+		for i as integer = 0 to p.nestedcount-1
+			if( p.nestedidx( i ) < 0 ) then
+				continue for
+			end if
+
+			dim as integer adtype = any
+			dim as FBSYMBOL ptr asubtype = any
+
+			if( hInstTypeArg( subtype, i, adtype, asubtype ) = FALSE ) then
+				return FALSE
+			end if
+
+			dim as integer q = p.nestedidx( i )
+			if( isbound( q ) = FALSE ) then
+				bounddtype( q ) = adtype
+				boundsubtype( q ) = asubtype
+				isbound( q ) = TRUE
+			elseif( (bounddtype( q ) <> adtype) orelse (boundsubtype( q ) <> asubtype) ) then
+				return FALSE
+			end if
+		next
+
+		return TRUE
+	end if
+
+	'' The one normalisation inference performs: a string LITERAL has type
+	'' zstring (or a fixed-length string), and neither can be a BYVAL
+	'' parameter, so Max( "abc", "abd" ) would infer 'Max( of zstring )' and
+	'' then fail deep inside the instantiated body with "Illegal
+	'' specification, at parameter 1".
+	''
+	'' This is not the implicit conversion RFC-0001 5 rules out.  That rule
+	'' is about never silently choosing between two types the author
+	'' actually wrote -- Max( 1, 2.0 ) must fail rather than promote.  Here
+	'' both arguments are string literals and 'string' is the only type the
+	'' author could have meant.
+	if( p.ptrlevels = 0 ) then
+		select case typeGetDtOnly( dtype )
+		case FB_DATATYPE_CHAR, FB_DATATYPE_FIXSTR
+			dtype = FB_DATATYPE_STRING
+			subtype = NULL
+		end select
+	end if
+
+	dim as integer pi = p.paramidx
+	if( pi < 0 ) then
+		return TRUE
+	end if
+
+	if( isbound( pi ) = FALSE ) then
+		bounddtype( pi ) = dtype
+		boundsubtype( pi ) = subtype
+		isbound( pi ) = TRUE
+	else
+		'' No implicit conversion: two positions binding the same parameter
+		'' to different types is an error, not a promotion.
+		''
+		'' Max( v + v, v ) is rejected, and that is correct rather than a
+		'' shortcoming: FreeBASIC promotes 'long + long' to the native
+		'' INTEGER, so those two arguments really ARE integer and long.
+		'' Measured, after two wrong guesses at a non-existent bug -- the
+		'' argument dtypes were 8 (INTEGER) and 11 (LONG).
+		if( (bounddtype( pi ) <> dtype) orelse (boundsubtype( pi ) <> subtype) ) then
+			return FALSE
+		end if
+	end if
+
+	function = TRUE
+end function
+
+'' ----------------------------------------------------------------------------
+'' Generic global operators
+'' ----------------------------------------------------------------------------
+
+'' Try to instantiate one generic global operator for these operand types.
+''
+'' Silent throughout.  An operator that does not fit is not an error: the same
+'' AST_OP may have ordinary overloads, or none, and the caller's normal
+'' diagnostics are the right ones.  Instantiating is idempotent -- the second
+'' identical 'x + y' hits the instantiation cache.
+private sub hTryOneGlobalOp _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval ldtype as integer, _
+		byval lsubtype as FBSYMBOL ptr, _
+		byval rdtype as integer, _
+		byval rsubtype as FBSYMBOL ptr _
+	)
+
+	static as FB_GENPARAMPAT pat( 0 to FB_MAXGENERICARGS-1 )
+	dim as integer bounddtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as FBSYMBOL ptr boundsubtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as integer isbound( 0 to FB_MAXGENERICARGS-1 )
+
+	dim as FB_GENPROC ptr body = genGetProcBodies( gensym )
+	if( body = NULL ) then
+		exit sub
+	end if
+
+	dim as integer argcount = iif( rdtype = FB_DATATYPE_INVALID, 1, 2 )
+	dim as integer paramcount = hScanParamPatterns( gensym, body->hdrhead, pat() )
+
+	if( paramcount <> argcount ) then
+		exit sub
+	end if
+
+	for i as integer = 0 to gensym->gen.paramcount-1
+		isbound( i ) = FALSE
+	next
+
+	if( hBindPattern( pat( 0 ), ldtype, lsubtype, bounddtype(), boundsubtype(), isbound() ) = FALSE ) then
+		exit sub
+	end if
+
+	if( argcount = 2 ) then
+		if( hBindPattern( pat( 1 ), rdtype, rsubtype, bounddtype(), boundsubtype(), isbound() ) = FALSE ) then
+			exit sub
+		end if
+	end if
+
+	for i as integer = 0 to gensym->gen.paramcount-1
+		if( isbound( i ) = FALSE ) then
+			exit sub
+		end if
+	next
+
+	genInstantiateProc( gensym, bounddtype(), boundsubtype(), gensym->gen.paramcount )
+end sub
+
+sub genTryInstantiateGlobalOp _
+	( _
+		byval op as integer, _
+		byval ldtype as integer, _
+		byval lsubtype as FBSYMBOL ptr, _
+		byval rdtype as integer, _
+		byval rsubtype as FBSYMBOL ptr _
+	)
+
+	dim as FB_GENOP ptr g = genGetGenericOps( )
+
+	'' the fast path, and the overwhelmingly common one: no generic operators
+	'' were ever declared, so every BOP in the module costs one NULL test
+	while( g )
+		if( g->op = op ) then
+			hTryOneGlobalOp( g->gensym, ldtype, lsubtype, rdtype, rsubtype )
+		end if
+		g = g->nxt
+	wend
+end sub
 
 '' TypeArgList at a call site: '( OF TypeRef (',' TypeRef)* ')'
 ''
@@ -1435,62 +1867,10 @@ function cGenericProcInferredCall _
 	end if
 
 	for i as integer = 0 to argcount-1
-		if( pat( i ).matched = FALSE ) then
-			continue for
-		end if
-
-		dim as integer dtype = argdtype( i )
-		dim as FBSYMBOL ptr subtype = argsubtype( i )
-
-		'' 'T ptr' binds T to the pointee
-		for k as integer = 1 to pat( i ).ptrlevels
-			if( typeIsPtr( dtype ) = 0 ) then
-				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
-				return NULL
-			end if
-			dtype = typeDeref( dtype )
-		next
-
-		'' CONST-ness of the argument does not participate
-		dtype = typeUnsetIsConst( dtype )
-
-		'' The one normalisation inference performs: a string LITERAL has type
-		'' zstring (or a fixed-length string), and neither can be a BYVAL
-		'' parameter, so Max( "abc", "abd" ) would infer 'Max( of zstring )' and
-		'' then fail deep inside the instantiated body with "Illegal
-		'' specification, at parameter 1".
-		''
-		'' This is not the implicit conversion RFC-0001 5 rules out.  That rule
-		'' is about never silently choosing between two types the author
-		'' actually wrote -- Max( 1, 2.0 ) must fail rather than promote.  Here
-		'' both arguments are string literals and 'string' is the only type the
-		'' author could have meant.
-		if( pat( i ).ptrlevels = 0 ) then
-			select case typeGetDtOnly( dtype )
-			case FB_DATATYPE_CHAR, FB_DATATYPE_FIXSTR
-				dtype = FB_DATATYPE_STRING
-				subtype = NULL
-			end select
-		end if
-
-		dim as integer p = pat( i ).paramidx
-		if( isbound( p ) = FALSE ) then
-			bounddtype( p ) = dtype
-			boundsubtype( p ) = subtype
-			isbound( p ) = TRUE
-		else
-			'' No implicit conversion: two positions binding the same parameter
-			'' to different types is an error, not a promotion.
-			''
-			'' Max( v + v, v ) is rejected, and that is correct rather than a
-			'' shortcoming: FreeBASIC promotes 'long + long' to the native
-			'' INTEGER, so those two arguments really ARE integer and long.
-			'' Measured, after two wrong guesses at a non-existent bug -- the
-			'' argument dtypes were 8 (INTEGER) and 11 (LONG).
-			if( (bounddtype( p ) <> dtype) orelse (boundsubtype( p ) <> subtype) ) then
-				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
-				return NULL
-			end if
+		if( hBindPattern( pat( i ), argdtype( i ), argsubtype( i ), _
+		                  bounddtype(), boundsubtype(), isbound() ) = FALSE ) then
+			errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+			return NULL
 		end if
 	next
 

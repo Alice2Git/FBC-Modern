@@ -47,11 +47,27 @@ declare function t_double alias "_ZN3BoxIdE4TAKEEd" _
 declare function t_nested alias "_ZN3BoxI3BoxIiEE4TAKEES1_" _
 	( byval this_ as any ptr, byval a as any ptr ) as any ptr
 
+'' The generic GLOBAL operators.  Both are byte-identical to what
+'' x86_64-w64-mingw32-g++ emits for the equivalent C++ template -- including the
+'' substitution index, which is the part that was wrong: the synthetic namespace
+'' wrapping an instantiation emits nothing, but the mangler's abbreviation
+'' warm-up pass used to register it anyway, so every back-reference came out one
+'' too high (_ZplR3BoxIdES2_, which c++filt cannot read at all).
+''
+'' Slots for operator+(Box<double>&, Box<double>&): 0 = the template name Box,
+'' 1 = Box<double> (double is a builtin and not a candidate), 2 = the reference
+'' -- so the second parameter is S1_.
+declare function o_long alias "_ZplR3BoxIiES1_" _
+	( byval a as any ptr, byval b as any ptr ) as any ptr
+
+declare function o_double alias "_ZplR3BoxIdES1_" _
+	( byval a as any ptr, byval b as any ptr ) as any ptr
+
 function probe_addrs( ) as integer
-	dim as any ptr p( 0 to 2 ) = { @t_long, @t_double, @t_nested }
+	dim as any ptr p( 0 to 4 ) = { @t_long, @t_double, @t_nested, @o_long, @o_double }
 	dim as integer n = 0
 
-	for i as integer = 0 to 2
+	for i as integer = 0 to 4
 		if p( i ) <> 0 then
 			n += 1
 		end if

@@ -60,7 +60,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 5 — member protos + out-of-line bodies | **done** — gate green |
 | 6 — generic procedures + inference | **done** — gate green |
 | 7 — ctors/dtors/copy | **done** — gate green |
-| 8 — operators + properties | not started |
+| 8 — operators + properties | **done** — gate green |
 | 9 — inheritance/virtual *(cut line)* | not started |
 | 10 — RFC-0002 iterator protocol | not started |
 | 11 — RFC-0003 `for each` | not started |
@@ -731,6 +731,268 @@ misleading results. Delete the artifact before every probe.
 Tests added: `generic-procs.bas` (explicit and inferred, `T ptr`, two type
 parameters, return-type-only, generic calling generic, generic type method
 calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
+
+---
+
+## HANDOFF — read this first
+
+### State of the tree
+
+Branch `feat/generics`, **nothing pushed**. Phases 0-8 complete and gated.
+
+Last commits:
+
+```
+ae8e086  tests: derive the astral surrogate expectations from the codepoint  (not generics)
+8fd0874  Generics Phase 7: ctors, dtors and copy -- one real gap, not four
+96d5066  Phase 6: generic procedures, with type-argument inference
+e477cc5  Phase 5: generic types get methods
+```
+
+### What to do next
+
+Phase 9 — inheritance / virtual. This is the **cut line** in the plan: decide
+whether v1 ships without it before building any of it.
+
+Nothing is owed from Phase 8. The items still open are the ones carried since
+Phase 4 (readable debug names, in-body line numbers), listed at the end of the
+Phase 8 section.
+
+### Gate protocol — do not skip
+
+```
+make compiler -j8 FBC="C:/dev/USTRING/fbc-master/bin/fbc.exe -i C:/dev/USTRING/fbc-master/inc"
+cd tests && make unit-tests [GEN=gas64] ... && make log-tests ...
+tests/warnings/test.sh  and  tests/errors/test.sh   then  git diff on r/
+```
+
+The repository root is **`fbc-master/`**, not `C:/dev/USTRING/` — `make` from the
+outer directory reports "No rule to make target 'compiler'".
+
+- **Environmental floor: 11 `threadcall_` + 4 `cpp`.** The 4 are missing
+  `libstdc++` in this mingw64; proven by rebuilding at HEAD with changes stashed.
+  A 16th failure is a regression.
+- **Reconcile the log-test count, do not just read "no failures".**
+  `passed + failed = total logs`, and passed should move by exactly the number of
+  tests added. Baseline after Phase 8: **1708 passed / 4 failed / 1712 logs**.
+  Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
+  "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
+  inflate a naive count by four.
+- **A new test FILE in an existing directory is not picked up** without
+  `make clean-tests` **from `fbc-master/`** — the generated list is cached.
+  This silently hid two Phase 6 tests behind a green-looking gate.
+- Check no log lacks a `RESULT=` line; a timed-out run leaves one truncated.
+- Never run two `make log-tests` concurrently — they race and invent failures.
+
+### Traps this project has actually hit
+
+- `git` without `-C <abspath>` runs against the wrong repo. Always
+  `git -C /c/dev/USTRING`.
+- **`git stash push -- <file>` reverts the WHOLE file, not the hunk you had in
+  mind.** Reached for to check whether one fix had teeth, it silently backed out
+  the rest of the phase's work in that file too. To neutralise a single
+  condition, edit it (`if( FALSE andalso ... )`), rebuild, observe, edit it back.
+- Delete the old `.exe` before every probe. A stale binary has twice produced
+  output that looked like a passing fix.
+- **An unexpected result is more often the test than the compiler** — `base` is
+  reserved, `A`/`a` collide case-insensitively, `K` cannot be a parameter type,
+  `long + long` promotes to INTEGER, `str()` emits no leading space, and a UDT
+  used as a FOR variable needs a **default constructor** as well as its
+  for/step/next trio. Six false alarms now. Check the plain-FB control first.
+- An unreferenced `declare ... alias "..."` emits no relocation and links against
+  any mangling at all. Take its address, and mutate the name to prove the test
+  fails.
+- Empty output is not a pass; look for the summary line.
+
+---
+
+## Phase 8 — what landed
+
+Operators and properties on generics. Probed before anything was written, per
+the Phase 7 lesson, and most of it already worked:
+
+| probe | before any change |
+| --- | --- |
+| `operator Arr( of T ).[]` | worked |
+| `property Box( of T ).val` get and set | worked |
+| `operator Box( of T ).cast` | worked |
+| `operator Box( of T ).+=` | worked |
+| global `operator +` on a CONCRETE instantiation | worked |
+
+All of it rides the Phase 5 member-body path. Two gaps, and one mangling bug the
+second gap exposed.
+
+### Gap 2 — a self-reference in a prototype
+
+```
+declare operator next( byref e as Ctr( of T ) ) as integer
+error 142: Invalid parameter type, it must be the same as the parent TYPE/CLASS
+```
+
+While a body is being replayed the instantiation cache holds a FORWARD
+REFERENCE, so that a self-referential `Node( of T ) ptr` terminates. But once
+`symbStructBegin` has published the real struct, a self-reference must get
+THAT: some parameter checks compare symbol identity rather than the resolved
+type, and reject the forward reference even though it prints identically. Plain
+FreeBASIC never meets this — inside `type Ctr`, `Ctr` is already the real
+symbol.
+
+`hCacheLookup` now prefers a published struct and falls back to the forward
+reference only while none exists. `recursive-generic.bas` still passes, which is
+the test that depends on the fallback.
+
+**Shown to have teeth** rather than assumed: with the preference disabled,
+`member-operators.bas` fails with exactly the error above.
+
+The case that needs it is the FOR/STEP/NEXT trio, which needs it three times
+over. Phase 8 inherited that half as *unverified*, because the plain-FreeBASIC
+control had failed with a different error — the control was simply wrong. A UDT
+used as a FOR variable needs a **default constructor** as well as the three
+operators. With that, both the plain and the generic loop work, and both are in
+the test.
+
+### Gap 1 — generic global operators
+
+```freebasic
+operator + ( of T )( byref a as Box( of T ), byref b as Box( of T ) ) as Box( of T )
+```
+
+Previously `error 147: Default types or suffixes are only valid in ...`, because
+`genIsGenericProcDecl` requires an IDENTIFIER after the kind keyword and an
+operator's name is a symbol token.
+
+**The declaration was the easy half.** Detection is the same three-token test as
+a generic procedure — `(`, text `OF`, token 3 an identifier — so
+`operator +( of as Box, b as Box )`, which declares a *parameter* named `of`,
+still compiles. It is checked **after** the member-body test, because
+`operator Box( of T ).+=` matches the identical shape and is a member body; and
+it refuses an identifier outright, so the two can never both claim the
+statement. A self op is rejected here (`FB_ERRMSG_OPMUSTBEAMETHOD`) rather than
+left to `cProcHeader`, which by then has no parent to complain about.
+
+The generic owns one body, exactly as in Phase 6, and the whole capture /
+eager-prototype / deferred-body path carries it unchanged. One difference: there
+is no name to paste in front at replay time, so the **operator token itself
+leads the captured header** and stands in for one. `cProcHeader`'s return value
+is then the only handle on the result — a global operator is registered in
+`symb.globOpOvlTb`, not in any hash table, so the `symbLookupAt( nsp,
+"__FBGENPROC" )` the named path uses finds nothing.
+
+`FB_SYMBATTRIB_GENERICINST` is deliberately **not** set on one. `hMangleProc`
+takes the operator branch for the id, so the flag would only append an `I...E`
+list, and it is not needed to keep instantiations apart: an operator living
+inside the synthetic namespace is C++-mangled (`hDoCppMangling` returns TRUE for
+anything outside the global namespace), so its parameter types are encoded, and
+those are exactly what differ.
+
+**The hard half is the use site.** There is nowhere in `x + y` to write explicit
+type arguments, so inference is the only route — and a generic operator's
+parameters are of the nested shape `G( of T )`, which Phase 6's inference
+explicitly did not model. So the pattern matcher now inverts a nested position:
+given an operand that is an instantiation of `G`, each of *its* type arguments
+binds the corresponding type parameter. The instantiation's own arguments are
+read back from the TYPEDEFs in its synthetic namespace — the same recovery
+`hMangleTemplateArgs` does — and the generic it came from by walking the
+instantiation cache, so `FBSYMBOL` does not grow.
+
+The hook is `hDoGlobOpOverload` in `ast-node-bop.bas`: one choke point covering
+every binary operator, rather than the thirteen `astNewBOP` call sites in
+`parser-expr-binary.bas`. It is **silent** throughout. An operand matching
+nothing is not an error — the same `AST_OP` may have ordinary overloads, or none
+— so a failed inference instantiates nothing and the ordinary "Type mismatch" is
+reported at the use site, which is exactly right for
+`Box(of integer) + Box(of double)`. A golden case pins that *"Cannot infer type
+arguments"* does **not** appear there.
+
+Phase 6's named-procedure inference shares the new matcher, so `Vector( of T )`
+positions now infer there too — the restriction recorded as "not implemented,
+deliberately" in Phase 6 is lifted as a side effect.
+
+**Documented limitation:** a nested position is matched against the operand's
+generic **by name**. Two generics with the same name in different namespaces
+could mis-bind. The failure mode is harmless — the wrong instantiation's
+parameters then do not fit and overload resolution reports a type mismatch — and
+the alternative, resolving the header token to a symbol at the use site, has the
+same exposure from the other direction.
+
+### A mangling off-by-one, found by comparing with g++
+
+fbc emitted `_ZplR3BoxIdES2_` where `x86_64-w64-mingw32-g++` writes
+`_ZplR3BoxIdES1_` for the equivalent C++ template. Not cosmetic: `c++filt`
+cannot read the fbc form at all, because the index is past the end.
+
+`hMangleNamespace` mangles a parent namespace **twice** — once into a throwaway
+string purely to populate the abbreviation table, then once for real. Phase 4
+taught the *emitting* pass to skip a generic scope, but the warm-up pass still
+ran over it and registered a candidate. An abbreviation candidate that never
+appears in the output leaves every later back-reference one index too high. The
+warm-up now walks up to the nearest non-generic ancestor, which is the one that
+does get emitted.
+
+Measured, not inferred. Across every generics test plus the new ones, the fix
+moves **only** instantiated generic procedures and global operators — the
+symbols whose namespace *is* a generic scope — and moves all of them by exactly
+−1. No type or member name moves, so Phase 0's "existing mangled names must not
+move" holds. Names `c++filt` cannot parse dropped from 17 to 7, and the
+single-level global operators are now byte-identical to g++.
+
+The 7 that remain are pre-existing from Phase 6 and unrelated: `_Z3IncIiEi`,
+`_Z8MakeZeroIdEv` and friends. Itanium encodes a function template's **return
+type** immediately after the `I...E` list, and fbc emits only the parameters.
+The names are still unique and stable across compilation units, which is all
+Phase 6 claimed for them. Recorded, not fixed.
+
+### Not implemented, deliberately
+
+- The **prototype form** `declare operator + ( of T )( ... )`. Same as generic
+  procedures in Phase 6: a generic's declaration is its body.
+- Multi-token operator names (`[]`, `new[]`, `delete[]`). All of them are self
+  ops, and a self op cannot be global, so one token of look-ahead is enough.
+- **Unary** global operators. `genTryInstantiateGlobalOp` takes an argument
+  count and the one-argument path is written, but only `hDoGlobOpOverload`
+  (binary) calls it; the UOP site in `ast-node-uop.bas` is not hooked and
+  nothing is tested.
+
+### Tests added
+
+| Path | Kind |
+| --- | --- |
+| `tests/generics/global-operators.bas` | `COMPILE_AND_RUN_OK` — three distinct instantiations of one operator, a concrete result type, a header mixing a nested and a bare position, two type parameters, an ordinary non-generic global operator alongside, cache re-use, chaining |
+| `tests/generics/member-operators.bas` | `COMPILE_AND_RUN_OK` — `[]`, `cast`, get/set properties, a self op, and the for/step/next trio on two instantiations |
+| `tests/generics/fail-globalop-selfop.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/fail-globalop-conflict.bas` | `COMPILE_ONLY_FAIL` |
+| `tests/generics/member-mangling/` | extended — two more exact Itanium names, for the global operator on two argument lists |
+| `tests/errors/generic-operator-errors.bas` | golden diagnostics, 5 targets |
+
+The two new mangling names were confirmed to have teeth the same way as the
+Phase 5 ones: mutating `_ZplR3BoxIdES1_` to `...S2_` makes the link fail with an
+undefined reference, on both backends.
+
+### Phase 8 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1708 passed / 4 failed / 1712 logs** — 1704 + 4 new; none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean — zero content change |
+| `tests/errors` golden, 5 targets | additions only; no existing golden moved |
+| mangled names vs Phase 7 | only generic procedures and global operators move, all by −1; every type and member name byte-identical |
+
+Unit-test figures are unchanged by design: every Phase 8 behaviour test is a
+log-test, so none adds an fbcunit assertion. All four new logs were confirmed
+`RESULT=PASSED` individually, not merely absent from the failure list.
+
+### Still open
+
+- **Readable debug names** (carried from Phase 4). Every instantiation still
+  reports as `Box` to the debugger, so GDB sees N distinct types under one name.
+- **In-body line numbers** (carried from Phase 4). An error inside a replayed
+  body reports the body's opening line; the instantiation chain supplies the
+  detail.
+- **Function-template return types are not mangled** (from Phase 6, above).
+- `new` / `delete` on an instantiation (carried from Phase 7).
 
 ---
 
