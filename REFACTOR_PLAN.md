@@ -64,7 +64,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 9 — inheritance/virtual *(cut line)* | **done** — gate green |
 | 10 — RFC-0002 iterator protocol | **done** — gate green |
 | 11 — RFC-0003 `for each` | **done** — gate green |
-| 12 — RFC-0004 containers | not started |
+| 12 — RFC-0004 containers | **in progress** — Array + Map done, Set/LinkedList owed |
 | 13 — weak/COMDAT | not started |
 | 14 — docs + merge | not started |
 
@@ -738,7 +738,8 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-11 complete and gated.
+Branch `feat/generics`, **nothing pushed**. Phases 0-11 complete and gated; Phase 12 is
+in progress and its gate has not been run (it adds no compiler code).
 
 Last commits:
 
@@ -751,14 +752,20 @@ de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
 
 ### What to do next
 
-Phase 12 — RFC-0004 containers. **Get the author's approval before starting it**,
-and before anything naming Vector, Dictionary, Set or List.
+Finish Phase 12. `Array` and `Map` are written and verified by probe; `Set`,
+`LinkedList`, `inc/containers.bi`, the fbcunit suites and `doc/containers.txt`
+are owed, then the gate. Approval to proceed was given, along with the naming:
+Vector→**Array**, Dictionary→**Map**, Set→Set, List→**LinkedList**.
 
-It is expected to need **no compiler change**: new `fbc-master/inc/fb/`
-(`vector.bi`, `dictionary.bi`, `set.bi`, `list.bi`, `iterator.bi`) written in
-ordinary FreeBASIC on top of Phases 1-11. The tests are fbcunit suites asserting
-behaviour **and complexity** — 100k appends must not be O(n²), which is the
-entire point.
+Two rules the phase established the hard way, and both bind the remaining work:
+
+- **A container member may not constrain T beyond what the container needs.**
+  Every member is instantiated whether called or not, so anything requiring `=`
+  or `<` on T has to be a free generic procedure.
+- **A type parameter must not case-collide with any parameter or local**, since
+  FreeBASIC is case-insensitive. `Map` uses `TK`/`TV` for exactly this reason.
+
+The complexity tests are the point of the phase: 100k appends must not be O(n²).
 
 Nothing is owed from Phase 11. The items still open are the ones carried since
 Phase 4, listed at the end of the Phase 11 section.
@@ -826,6 +833,123 @@ outer directory reports "No rule to make target 'compiler'".
   any mangling at all. Take its address, and mutate the name to prove the test
   fails.
 - Empty output is not a pass; look for the summary line.
+
+---
+
+## Phase 12 — IN PROGRESS: two of four containers
+
+RFC-0004, with the author's naming:
+
+| RFC | here |
+| --- | --- |
+| `Vector` | **`Array`** |
+| `Dictionary` | **`Map`** |
+| `Set` | `Set` |
+| `List` | **`LinkedList`** |
+
+**No compiler change**, as the RFC promised — everything below is ordinary
+FreeBASIC in `fbc-master/inc/fb/`, consuming Phases 1-11.
+
+### Landed and verified by probe
+
+| File | What |
+| --- | --- |
+| `inc/fb/hash.bi` | the hash contract: `FB.HashOf` overloads for every built-in type, FNV-1a for strings, splitmix64 finaliser for integers |
+| `inc/fb/array.bi` | `FB.Array( of T )` + `ArrayIterator( of T )`, and free `IndexOf` / `Contains` / `Sort` |
+| `inc/fb/map.bi` | `FB.Map( of TK, TV )` + `MapIterator` + `KeyValuePair`, open-addressed |
+
+`Array`: Push, Pop, Insert, Remove, RemoveSwap, Clear, Reserve, Shrink, `[]` as
+an lvalue, `for each` and `for each byref`, deep copy, **nested containers**
+(`Array( of Array( of long ) )`), Sort, IndexOf, Contains.
+
+`Map`: Add vs Put vs the inserting indexer, TryGet and Contains not inserting,
+the `counts[ w ] += 1` idiom, iteration, removal through tombstones, 1000
+entries with rehashing, deep copy, Clear, Keys/Values snapshots.
+
+### Still owed
+
+- `inc/fb/set.bi` — `Set( of T )` plus `UnionWith` / `IntersectWith` /
+  `ExceptWith`. A `Map` with the value machinery removed.
+- `inc/fb/linkedlist.bi` — `LinkedList( of T )`, doubly linked.
+- `inc/containers.bi` — the single include.
+- fbcunit suites asserting behaviour **and complexity** — 100k appends must not
+  be O(n²), which is the entire point of the phase.
+- `doc/containers.txt`, and the gate.
+
+### Storage: a dynamic array, redim'd only on growth
+
+The elements live in an ordinary FreeBASIC dynamic array field, `redim
+preserve`d only when the capacity doubles — never per push. That keeps the
+append amortised O(1) while letting the language do element construction,
+copying and destruction, so a deep copy, an assignment and a destructor all fall
+out for free and there is no manual memory to get wrong.
+
+RFC-0004 rejects "wrap the existing redim array" because it would inherit the
+O(n²) append — but that objection is about redim'ing per append, not about the
+storage. Measured before it was chosen: a dynamic array field inside a generic
+redims correctly, deep-copies on both construction and assignment, and carries
+T's constructors.
+
+### Three findings, all from writing real code against the feature
+
+**1. `typeof( T )` does not see through a type parameter.** This decided the
+hash design:
+
+```freebasic
+type Alias1 as long
+#if typeof( Alias1 ) = typeof( long )   '' matches
+#if typeof( T ) = typeof( long )        '' does NOT match, with T bound to long
+```
+
+An ordinary TYPEDEF is transparent to `typeof`; the TYPEDEF a generic
+instantiation binds is not. So a generic body cannot branch on what its type
+parameter is bound to, and the hash contract cannot be `#if`-dispatched. It is
+an overloaded `FB.HashOf` instead, extended by re-opening the namespace — which
+also gives ordinary overload resolution at the instantiation site, where every
+overload is in scope. Worth fixing in the compiler later; it is not needed here.
+
+**2. Every member of a generic is instantiated whether it is called or not.**
+There is no lazy member instantiation, so a member that needs `=` on `T` makes
+the *whole type* unusable for any `T` without one. As members, `IndexOf`,
+`Contains` and `Sort` made `Array( of Array( of long ) )` fail to instantiate:
+
+```
+array.bi(224) error 20: Type mismatch
+  in instantiation of 'Array( of Array( of long ) )'
+```
+
+They are free generic **procedures** instead, which are instantiated only where
+they are called, so the requirement lands on the call site that actually needs
+it. `T` is inferred from the nested `Array( of T )` position — the inference
+Phase 8 added. This is the strongest practical argument yet for constraints, and
+it is a design rule for the rest of the phase: *a container member may not
+constrain T beyond what the container itself needs.*
+
+**3. Strict inference bites on untyped literals.** `IndexOf( nums, 3 )` where
+`nums` is an `Array( of long )` fails: the nested position binds `T` to `long`
+and the bare literal `3` is an INTEGER, so the two positions conflict and
+RFC-0001 §5 forbids picking. `IndexOf( nums, 3L )` works. Correct, and a
+usability wart worth documenting rather than hiding.
+
+### And the twelfth identifier false alarm
+
+`Map` originally had type parameters `K, V` and a method `Put( byref k as TK,
+... )`. Every member body declaring a local of type `K` failed with
+
+```
+error 14: Expected identifier, found 'K'
+  in instantiation of 'Map( of string, long )'
+```
+
+Bisecting suggested "exactly two type parameters breaks; one and three are
+fine", which is a nonsense shape for a compiler bug and should have been the
+clue. It is not a compiler bug: FreeBASIC is case-insensitive, so the parameter
+`k` and the type parameter `K` are **the same name**, and inside the body `K`
+resolved to the parameter. The same `A`/`a` collision Phase 2 hit.
+
+The type parameters are now `TK` / `TV`, so ordinary parameter names stay
+natural. **The rule for the rest of the phase: a type parameter must not
+case-collide with any parameter or local in any member body.**
 
 ---
 
