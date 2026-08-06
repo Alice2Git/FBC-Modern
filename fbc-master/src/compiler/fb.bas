@@ -537,6 +537,7 @@ sub fbEnd()
 	astEnd( )
 	errEnd( )
 	genCaptureEnd( )
+	genInstCacheEnd( )
 	symbEnd( )
 
 	erase infileTb

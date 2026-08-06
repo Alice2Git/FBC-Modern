@@ -757,12 +757,23 @@ private sub hMangleNamespace _
 	end if
 
 	'' create a stack
+	'' The synthetic namespace holding a generic instantiation's type parameters
+	'' is skipped: it is an implementation detail, and its internal id contains
+	'' '<' and '>', which are not legal in C identifiers or asm labels.  The type
+	'' arguments reach the mangled name through the instantiated type's ALIAS.
 	tos = -1
 	do
-		tos += 1
-		nsStk(tos) = ns
+		if( symbIsGenericScope( ns ) = FALSE ) then
+			tos += 1
+			nsStk(tos) = ns
+		end if
 		ns = symbGetNamespace( ns )
 	loop until( ns = @symbGetGlobalNamespc( ) )
+
+	'' nothing left to emit?
+	if( tos < 0 ) then
+		exit sub
+	end if
 
 	'' return the chain starting from base parent
 	mangled += "N"

@@ -55,7 +55,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 0 — pre-work: mangler + hUcase | **done** — gate green (see below) |
 | 1 — scaffolding (semantic no-op) | **done** — gate green (see below) |
 | 2 — body capture + structural pre-scan | **done** — gate green (see below) |
-| 3 — parser save/restore + replay harness | not started |
+| 3 — parser save/restore + replay + minimal instantiation | **done** — gate green |
 | 4 — type instantiation engine | not started |
 | 5 — member protos + out-of-line bodies | not started |
 | 6 — generic procedures + inference | not started |
@@ -159,6 +159,131 @@ exactly the new `identifier-of.bas`. Failures unchanged at 11.
   `lexPopCtx` callers for no present gain; every caller already pre-checks its
   own recursion limit. The real protection is the Phase 4 instantiation-depth
   counter.
+
+---
+
+## Phase 3 — what landed
+
+`dim b as Box( of long )` compiles, runs, and works.  A generic's captured body
+is replayed once per distinct type-argument list, with the type parameters
+bound as TYPEDEFs in a synthetic namespace, and the result used as an ordinary
+type.
+
+A minimal instantiation was pulled forward from Phase 4, because Phase 3 as
+planned ended with infrastructure nothing could exercise: the plan proposed a
+`__FB_DEBUG__`-only self-test, but the suite runs a release compiler. Phase 4
+still owns canonical-argument mangling, the depth limit, the instantiation
+chain and debug names.
+
+Working: scalar / string / UDT / nested arguments, two type parameters,
+distinct argument lists as genuinely unrelated types, `-gen gcc` and
+`-gen gas64`.
+
+New in `parser-generic.bas`:
+  `FB_PARSERSTATE`, `genSaveState`/`genRestoreState`
+  `genReplayBegin`/`genReplayEnd`
+  `cGenericTypeArgs`  — `( OF TypeRef, ... )` at a use site, recursive
+  `genInstantiateType`— cache, synthetic namespace, typedef binding, replay
+  explicit instantiation cache + `genInstCacheEnd`
+Plus `errGetLastStmt`/`errSetLastStmt` (`error.bas`), the `FB_SYMBCLASS_GENERIC`
+arm in `cSymbolType`, and the `GENERICSCOPE` skip in `hMangleNamespace`.
+
+### Two bugs found by probing, not by review
+
+1. **The instantiation cache never hit.** `symbAddNamespace` calls
+   `symbNewSymbol` *without* `FB_SYMBOPT_PRESERVECASE`, so the stored name is
+   up-cased, while the lookup used `preserve_case = TRUE`. Every mention of
+   `Box( of long )` minted a fresh, incompatible type and `b2 = b` failed.
+   Folding case would have been wrong anyway: the type-argument codes
+   `symbMangleType` emits are case-significant, so distinct argument lists could
+   collide. Replaced with an explicit per-generic cache.
+
+2. **Mangling was not deterministic.** The synthetic namespace was named from a
+   counter. `hMangleNamespace` skips `GENERICSCOPE`, but `symbMangleType`'s
+   STRUCT branch builds its *own* namespace chain, so the namespace still leaks
+   into a **nested** instantiation's name — making `Box( of Box( of long ) )`
+   mangle as `…$GEN0$…` or `…$GEN1$…` depending on what preceded it. That breaks
+   RFC-0001 §4 outright; separate compilation would not link. The name is now
+   derived from the canonical key, verified byte-identical across declaration
+   orders.
+
+### Owed to Phase 4
+
+- The synthetic namespace **still leaks** into nested mangled names. Deterministic
+  and C-safe now, but the real fix is the Itanium `I…E` template-argument
+  encoding, which removes the leak.
+- `sizeof( Box( of long ) )` does not work: `sizeof` resolves through
+  `cTypeOrExpression`, not the `cSymbolType` arm hooked here.
+- Instantiations are placed in the *current* namespace rather than by
+  `symbLookupInternallyMangledSubtype`'s scope rules. Fine at module level, which
+  is what the tests cover; local-scope placement is Phase 4 (deviation D1).
+
+### Phase 3 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — identical to Phases 1-2 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1696 passed, 0 failed** = 1694 + the 2 new tests |
+| `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
+| nested-instantiation mangling | byte-identical across declaration orders (determinism fix verified) |
+
+Unit-test figures are unchanged by design: every Phase 3 test is a log-test and
+adds no assertion.
+
+### Earlier notes from this phase
+
+- `parser-generic.bas` — `FB_PARSERSTATE`, `genSaveState`/`genRestoreState`,
+  `genReplayBegin`/`genReplayEnd`.
+- `errGetLastStmt`/`errSetLastStmt` (`error.bas`) — `errctx` is module-private,
+  and the one-error-per-statement filter keys off `laststmt`; without
+  save/restore an error inside a replayed body can swallow the caller's next
+  real error.
+
+`genRestoreState` asserts `parser.stmt.cnt` is back where it started rather
+than copying the stack, since that stack has its own push/pop discipline. A
+replay that opened a compound statement and never closed it would otherwise
+skew the caller and fail far from the cause.
+
+`genReplayBegin` pre-checks `env.includerec` before `lexPushCtx` rather than
+relying on the Phase 1 assert, matching what `fbIncludeFile` and the macro
+evaluators already do, and returns FALSE without pushing so the caller must not
+pop.
+
+### Static-scratch re-entrancy audit (task complete)
+
+Nine sites hold a `lexGetText()` pointer in a local. The result is better than
+feared:
+
+- `lexGetText` returns `@lex.ctx->head->text`, a pointer into the **per-context**
+  token ring, and `lexPushCtx` moves `lex.ctx` to a different `ctxTB` slot
+  (`lex.bi:153`). A replay therefore writes a different ring and **cannot
+  clobber a pointer the caller is holding**. No change needed.
+- **One real hazard:** for a `FB_DATATYPE_WCHAR` token, `lexGetText` narrows via
+  `str()` into a single `static tmpstr` shared across *all* contexts
+  (`lex.bas:2399`). A replay that lexes any wide token overwrites it under a
+  caller holding that pointer. Unicode-source only.
+
+### Known fidelity gap, same root cause
+
+Capture stores `lexGetText()`, so a wide token is narrowed on the way in. A
+generic body containing non-ASCII text in a unicode source file will not
+round-trip. ASCII sources — the overwhelmingly common case — are exact. Fixing
+it means capturing `textw` into `FB_GENTOK.textw` (the union member already
+exists) and flattening to `DWSTRING`.
+
+### Decision to surface before continuing
+
+Phase 3 as planned ends with untestable infrastructure: the plan proposed a
+`__FB_DEBUG__`-only self-test, but the suite runs a release compiler, so
+nothing would actually exercise it. The intended fix is to pull a **minimal
+instantiation** forward from Phase 4 — enough that `dim b as Box( of long )`
+compiles and `sizeof` can be asserted — leaving canonical argument keys,
+Itanium `I…E` mangling, the depth limit, the instantiation-chain notes and
+debug names to Phase 4. `symbLookupInternallyMangledSubtype`
+(`symb-proc.bas:1157`) supplies interning, scope placement and case-preserving
+lookup in one call, exactly as `symbAddArrayDescriptorType` uses it.
 
 ---
 

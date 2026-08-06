@@ -446,6 +446,17 @@ declare function hMakeParamDesc _
 	}
 
 
+'' The one-error-per-statement filter keys off this.  A generic replay has to
+'' save and restore it, or an error reported inside a replayed body can swallow
+'' the caller's next real error.
+function errGetLastStmt( ) as integer
+	function = errctx.laststmt
+end function
+
+sub errSetLastStmt( byval n as integer )
+	errctx.laststmt = n
+end sub
+
 sub errPreInit( )
 	errctx.hide_further_messages = FALSE
 end sub

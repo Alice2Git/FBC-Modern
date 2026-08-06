@@ -45,6 +45,7 @@ const FB_MAXNAMESPCRECLEVEL = 64
 
 const FB_MAXARRAYDIMS       = 8
 const FB_MAXDEFINEARGS      = 32
+const FB_MAXGENERICARGS     = 32      '' type arguments in one (of ...) list
 
 const FB_MAXNAMELEN         = 128
 const FB_MAXLITLEN          = 1024              '' literal strings max length

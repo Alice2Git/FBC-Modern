@@ -771,6 +771,21 @@ function cSymbolType _
 					dim as FBSYMBOL ptr sym = chain_->sym
 					do
 						select case symbGetClass( sym )
+						'' a generic: 'Foo( of long )' instantiates it.  A bare
+						'' 'Foo' is an error -- it is a template, not a type.
+						case FB_SYMBCLASS_GENERIC
+							lexSkipToken( LEXCHECK_POST_SUFFIX )
+							subtype = cGenericTypeArgs( sym )
+							if( subtype = NULL ) then
+								'' error recovery: fake a type
+								dtype = FB_DATATYPE_INTEGER
+								lgt = typeGetSize( FB_DATATYPE_INTEGER )
+							else
+								dtype = FB_DATATYPE_STRUCT
+								lgt = symbGetSizeOf( subtype )
+							end if
+							exit do, do
+
 						case FB_SYMBCLASS_STRUCT
 							lexSkipToken( LEXCHECK_POST_SUFFIX )
 							dtype = FB_DATATYPE_STRUCT

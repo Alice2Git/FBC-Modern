@@ -438,6 +438,9 @@ declare sub errPushParamLocation _
 	)
 declare sub errPopParamLocation( )
 
+declare function errGetLastStmt( ) as integer
+declare sub errSetLastStmt( byval n as integer )
+
 declare sub errReportEx _
 	( _
 		byval errnum as integer, _

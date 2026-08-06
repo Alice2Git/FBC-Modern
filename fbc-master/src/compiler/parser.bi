@@ -1101,6 +1101,17 @@ declare function hIntegerTypeFromBitSize _
 ''
 
 declare sub genCaptureEnd( )
+declare sub genInstCacheEnd( )
+
+declare function cGenericTypeArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
+
+declare function genInstantiateType _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		argdtype() as integer, _
+		argsubtype() as FBSYMBOL ptr, _
+		byval argcount as integer _
+	) as FBSYMBOL ptr
 
 declare sub cGenericTypeDecl _
 	( _
