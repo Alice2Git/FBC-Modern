@@ -166,20 +166,35 @@ function hFileExists _
 end function
 
 '':::::
+'' Copy src to dst, upper-casing ASCII a-z on the way.
+''
+'' dstchars is the number of characters (not counting the NUL terminator) that
+'' dst has room for; the result is truncated to fit.  Passing 0 means "no
+'' limit", which is only safe when dst is known to be at least as long as src
+'' (e.g. an in-place call, or a buffer allocated from len( src )).
 sub hUcase _
 	( _
 		byval src as const zstring ptr, _
-		byval dst as zstring ptr _
+		byval dst as zstring ptr, _
+		byval dstchars as integer _
 	) static
 
 	dim as integer c
 	dim as const zstring ptr s
 	dim as zstring ptr d
+	dim as zstring ptr dmax
 
 	s = src
 	d = dst
+	dmax = iif( dstchars > 0, dst + dstchars, cast( zstring ptr, NULL ) )
 
 	do
+		if( dmax <> NULL ) then
+			if( d >= dmax ) then
+				exit do
+			end if
+		end if
+
 		c = *s
 		if( c >= 97 ) then
 			if( c <= 122 ) then

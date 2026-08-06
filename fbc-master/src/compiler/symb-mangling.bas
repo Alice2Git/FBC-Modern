@@ -315,27 +315,38 @@ end function
 private sub hAbbrevGet( byref mangled as string, byval idx as integer )
 	mangled += "S"
 
+	'' Itanium C++ ABI:
+	''    <substitution> ::= S <seq-id> _
+	''                   ::= S_
+	'' where <seq-id> is (idx - 1) written in base 36, using the digits
+	'' 0..9 then A..Z, most significant digit first, with no leading zeroes.
+	''
 	'' abbreviation index   mangling
-	''   0                    S_
-	''   1                    S0_
-	''   2                    S1_
+	''    0                   S_
+	''    1                   S0_
+	''    2                   S1_
+	''   10                   S9_
+	''   11                   SA_
+	''   36                   SZ_
+	''   37                   S10_
+	''   38                   S11_
 	'' etc.
 
 	if( idx > 0 ) then
-		if( idx <= 10 ) then
-			mangled += chr( asc( "0" ) + (idx - 1) )
-		elseif( idx <= 33 ) then
-			mangled += chr( asc( "A" ) + (idx - 11) )
-		else
-			'' 2 digits are enough for 333 abbreviations
-			mangled += chr( idx \ 33 )
-			idx mod= 33
-			if( idx <= 10 ) then
-				mangled += chr( asc( "0" ) + (idx - 1) )
-			elseif( idx <= 33 ) then
-				mangled += chr( asc( "A" ) + (idx - 11) )
+		dim as integer seqid = idx - 1
+		dim as string digits
+
+		do
+			dim as integer d = seqid mod 36
+			if( d < 10 ) then
+				digits = chr( asc( "0" ) + d ) + digits
+			else
+				digits = chr( asc( "A" ) + (d - 10) ) + digits
 			end if
-		end if
+			seqid \= 36
+		loop while( seqid > 0 )
+
+		mangled += digits
 	end if
 
 	mangled += "_"

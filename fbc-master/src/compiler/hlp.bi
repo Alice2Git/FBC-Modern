@@ -31,7 +31,8 @@ declare sub hClearName _
 declare sub hUcase _
 	( _
 		byval src as const zstring ptr, _
-		byval dst as zstring ptr _
+		byval dst as zstring ptr, _
+		byval dstchars as integer = 0 _
 	)
 
 declare function hStripUnderscore _

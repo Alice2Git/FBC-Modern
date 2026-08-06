@@ -1140,7 +1140,7 @@ function symbLookup _
 	tk = FB_TK_ID
 	tk_class = FB_TKCLASS_IDENTIFIER
 
-	hUcase( *id, sname )
+	hUcase( *id, sname, FB_MAXNAMELEN )
 	id = @sname
 
 	dim as uinteger index = hashHash( id )
@@ -1255,7 +1255,7 @@ function symbLookupAt _
 	end if
 
 	if( preserve_case = FALSE ) then
-		hUcase( *id, sname )
+		hUcase( *id, sname, FB_MAXNAMELEN )
 		id = @sname
 	end if
 
