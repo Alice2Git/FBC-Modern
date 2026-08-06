@@ -393,6 +393,12 @@ dim shared as GENINSTCTX genctx2
 '' or the forward reference is never patched and the type stays incomplete.
 #define GENINST_NAME "__FBGENINST"
 
+'' Internal name of every instantiated generic PROCEDURE, inside its own
+'' synthetic namespace.  Upper-case for the same reason as GENINST_NAME: the
+'' replay creates it through the normal up-casing path, and it is looked up
+'' again afterwards by exact name.
+#define GENPROC_NAME "__FBGENPROC"
+
 private function hCacheLookup _
 	( _
 		byval gensym as FBSYMBOL ptr, _
@@ -598,12 +604,23 @@ private sub hReplayProcBody _
 	dim as string text
 	dim as integer firstline = any
 
-	'' '<kind> __FBGENINST' + '.name( ... ) ... end <kind>'
+	'' Two shapes, told apart by whether a separate header was captured:
 	''
-	'' The captured chain already ends with its own terminator, unlike a type
-	'' body, so nothing is appended.
-	text = hProcKeyword( body->kindtk ) + " " + GENINST_NAME + _
-	       genFlattenTokens( body->tokhead, firstline )
+	''   member body of a generic type
+	''     '<kind> __FBGENINST'  +  '.name( ... ) ... end <kind>'
+	''   generic procedure
+	''     '<kind> __FBGENPROC'  +  '( ... ) as T'  +  ' ... end <kind>'
+	''
+	'' Either way the captured body already ends with its own terminator, unlike
+	'' a type body, so nothing is appended.
+	if( body->hdrhead ) then
+		text = hProcKeyword( body->kindtk ) + " " + GENPROC_NAME + _
+		       genFlattenTokens( body->hdrhead, firstline ) + LFCHAR + _
+		       genFlattenTokens( body->tokhead, firstline )
+	else
+		text = hProcKeyword( body->kindtk ) + " " + GENINST_NAME + _
+		       genFlattenTokens( body->tokhead, firstline )
+	end if
 
 	'' The drain point is already at module level, but it may sit inside a
 	'' user namespace block; the body belongs to the instantiation, not to
@@ -934,4 +951,574 @@ function genInstantiateType _
 	genLeaveGlobalScope( gs )
 
 	function = inst
+end function
+
+'' Instantiate a generic PROCEDURE for one type-argument list.
+''
+'' Differs from a type in one way that shapes everything else: the caller needs a
+'' CALLABLE symbol immediately, in the middle of an expression, but the body
+'' cannot be parsed there.  So the header is replayed now, as an ordinary
+'' 'declare', and the body is handed to the same deferred queue that member
+'' bodies use.  That is exactly how FreeBASIC already treats a prototype and its
+'' out-of-line body, so overload matching between the two needs nothing new.
+function genInstantiateProc _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		argdtype() as integer, _
+		argsubtype() as FBSYMBOL ptr, _
+		byval argcount as integer _
+	) as FBSYMBOL ptr
+
+	dim as FBSYMBOL ptr nsp = any, prm = any, inst = any
+	dim as FBSYMCHAIN ptr chain_ = any
+	dim as FB_PARSERSTATE st
+	dim as FB_GENSCOPE gs
+	dim as string id, text, nspid, desc
+	dim as zstring ptr descz = any
+	dim as integer firstline = any
+
+	function = NULL
+
+	if( genctx2.depth >= env.clopt.maxinstdepth ) then
+		errReportEx( FB_ERRMSG_INSTDEPTHTOODEEP, genGenericName( gensym ) )
+		errHideFurtherErrors( )
+		return NULL
+	end if
+
+	if( argcount <> gensym->gen.paramcount ) then
+		errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, genGenericName( gensym ) )
+		return NULL
+	end if
+
+	dim as FB_GENPROC ptr body = genGetProcBodies( gensym )
+	if( body = NULL ) then
+		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+
+	id = hArgKey( gensym, argdtype(), argsubtype(), argcount )
+
+	inst = hCacheLookup( gensym, id )
+	if( inst ) then
+		return inst
+	end if
+
+	genEnterGlobalScope( gs )
+
+	nspid = "$gen$"
+	for i as integer = 1 to len( id )
+		select case id[i-1]
+		case asc( "<" ), asc( ">" ), asc( "," ), asc( "$" )
+			nspid += "$"
+		case else
+			nspid += chr( id[i-1] )
+		end select
+	next
+
+	nsp = symbAddNamespace( strptr( nspid ), NULL )
+	if( nsp = NULL ) then
+		genLeaveGlobalScope( gs )
+		return NULL
+	end if
+	nsp->attrib or= FB_SYMBATTRIB_GENERICSCOPE
+
+	symbNestBegin( nsp, FALSE )
+
+	'' bind each type parameter
+	prm = gensym->gen.paramhead
+	for i as integer = 0 to argcount-1
+		symbAddTypedef( symbGetName( prm ), argdtype(i), argsubtype(i), _
+		                symbCalcLen( argdtype(i), argsubtype(i) ) )
+		prm = prm->next
+	next
+
+	desc = *genGenericName( gensym ) + "( of "
+	for i as integer = 0 to argcount-1
+		if( i > 0 ) then
+			desc += ", "
+		end if
+		desc += symbTypeToStr( argdtype(i), argsubtype(i) )
+	next
+	desc += " )"
+
+	descz = ZstrAllocate( len( desc ) )
+	*descz = desc
+
+	'' Cache BEFORE the replay, so a generic procedure that calls itself with
+	'' the same arguments finds the entry instead of recursing forever.  Unlike
+	'' a type there is no forward-reference machinery to fall back on, so the
+	'' entry starts out pointing at nothing and is filled in below; a
+	'' same-argument self-call during the header replay is not possible anyway,
+	'' since a header contains no calls.
+	hCacheAdd( gensym, id, NULL )
+	dim as FB_GENINST ptr entry = hCacheFind( gensym, id )
+	if( entry ) then
+		entry->nsp = nsp
+		entry->desc = descz
+		entry->instfile = ZstrAllocate( len( env.inf.name ) )
+		*entry->instfile = env.inf.name
+		entry->instline = lexLineNum( )
+	end if
+
+	'' EAGER: the prototype, '<kind> __FBGENPROC( params ) [as ret]'.
+	''
+	'' cProcHeader is called directly rather than replaying a 'declare'
+	'' statement through cProgram.  A call site can sit inside another
+	'' procedure's body -- one generic procedure calling another, or a generic
+	'' type's method calling one -- and a DECLARE is not permitted there:
+	'' cProcDecl gates on cCompStmtIsAllowed( FB_CMPSTMT_MASK_DECL ), which the
+	'' enclosing FUNCTION stack entry refuses, reporting "Illegal inside a
+	'' NAMESPACE block".  cProcHeader itself has no such gate, and the prototype
+	'' is all we actually want from that statement.
+	text = hProcKeyword( body->kindtk ) + " " + GENPROC_NAME + _
+	       genFlattenTokens( body->hdrhead, firstline )
+
+	errPushInstLocation( descz, @env.inf.name, lexLineNum( ) )
+
+	if( genReplayBegin( st, text, body->srcline, body->srcfile ) ) then
+		dim as integer is_nested = FALSE
+		dim as FB_SYMBATTRIB attrib = FB_SYMBATTRIB_NONE
+
+		'' Give the prototype the same default visibility cProcStmtBegin will
+		'' give the body.  Without this the two differ in PUBLIC/PRIVATE, do not
+		'' match as prototype-and-definition, and the body is reported as a
+		'' duplicate.
+		if( env.opt.procpublic ) then
+			attrib or= FB_SYMBATTRIB_PUBLIC
+		else
+			attrib or= FB_SYMBATTRIB_PRIVATE
+		end if
+
+		genctx2.depth += 1
+
+		'' Skip the kind keyword the replay text starts with.
+		'' lexGetToken() first, to prime the lexer: skipping before the current
+		'' token has been read leaves the keyword in place, and cProcHeader then
+		'' tries to use 'function' itself as the procedure name.
+		if( lexGetToken( ) = body->kindtk ) then
+			lexSkipToken( LEXCHECK_POST_SUFFIX )
+		end if
+
+		cProcHeader( attrib, 0, is_nested, FB_PROCOPT_ISPROTO, body->kindtk )
+		genctx2.depth -= 1
+		genReplayEnd( st )
+	end if
+
+	errPopInstLocation( )
+
+	symbNestEnd( FALSE )
+
+	chain_ = symbLookupAt( nsp, @GENPROC_NAME, FALSE, FALSE )
+	if( chain_ = NULL ) then
+		genLeaveGlobalScope( gs )
+		return NULL
+	end if
+	inst = chain_->sym
+
+	'' hMangleProc appends the type arguments as an 'I...E' list once this is
+	'' set, and takes the readable part of the name from the ALIAS.  id.name has
+	'' to stay __FBGENPROC: the deferred body replay finds its own prototype by
+	'' that name.
+	inst->attrib or= FB_SYMBATTRIB_GENERICINST
+
+	if( inst->id.alias = NULL ) then
+		dim as zstring ptr src = genGenericName( gensym )
+		inst->id.alias = ZstrAllocate( len( *src ) )
+		*inst->id.alias = *src
+	end if
+
+	if( entry ) then
+		entry->inst = inst
+		entry->inprogress = FALSE
+	end if
+
+	'' DEFERRED: the body, at the next module-level statement boundary
+	genQueueProcBodies( gensym, nsp, NULL )
+
+	genLeaveGlobalScope( gs )
+
+	function = inst
+end function
+
+'' ----------------------------------------------------------------------------
+'' Type-argument inference (RFC-0001 5)
+'' ----------------------------------------------------------------------------
+''
+'' Unification of the declared parameter types against the argument types, left
+'' to right, first binding wins.  Deliberately minimal, and deliberately without
+'' any implicit conversion: Max( 1, 2.0 ) fails rather than silently picking an
+'' instantiation the author did not intend.
+''
+'' The pattern is matched over the CAPTURED HEADER TOKENS rather than over a
+'' parsed signature.
+''
+'' The alternative -- parse the parameter list once at declaration time with each
+'' type parameter bound to an opaque placeholder type -- needs those placeholders
+'' to have a nominal non-zero size, or every incomplete-type check in the
+'' parameter parser fires.  Matching tokens needs no placeholder to exist at all,
+'' and the positions RFC-0001 5 admits ('T', 'T ptr') are exactly the ones that
+'' are trivial to recognise syntactically.  Anything it cannot match simply fails
+'' inference and asks for explicit arguments, which is what the RFC prescribes
+'' for that case anyway.
+
+type FB_GENPARAMPAT
+	paramidx        as integer                  '' which type parameter, or -1
+	ptrlevels       as integer                  '' 'T ptr ptr' -> 2
+	matched         as integer                  '' pattern understood at all?
+end type
+
+'' Which type parameter does this name refer to?  -1 if none.
+private function hTypeParamIndex _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval text as zstring ptr _
+	) as integer
+
+	dim as FBSYMBOL ptr prm = gensym->gen.paramhead
+	dim as integer i = 0
+	dim as string want = ucase( *text )
+
+	while( prm )
+		if( ucase( *symbGetName( prm ) ) = want ) then
+			return i
+		end if
+		prm = prm->next
+		i += 1
+	wend
+
+	function = -1
+end function
+
+'' Walk the captured header and describe each parameter's declared type.
+''
+'' Returns the number of parameters found.  Tokens look like
+''     ( byval a as T , byref b as T ptr )
+'' so parameters split on commas at paren depth 1, and a parameter's type is
+'' whatever follows its last 'as' at that depth.
+private function hScanParamPatterns _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval hdr as FB_GENTOK ptr, _
+		pat() as FB_GENPARAMPAT _
+	) as integer
+
+	dim as FB_GENTOK ptr n = hdr
+	dim as integer depth = 0, count = 0
+	dim as integer sawas = FALSE
+
+	'' skip to just inside the opening '('
+	while( n andalso (*n->text <> "(") )
+		n = n->next
+	wend
+	if( n = NULL ) then
+		return 0
+	end if
+	depth = 1
+	n = n->next
+
+	pat( 0 ).paramidx = -1
+	pat( 0 ).ptrlevels = 0
+	pat( 0 ).matched = FALSE
+
+	while( n )
+		dim as string t = *n->text
+
+		if( t = "(" ) then
+			depth += 1
+			'' 'arr() as T' -- an array parameter; not inferred here
+			if( (depth = 2) andalso (sawas = FALSE) ) then
+				pat( count ).matched = FALSE
+			end if
+		elseif( t = ")" ) then
+			depth -= 1
+			if( depth = 0 ) then
+				exit while
+			end if
+		elseif( (depth = 1) andalso (t = ",") ) then
+			count += 1
+			if( count >= FB_MAXGENERICARGS ) then
+				exit while
+			end if
+			pat( count ).paramidx = -1
+			pat( count ).ptrlevels = 0
+			pat( count ).matched = FALSE
+			sawas = FALSE
+		elseif( depth = 1 ) then
+			if( ucase( t ) = "AS" ) then
+				sawas = TRUE
+				'' a fresh type starts here; forget anything seen before
+				pat( count ).paramidx = -1
+				pat( count ).ptrlevels = 0
+				pat( count ).matched = FALSE
+			elseif( sawas ) then
+				select case ucase( t )
+				case "PTR", "POINTER"
+					if( pat( count ).matched ) then
+						pat( count ).ptrlevels += 1
+					end if
+				case "CONST"
+					'' ignore; CONST-ness does not participate
+				case else
+					if( pat( count ).paramidx = -1 ) then
+						dim as integer idx = hTypeParamIndex( gensym, strptr( t ) )
+						if( idx >= 0 ) then
+							pat( count ).paramidx = idx
+							pat( count ).matched = TRUE
+						else
+							'' a concrete type, or something more involved
+							'' (a nested generic); it binds nothing
+							pat( count ).matched = FALSE
+						end if
+					else
+						'' more tokens after the type name that this does not
+						'' model -- refuse to guess
+						pat( count ).matched = FALSE
+					end if
+				end select
+			end if
+		end if
+
+		n = n->next
+	wend
+
+	'' an empty parameter list has no parameters, not one
+	if( (count = 0) andalso (pat( 0 ).paramidx = -1) andalso (pat( 0 ).matched = FALSE) andalso (sawas = FALSE) ) then
+		return 0
+	end if
+
+	function = count + 1
+end function
+
+'' TypeArgList at a call site: '( OF TypeRef (',' TypeRef)* ')'
+''
+'' On entry the procedure's name has been consumed and the current token is the
+'' '('.  On exit the whole clause is consumed, so the caller continues at the
+'' real argument list exactly as for an ordinary call.
+function cGenericProcArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
+
+	dim as integer argdtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as FBSYMBOL ptr argsubtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as integer argcount = 0, dtype = any, lgt = any
+	dim as FBSYMBOL ptr subtype = any
+
+	function = NULL
+
+	if( lexGetToken( ) <> CHAR_LPRNT ) then
+		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+	lexSkipToken( LEXCHECK_POST_SUFFIX )
+
+	if( hMatchIdOrKw( "OF", LEXCHECK_POST_SUFFIX ) = FALSE ) then
+		errReportEx( FB_ERRMSG_GENERICNEEDSTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+
+	do
+		if( argcount >= FB_MAXGENERICARGS ) then
+			errReportEx( FB_ERRMSG_WRONGTYPEARGCOUNT, genGenericName( gensym ) )
+			return NULL
+		end if
+
+		dtype = FB_DATATYPE_INVALID
+		subtype = NULL
+		lgt = 0
+
+		if( cSymbolType( dtype, subtype, lgt, 0 ) = FALSE ) then
+			errReport( FB_ERRMSG_SYNTAXERROR )
+			return NULL
+		end if
+
+		argdtype( argcount ) = dtype
+		argsubtype( argcount ) = subtype
+		argcount += 1
+
+		if( lexGetToken( ) <> CHAR_COMMA ) then
+			exit do
+		end if
+		lexSkipToken( LEXCHECK_POST_SUFFIX )
+	loop
+
+	if( hMatch( CHAR_RPRNT, LEXCHECK_POST_SUFFIX ) = FALSE ) then
+		errReport( FB_ERRMSG_EXPECTEDRPRNT )
+		return NULL
+	end if
+
+	function = genInstantiateProc( gensym, argdtype(), argsubtype(), argcount )
+end function
+
+'' An inferred call: 'Swap2( x, y )', with no type arguments written.
+''
+'' The argument expressions are parsed HERE, before the procedure exists, which
+'' is the whole difficulty: cProcArgList needs a procedure symbol up front, and
+'' inference needs the argument types up front.  They are parsed once, kept, and
+'' handed to the instantiated procedure afterwards -- cProcArgList already
+'' supports exactly that, since it feeds any pre-existing arg_list entries
+'' through astNewARG before parsing anything itself.
+''
+'' Parentheses are required.  A paren-less statement call ('Swap2 x, y') would
+'' have to parse an argument list with no idea where it ends, and the RFC's
+'' inference examples are all parenthesised.
+function cGenericProcInferredCall _
+	( _
+		byval base_parent as FBSYMBOL ptr, _
+		byval gensym as FBSYMBOL ptr, _
+		byval options as FB_PARSEROPT _
+	) as ASTNODE ptr
+
+	static as FB_GENPARAMPAT pat( 0 to FB_MAXGENERICARGS-1 )
+	dim as ASTNODE ptr argexpr( 0 to FB_MAXGENERICARGS-1 )
+	dim as integer argdtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as FBSYMBOL ptr argsubtype( 0 to FB_MAXGENERICARGS-1 )
+
+	dim as integer bounddtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as FBSYMBOL ptr boundsubtype( 0 to FB_MAXGENERICARGS-1 )
+	dim as integer isbound( 0 to FB_MAXGENERICARGS-1 )
+
+	dim as integer argcount = 0, paramcount = any
+
+	function = NULL
+
+	dim as FB_GENPROC ptr body = genGetProcBodies( gensym )
+	if( body = NULL ) then
+		errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+
+	if( lexGetToken( ) <> CHAR_LPRNT ) then
+		errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+	lexSkipToken( )
+
+	'' argument expressions
+	if( lexGetToken( ) <> CHAR_RPRNT ) then
+		do
+			if( argcount >= FB_MAXGENERICARGS ) then
+				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+				return NULL
+			end if
+
+			dim as ASTNODE ptr e = cExpression( )
+			if( e = NULL ) then
+				errReport( FB_ERRMSG_EXPECTEDEXPRESSION )
+				return NULL
+			end if
+
+			argexpr( argcount ) = e
+			argdtype( argcount ) = astGetFullType( e )
+			argsubtype( argcount ) = astGetSubtype( e )
+			argcount += 1
+
+			if( lexGetToken( ) <> CHAR_COMMA ) then
+				exit do
+			end if
+			lexSkipToken( )
+		loop
+	end if
+
+	if( hMatch( CHAR_RPRNT ) = FALSE ) then
+		errReport( FB_ERRMSG_EXPECTEDRPRNT )
+		return NULL
+	end if
+
+	'' unify
+	for i as integer = 0 to gensym->gen.paramcount-1
+		isbound( i ) = FALSE
+	next
+
+	paramcount = hScanParamPatterns( gensym, body->hdrhead, pat() )
+
+	if( paramcount <> argcount ) then
+		errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+		return NULL
+	end if
+
+	for i as integer = 0 to argcount-1
+		if( pat( i ).matched = FALSE ) then
+			continue for
+		end if
+
+		dim as integer dtype = argdtype( i )
+		dim as FBSYMBOL ptr subtype = argsubtype( i )
+
+		'' 'T ptr' binds T to the pointee
+		for k as integer = 1 to pat( i ).ptrlevels
+			if( typeIsPtr( dtype ) = 0 ) then
+				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+				return NULL
+			end if
+			dtype = typeDeref( dtype )
+		next
+
+		'' CONST-ness of the argument does not participate
+		dtype = typeUnsetIsConst( dtype )
+
+		'' The one normalisation inference performs: a string LITERAL has type
+		'' zstring (or a fixed-length string), and neither can be a BYVAL
+		'' parameter, so Max( "abc", "abd" ) would infer 'Max( of zstring )' and
+		'' then fail deep inside the instantiated body with "Illegal
+		'' specification, at parameter 1".
+		''
+		'' This is not the implicit conversion RFC-0001 5 rules out.  That rule
+		'' is about never silently choosing between two types the author
+		'' actually wrote -- Max( 1, 2.0 ) must fail rather than promote.  Here
+		'' both arguments are string literals and 'string' is the only type the
+		'' author could have meant.
+		if( pat( i ).ptrlevels = 0 ) then
+			select case typeGetDtOnly( dtype )
+			case FB_DATATYPE_CHAR, FB_DATATYPE_FIXSTR
+				dtype = FB_DATATYPE_STRING
+				subtype = NULL
+			end select
+		end if
+
+		dim as integer p = pat( i ).paramidx
+		if( isbound( p ) = FALSE ) then
+			bounddtype( p ) = dtype
+			boundsubtype( p ) = subtype
+			isbound( p ) = TRUE
+		else
+			'' No implicit conversion: two positions binding the same parameter
+			'' to different types is an error, not a promotion.
+			''
+			'' Max( v + v, v ) is rejected, and that is correct rather than a
+			'' shortcoming: FreeBASIC promotes 'long + long' to the native
+			'' INTEGER, so those two arguments really ARE integer and long.
+			'' Measured, after two wrong guesses at a non-existent bug -- the
+			'' argument dtypes were 8 (INTEGER) and 11 (LONG).
+			if( (bounddtype( p ) <> dtype) orelse (boundsubtype( p ) <> subtype) ) then
+				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+				return NULL
+			end if
+		end if
+	next
+
+	for i as integer = 0 to gensym->gen.paramcount-1
+		if( isbound( i ) = FALSE ) then
+			errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+			return NULL
+		end if
+	next
+
+	dim as FBSYMBOL ptr proc = genInstantiateProc( gensym, bounddtype(), boundsubtype(), _
+	                                               gensym->gen.paramcount )
+	if( proc = NULL ) then
+		return NULL
+	end if
+
+	'' Build the call from the arguments already parsed.  Same sequence
+	'' cProcArgList uses for its pre-defined args.
+	dim as ASTNODE ptr procexpr = astNewCALL( proc, NULL )
+
+	for i as integer = 0 to argcount-1
+		if( astNewARG( procexpr, argexpr( i ) ) = NULL ) then
+			astDelTree( procexpr )
+			return astBuildFakeCall( proc )
+		end if
+	next
+
+	procexpr = astBuildByrefResultDeref( procexpr )
+
+	function = procexpr
 end function

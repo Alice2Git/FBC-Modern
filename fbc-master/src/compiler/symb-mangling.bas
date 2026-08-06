@@ -49,6 +49,7 @@ declare function hAbbrevAdd _
 		byval dtype as integer, _
 		byval subtype as FBSYMBOL ptr _
 	) as FB_MANGLEABBR ptr
+declare sub hMangleTemplateArgs( byref mangled as string, byval sym as FBSYMBOL ptr )
 
 '' inside a namespace or class?
 ''
@@ -246,6 +247,18 @@ private sub hMangleUdtId( byref mangled as string, byval sym as FBSYMBOL ptr )
 	'' mangled, so a pre-rendered string would be wrong in most contexts.
 	''
 	if( symbIsStruct( sym ) and symbIsGenericInst( sym ) ) then
+		hMangleTemplateArgs( mangled, sym )
+	end if
+end sub
+
+'' The 'I<args>E' template argument list of a generic instantiation.
+''
+'' Shared by hMangleUdtId (instantiated TYPES) and hMangleProc (instantiated
+'' PROCEDURES).  The arguments are recovered from the TYPEDEFs in the
+'' instantiation's synthetic namespace -- those bindings ARE the type arguments,
+'' in declaration order.  They are re-mangled here rather than stored as text
+'' because the Itanium abbreviation indices depend on the symbol being mangled.
+private sub hMangleTemplateArgs( byref mangled as string, byval sym as FBSYMBOL ptr )
 		dim as FBSYMBOL ptr nsp = symbGetNamespace( sym )
 		if( nsp <> NULL ) then
 			if( symbIsGenericScope( nsp ) ) then
@@ -298,7 +311,6 @@ private sub hMangleUdtId( byref mangled as string, byval sym as FBSYMBOL ptr )
 				mangled += "E" '' end of template argument list
 			end if
 		end if
-	end if
 end sub
 
 function symbGetMangledName( byval sym as FBSYMBOL ptr ) as zstring ptr
@@ -1488,7 +1500,13 @@ private sub hMangleProc( byval sym as FBSYMBOL ptr )
 	elseif( symbIsDestructor1( sym ) ) then
 		mangled += "D1"
 	else
-		if( symbGetMangling( sym ) = FB_MANGLING_BASIC ) then
+		if( symbIsGenericInst( sym ) ) then
+			'' An instantiated generic procedure.  id.name is the internal
+			'' __FBGENPROC -- it has to stay that way, because the deferred body
+			'' replay finds its own prototype by that name -- so the ALIAS
+			'' carries the generic's source-case name for the outside world.
+			id = sym->id.alias
+		elseif( symbGetMangling( sym ) = FB_MANGLING_BASIC ) then
 			'' BASIC, use the upper-cased name
 			id = sym->id.name
 		else
@@ -1517,6 +1535,23 @@ private sub hMangleProc( byval sym as FBSYMBOL ptr )
 				mangled += "__get__"
 			end if
 		end if
+	end if
+
+	'' Template argument list of an instantiated generic procedure.
+	''
+	'' Emitted whether or not C++ mangling is in effect, and that is the point:
+	'' under BASIC mangling a procedure's parameters are not encoded at all, so
+	'' without this every instantiation of 'MakeZero( of T )( ) as T' -- where
+	'' the type argument appears ONLY in the return type -- would collapse onto
+	'' the same external name.  Itanium type codes are alphanumeric, so the
+	'' result stays a legal identifier either way.
+	''
+	'' Note this is not how Itanium encodes a C++ function template, which
+	'' references the template parameters from the signature (T_, S0_).  Nothing
+	'' here needs to interoperate with a C++ template; what is needed is a name
+	'' that is unique per argument list and identical in every compilation unit.
+	if( symbIsGenericInst( sym ) ) then
+		hMangleTemplateArgs( mangled, sym )
 	end if
 
 	'' params

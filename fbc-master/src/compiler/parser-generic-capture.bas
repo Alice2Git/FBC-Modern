@@ -443,6 +443,8 @@ private function hAddProcBody _
 	dim as FB_GENPROC ptr n = listNewNode( @genprocctx.list )
 	n->gensym  = gensym
 	n->kindtk  = kindtk
+	n->hdrhead = NULL
+	n->hdrtail = NULL
 	n->tokhead = NULL
 	n->toktail = NULL
 	n->srcline = lexLineNum( )
@@ -495,7 +497,58 @@ function genIsGenericMemberProc( ) as integer
 		return FALSE
 	end if
 
-	if( genLookupGeneric( ) = NULL ) then
+	dim as FBSYMBOL ptr gensym = genLookupGeneric( )
+	if( gensym = NULL ) then
+		return FALSE
+	end if
+
+	'' Only a generic TYPE/UNION has member bodies.  Without this,
+	'' re-declaring a generic PROCEDURE would take the member-body path and
+	'' fail asking for a '.', instead of reporting the duplicate.
+	select case gensym->gen.kind
+	case FB_GENERICKIND_TYPE, FB_GENERICKIND_UNION
+	case else
+		return FALSE
+	end select
+
+	if( lexGetLookAhead( 1 ) <> CHAR_LPRNT ) then
+		return FALSE
+	end if
+
+	function = (ucase( *lexGetLookAheadText( 2 ) ) = "OF")
+end function
+
+'' Is the parser looking at 'Name( of T )( ... )' -- a generic PROCEDURE
+'' declaration?
+''
+'' Unlike a generic type, 'sub Name(' is ordinary syntax, so this has to be
+'' told apart from a normal parameter list.  The trap is that 'of' is not a
+'' keyword and never will be (RFC-0001 guarantees existing code keeps
+'' compiling), so
+''
+''     sub foo( of as long )
+''
+'' declares a PARAMETER called 'of' and must keep working.  Verified against the
+'' compiler before this was written: that, 'byval of as long', 'dim of as long'
+'' and even 'sub of( ... )' all compile today.
+''
+'' One more token settles it.  A type parameter list always has an identifier
+'' after 'of'; a parameter named 'of' is followed by 'as', ',' or ')'.
+'' At a call site, with the procedure's name already consumed: is this
+'' 'Name( of long )( ... )' or the inferred 'Name( ... )'?
+''
+'' One token of text look-ahead, and only when a '(' is actually there, so an
+'' inferred call costs nothing extra.
+function genHasExplicitTypeArgs( ) as integer
+	if( lexGetToken( ) <> CHAR_LPRNT ) then
+		return FALSE
+	end if
+
+	function = (ucase( *lexGetLookAheadText( 1 ) ) = "OF")
+end function
+
+function genIsGenericProcDecl( ) as integer
+	if( lexGetClass( ) <> FB_TKCLASS_IDENTIFIER ) then
 		return FALSE
 	end if
 
@@ -503,7 +556,11 @@ function genIsGenericMemberProc( ) as integer
 		return FALSE
 	end if
 
-	function = (ucase( *lexGetLookAheadText( 2 ) ) = "OF")
+	if( ucase( *lexGetLookAheadText( 2 ) ) <> "OF" ) then
+		return FALSE
+	end if
+
+	function = (lexGetLookAheadClass( 3 ) = FB_TKCLASS_IDENTIFIER)
 end function
 
 '' '(' OF ID (',' ID)* ')' on an out-of-line body, checked against the generic's
@@ -663,6 +720,91 @@ function cGenericProcDecl( byval tk as integer ) as integer
 	'' every existing instantiation retro-queues it.  Instantiations made later
 	'' pick it up from the generic's list instead.
 	genQueueProcBodies( gensym, NULL, body )
+
+	function = TRUE
+end function
+
+'' ----------------------------------------------------------------------------
+'' Generic procedures
+'' ----------------------------------------------------------------------------
+
+'' Capture the header: everything from the '(' of the parameter list up to, but
+'' not including, the end of the declaration line.
+''
+'' Stops at EOL or ':' so that a one-liner --
+''     sub f( of T )( byval x as T ) : print x : end sub
+'' -- splits in the same place a multi-line declaration does.
+private sub hCaptureProcHeader( byval d as FB_GENPROC ptr )
+	do
+		select case lexGetToken( GENTOK_FLAGS )
+		case FB_TK_EOL, FB_TK_EOF, FB_TK_STMTSEP, FB_TK_COMMENT, FB_TK_REM
+			exit do
+		end select
+
+		hAddTokTo( d->hdrhead, d->hdrtail, lexGetText( ), lexLineNum( ) )
+		lexSkipToken( GENTOK_FLAGS )
+	loop
+end sub
+
+'' SUB|FUNCTION|... ID '(' OF ... ')' ParamList ... END SUB|FUNCTION|...
+''
+'' Called from cProcStmtBegin() once the kind keyword has been consumed and the
+'' current token is seen to be 'Name( of Id'.  Returns TRUE if the statement was
+'' consumed here.
+function cGenericProcDeclNew( byval tk as integer ) as integer
+
+	dim as FBSYMBOL ptr sym = any
+	dim as integer startline = lexLineNum( )
+	dim as zstring * FB_MAXNAMELEN+1 id
+
+	lexEatToken( @id, LEXCHECK_NOPERIOD or LEXCHECK_POST_SUFFIX )
+
+	'' the source-case name is kept as the alias, exactly as for a generic type
+	sym = symbNewSymbol( FB_SYMBOPT_DOHASH, NULL, NULL, NULL, _
+	                     FB_SYMBCLASS_GENERIC, @id, @id, _
+	                     FB_DATATYPE_VOID, NULL, _
+	                     FB_SYMBATTRIB_NONE, FB_PROCATTRIB_NONE )
+
+	if( sym = NULL ) then
+		errReportEx( FB_ERRMSG_DUPDEFINITION, @id )
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	sym->gen.kind = FB_GENERICKIND_PROC
+	sym->gen.tokhead = NULL
+	sym->gen.toktail = NULL
+	sym->gen.instances = NULL
+	sym->gen.srcline = startline
+	sym->gen.srcfile = ZstrAllocate( len( env.inf.name ) )
+	*sym->gen.srcfile = env.inf.name
+
+	if( hTypeParamList( sym ) = FALSE ) then
+		hSkipCompound( tk )
+		return TRUE
+	end if
+
+	'' A generic procedure is modelled as a generic owning exactly ONE body, so
+	'' the deferred-replay machinery built for member bodies carries it
+	'' unchanged -- including the retro-queueing that makes declaration order
+	'' irrelevant.
+	dim as FB_GENPROC ptr d = hAddProcBody( sym, tk )
+	d->srcline = startline
+
+	hCaptureProcHeader( d )
+
+	'' Drop the EOL or ':' that ended the header.  An EOL token's text is a bare
+	'' LF, and the body's line structure is rebuilt from the recorded line
+	'' numbers anyway, so keeping it would only add a stray blank line.
+	select case lexGetToken( GENTOK_FLAGS )
+	case FB_TK_EOL, FB_TK_STMTSEP
+		lexSkipToken( GENTOK_FLAGS )
+	end select
+
+	'' the rest, terminator included, replayed later as the body
+	if( hCaptureProcBody( d, sym, startline ) = FALSE ) then
+		return TRUE
+	end if
 
 	function = TRUE
 end function

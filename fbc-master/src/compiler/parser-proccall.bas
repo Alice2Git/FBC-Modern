@@ -458,6 +458,59 @@ private function hProcSymbol _
 	function = cAssignFunctResult( FALSE )
 end function
 
+'' A generic procedure used as a statement: 'Swap2( of long )( x, y )'.
+''
+'' Mirrors hProcSymbol, minus the '=' handling -- a generic procedure cannot be
+'' the target of a function-result assignment, since that names the enclosing
+'' procedure and an instantiation is never the one being parsed.
+''
+'' The identifier is skipped here rather than by the callee because the type
+'' argument list sits between the name and the real arguments, and somebody has
+'' to consume it before cProcCall() sees a '('.
+private function hGenericProcSymbol _
+	( _
+		byval base_parent as FBSYMBOL ptr, _
+		byval gensym as FBSYMBOL ptr, _
+		byval options as FB_PARSEROPT = 0 _
+	) as integer
+
+	function = FALSE
+
+	if( cCompStmtIsAllowed( FB_CMPSTMT_MASK_CODE ) = FALSE ) then
+		hSkipStmt( )
+		return TRUE
+	end if
+
+	'' ID
+	lexSkipToken( LEXCHECK_POST_SUFFIX )
+
+	dim as ASTNODE ptr expr = any
+
+	if( genHasExplicitTypeArgs( ) ) then
+		dim as FBSYMBOL ptr proc = cGenericProcArgs( gensym )
+		if( proc = NULL ) then
+			hSkipStmt( )
+			return TRUE
+		end if
+		expr = cProcCall( base_parent, proc, NULL, NULL, FALSE, options )
+	else
+		expr = cGenericProcInferredCall( base_parent, gensym, options )
+
+		'' a SUB used as a statement, or a FUNCTION whose result is discarded
+		if( expr <> NULL ) then
+			if( cMaybeIgnoreCallResult( expr ) ) then
+				expr = NULL
+			end if
+		end if
+	end if
+
+	if( expr <> NULL ) then
+		cAssignment( expr )
+	end if
+
+	function = TRUE
+end function
+
 '':::::
 private function hVarSymbol _
 	( _
@@ -653,6 +706,12 @@ private function hAssignOrCall _
 			'' proc?
 			case FB_SYMBCLASS_PROC
 				return hProcSymbol( base_parent, sym, iscall, options )
+
+			'' generic procedure -- 'Swap2( of long )( x, y )'
+			case FB_SYMBCLASS_GENERIC
+				if( sym->gen.kind = FB_GENERICKIND_PROC ) then
+					return hGenericProcSymbol( base_parent, sym, options )
+				end if
 
 			case FB_SYMBCLASS_VAR
 				'' must process variables here, multiple calls to

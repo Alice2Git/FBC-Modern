@@ -285,6 +285,24 @@ private function hFindId _
 			case FB_SYMBCLASS_PROC
 				return cFunctionEx( base_parent, sym, options )
 
+			'' generic procedure in an expression -- 'print Max( of long )( 1, 2 )'
+			case FB_SYMBCLASS_GENERIC
+				if( sym->gen.kind = FB_GENERICKIND_PROC ) then
+					'' ID, then either an explicit type argument list or an
+					'' inferred call
+					lexSkipToken( LEXCHECK_POST_SUFFIX )
+
+					if( genHasExplicitTypeArgs( ) ) then
+						dim as FBSYMBOL ptr proc = cGenericProcArgs( sym )
+						if( proc = NULL ) then
+							return NULL
+						end if
+						return cFunctionCall( base_parent, proc, NULL, NULL, options )
+					end if
+
+					return cGenericProcInferredCall( base_parent, sym, options )
+				end if
+
 			case FB_SYMBCLASS_VAR
 				return cVariableEx( chain_, fbGetCheckArray( ) )
 

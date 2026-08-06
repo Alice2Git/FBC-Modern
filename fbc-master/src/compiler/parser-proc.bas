@@ -1918,6 +1918,15 @@ sub cProcStmtBegin( byval attrib as FB_SYMBATTRIB, byval pattrib as FB_PROCATTRI
 		end if
 	end if
 
+	'' 'sub Swap2( of T )( ... )' -- a generic procedure.  Nothing is declared
+	'' yet: the header is replayed when a call site first needs it, and the body
+	'' at the next statement boundary.
+	if( genIsGenericProcDecl( ) ) then
+		if( cGenericProcDeclNew( tkn ) ) then
+			exit sub
+		end if
+	end if
+
 	'' ProcHeader
 	proc = cProcHeader( attrib, pattrib, is_nested, FB_PROCOPT_NONE, tkn )
 	if( proc = NULL ) then

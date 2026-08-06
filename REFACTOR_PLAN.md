@@ -58,7 +58,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 3 — parser save/restore + replay + minimal instantiation | **done** — gate green |
 | 4 — type instantiation engine | **part 1 done** — mangling, recursion, depth limit |
 | 5 — member protos + out-of-line bodies | **done** — gate green |
-| 6 — generic procedures + inference | not started |
+| 6 — generic procedures + inference | **done** — gate green |
 | 7 — ctors/dtors/copy | not started |
 | 8 — operators + properties | not started |
 | 9 — inheritance/virtual *(cut line)* | not started |
@@ -577,6 +577,160 @@ failure list.
 - **A body for a member that was never declared** reports
   `Expected End-of-Line, found '.'`. Confirmed identical in plain FreeBASIC for
   `sub Box.nope()`, so pre-existing, not introduced here.
+
+---
+
+## Phase 6 — what landed
+
+Generic procedures, called with explicit type arguments or with them inferred.
+
+```freebasic
+sub Swap2( of T )( byref a as T, byref b as T )
+function Max( of T )( byval a as T, byval b as T ) as T
+
+Swap2( of long )( x, y )      Swap2( x, y )
+Max( of string )( "a", "b" )  Max( "a", "b" )
+Deref( @v )                   '' T ptr binds T to the pointee
+Pick( 7, 2.5 )                '' two parameters, independently inferred
+```
+
+### A generic procedure is a generic owning exactly one body
+
+That framing is what kept this phase small: the whole Phase 5 deferred-queue
+machinery carries generic procedures unchanged, including the retro-queueing
+that makes declaration order irrelevant.
+
+What is new is the split. The **header** is replayed eagerly, as a prototype,
+the moment a call site needs a callable symbol; the **body** waits for a
+statement boundary, because a call site is mid-expression and no procedure can
+be opened there. That is exactly how FreeBASIC already treats a prototype and
+its out-of-line body, so matching the two needed nothing new.
+
+### Recognising the declaration — the backward-compatibility trap
+
+Unlike `type Foo(`, the sequence `sub Foo(` is ordinary syntax, and `of` is not
+a keyword and never will be. Checked against the compiler **before** writing the
+detector, not after:
+
+| probe | today |
+| --- | --- |
+| `sub foo( of as long )` | OK — and must stay OK |
+| `sub foo( byval of as long )` | OK |
+| `dim of as long` | OK |
+| `sub of( byval x as long )` | OK |
+
+One extra token settles it: a type parameter list always has an identifier after
+`of`, while a parameter *named* `of` is followed by `as`, `,` or `)`. So
+detection needs `(` + text `OF` + **token 3 is an identifier**.
+
+The Phase 5 member-proc detector was also tightened to fire only for generic
+*types*; otherwise re-declaring a generic procedure took the member-body path and
+complained about a missing `.` instead of reporting the duplicate.
+
+### Three bugs on the way, all found by probing
+
+1. **The eager prototype could not be a `declare`.** Replaying one through
+   `cProgram` fails with *"Illegal inside a NAMESPACE block"* whenever the call
+   site is inside another procedure's body — `cProcDecl` gates on
+   `cCompStmtIsAllowed( FB_CMPSTMT_MASK_DECL )` and the enclosing `FUNCTION`
+   stack entry refuses it. Now calls `cProcHeader` directly, which has no such
+   gate and is all that statement was wanted for.
+
+2. **Mangling collapsed instantiations onto `_Z11__FBGENPROCv`.** Procedures do
+   not go through `hMangleUdtId`, so they never got the `I…E` treatment. That
+   emission is now a shared helper used by both, and for procedures it is emitted
+   **whether or not C++ mangling is active**: under BASIC mangling a procedure's
+   parameters are not encoded at all, so `MakeZero( of T )( ) as T` — type
+   argument only in the return type — would otherwise give every instantiation
+   the same name.
+
+3. **`lexSkipToken` before the lexer was primed.** The kind keyword was never
+   actually skipped, so `cProcHeader` tried to use `function` itself as the
+   procedure's name, surfacing as a baffling "Duplicated definition" reported
+   against the generic's own source line. Two dead-end theories (visibility
+   attributes, then the body queue) died before a one-line repro made it obvious.
+   **`lexGetToken( )` first.**
+
+### Inference (RFC-0001 §5)
+
+The pattern is matched over the **captured header tokens**, not over a parsed
+signature. The plan proposed parsing the parameter list at declaration with each
+type parameter bound to an opaque placeholder, and flagged that placeholders need
+a nominal non-zero size or every incomplete-type check fires — *"the most likely
+place for this plan to need a design change"*. Matching tokens needs no
+placeholder to exist at all, and the positions the RFC admits (`T`, `T ptr`) are
+precisely the ones trivial to recognise syntactically. Anything the matcher does
+not understand falls through to a clean inference failure, which is what the RFC
+prescribes for that case anyway. **The flagged risk never materialised because
+that road was not taken.**
+
+The ordering problem — `cProcArgList` wants the procedure before it parses
+arguments, inference wants the argument types before the procedure exists — is
+resolved by parsing the arguments once, keeping them, and handing them over
+afterwards. `cProcArgList` already supports exactly that: it feeds pre-existing
+`arg_list` entries through `astNewARG` before parsing anything itself.
+
+**One deliberate normalisation.** A string *literal* has type `zstring`, which
+cannot be a `byval` parameter, so `Max( "abc", "abd" )` inferred
+`Max( of zstring )` and then failed deep inside the instantiated body with
+"Illegal specification, at parameter 1". A literal's `zstring`/fixed-length type
+is now normalised to `string`. This is **not** the implicit conversion §5 rules
+out: that rule exists so inference never silently picks between two types the
+author actually wrote, and it still does not. Here both arguments are literals
+and `string` is the only type meant.
+
+### The inference "bug" that was not one
+
+`Max( v + v, v )` fails to infer. It looks like the same variable twice, and it
+looked like a defect for two rounds of wrong guessing — first the mangling-only
+type bits, then comparing rendered types instead of raw `(dtype, subtype)` pairs.
+Neither changed anything, because neither was the cause.
+
+One trace run settled it: the argument dtypes are **8 (`FB_DATATYPE_INTEGER`)**
+and **11 (`FB_DATATYPE_LONG`)**. FreeBASIC promotes `long + long` to the native
+integer, so the two arguments genuinely differ and §5 requires the rejection.
+`Max( v, w )` and `Max( v + v, w + w )` work because each is self-consistent;
+only the mix conflicts.
+
+Both speculative fixes were **reverted** — each was an unjustified change
+carrying a comment asserting an invented cause. The original comparison was
+correct throughout. `fail-infer-mixed-promotion.bas` now pins the behaviour with
+the measured dtypes recorded, so nobody re-derives this.
+
+**Lesson, and it is the fourth of its kind here:** after `base`, `A`/`a`, `K` and
+now integer promotion, an unexpected result is more often the test than the
+compiler. Two theories cost more than one trace would have.
+
+A second self-inflicted one: stripping the debug trace with `sed` deleted the
+first line of a two-line `print` joined by `_`, leaving an orphaned continuation
+that broke the build — and the harness in the same command then ran the **stale**
+compiler and printed trace output. Twice this session a stale binary has produced
+misleading results. Delete the artifact before every probe.
+
+### Not implemented, deliberately
+
+- `arr() as T` and nested `Vector( of T )` inference positions. Both fall
+  through to a clean "specify them explicitly".
+- Paren-less inferred statement calls (`Swap2 x, y`); an inferred call requires
+  parentheses, since otherwise the argument list has no determinable end.
+- Optional/default arguments and varargs on generic procedures are untested.
+- Overload interaction (a viable non-generic beating a viable generic) — there is
+  no overloading of generics in v1, so nothing exercises it yet.
+
+### Phase 6 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | see commit |
+| unit-tests, `GEN=gas64` | see commit |
+| log-tests | see commit |
+| `tests/warnings` golden, 5 targets | clean |
+| `tests/errors` golden, 5 targets | clean |
+
+Tests added: `generic-procs.bas` (explicit and inferred, `T ptr`, two type
+parameters, return-type-only, generic calling generic, generic type method
+calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ---
 

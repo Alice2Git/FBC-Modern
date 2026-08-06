@@ -1140,7 +1140,20 @@ declare function genFlattenTokens _
 type FB_GENPROC
 	gensym          as FBSYMBOL ptr
 	kindtk          as integer                  '' FB_TK_SUB / FUNCTION / OPERATOR / ...
-	tokhead         as FB_GENTOK ptr
+
+	'' A generic PROCEDURE's own signature: '( params ) [as ret]'.  NULL for a
+	'' member body of a generic type, whose captured chain already starts with
+	'' '.name( params )' and so needs no separate header.
+	''
+	'' The two are kept apart because they are replayed at different times: this
+	'' half is replayed EAGERLY, the moment a call site needs a callable symbol,
+	'' as 'declare sub __FBGENPROC( ... )'; the body waits for a statement
+	'' boundary like any other, since a call site is mid-expression and no
+	'' procedure can be opened there.
+	hdrhead         as FB_GENTOK ptr
+	hdrtail         as FB_GENTOK ptr
+
+	tokhead         as FB_GENTOK ptr            '' body, through 'end sub'
 	toktail         as FB_GENTOK ptr
 	srcline         as integer
 	srcfile         as zstring ptr
@@ -1150,6 +1163,34 @@ end type
 declare function genGenericName( byval gensym as FBSYMBOL ptr ) as zstring ptr
 declare function genLookupGeneric( ) as FBSYMBOL ptr
 declare function genIsGenericMemberProc( ) as integer
+declare function genIsGenericProcDecl( ) as integer
+declare function cGenericProcDeclNew( byval tk as integer ) as integer
+
+'' Resolve 'Name( of long )' at a call site to the instantiated procedure.
+'' On entry the identifier has already been consumed and the current token is
+'' the '(' of the type-argument list.  Returns NULL on error.
+declare function cGenericProcArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
+
+'' An inferred call, with no type arguments written: 'Swap2( x, y )'.
+'' On entry the identifier has been consumed and the current token is the '(' of
+'' the ordinary argument list.
+declare function cGenericProcInferredCall _
+	( _
+		byval base_parent as FBSYMBOL ptr, _
+		byval gensym as FBSYMBOL ptr, _
+		byval options as FB_PARSEROPT _
+	) as ASTNODE ptr
+
+'' Is the token after the consumed generic name an explicit '( of ...' list?
+declare function genHasExplicitTypeArgs( ) as integer
+
+declare function genInstantiateProc _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		argdtype() as integer, _
+		argsubtype() as FBSYMBOL ptr, _
+		byval argcount as integer _
+	) as FBSYMBOL ptr
 declare function cGenericProcDecl( byval tk as integer ) as integer
 declare function genGetProcBodies( byval gensym as FBSYMBOL ptr ) as FB_GENPROC ptr
 declare sub genQueueProcBodies _
