@@ -240,11 +240,85 @@ than the primary guard. It was verified to fire rather than assumed.
 | `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
 | mangled names | `c++filt`-demanglable; identical across declaration orders |
 
+### Phase 4 (part 2) — instantiation chain, sizeof
+
+**Instantiation chain notes.** `errctx.instlocations`, mirroring
+`paramlocations`, with `errPushInstLocation`/`errPopInstLocation`. Printed
+outside `errReportEx` so they neither bump `errctx.cnt` (which drives `-maxerr`)
+nor get eaten by the one-error-per-statement filter:
+
+```
+c3.bas(3) error 14: Expected identifier, found 'Wdiget'
+  in instantiation of 'Box( of long )'
+  required from c3.bas(8)
+```
+
+The site is captured *before* the replay swaps `env.inf`, or the chain would
+point at the generic's own file. Two casing defects fixed: `env.inf.incfile` is
+interned and may be up-cased, so the capture now keeps a source-case copy of the
+file name; and the description uses the generic's ALIAS rather than the up-cased
+`id.name`.
+
+**`sizeof` / `len` over an instantiation.** These go through
+`cTypeOrExpression`, which rejects a `(` after an identifier, so generics fell
+through to the expression parser and were reported as undeclared variables.
+
+### Line numbers inside a replayed body — tried, measured, reverted
+
+Errors inside an instantiated body report the **generic's declaration line**,
+not the offending line in the body.
+
+Counting the replayed text's newlines was implemented and backed out.
+Measurement across three fixtures gave `reported = start + 2*newlines + 1`
+consistently — each newline counted by both the character-level sites in
+`lexNextToken` and the token-level site in `lexSkipToken`. Separating the two
+(char sites keep the original `deflen = 0` guard, token site relaxed for
+GENERIC) did **not** fix it, so an EOL token is evidently consumed more than
+once through the look-ahead ring. A confidently wrong line number *inside the
+file* is worse than a coarser correct one, so the frozen behaviour stands and
+the chain supplies the detail.
+
+### A regression the targeted probes missed
+
+The first `sizeof` fix called `lexGetLookAheadText( 2 )` for every `(` following
+an identifier. That peek is not free — it drives the lexer two tokens further
+than the path otherwise would, which disturbs macro expansion — and it broke
+ordinary macro calls:
+
+```
+boolean_bop.bas(204) error 7: Expected ')', found '(' in 'check(  0, and,  0,  0 )'
+```
+
+Every generics probe passed against that compiler; only the full suite caught
+it, on a file unrelated to generics. The peek is now guarded by a cheap symbol
+test (`lexGetSymChain` is already attached, so it costs no extra look-ahead).
+
+**Also worth remembering:** the failure surfaced as my summary filter printing
+*nothing*, because the suite died before producing a summary. Empty output is
+not a pass — check that the log contains a `Total` line.
+
+### Phase 4 (part 2) gate
+
+| Check | Result |
+| --- | --- |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1700 passed, 0 failed** = 1698 + the 2 new tests |
+| `tests/warnings` golden, 5 targets | clean — 340 files regenerated, zero content change |
+
 ### Still open in Phase 4
 
-- instantiation-chain error notes (`in instantiation of X / required from Y`)
-- `sizeof( Box( of long ) )` — needs the `cTypeOrExpression` path
-- readable debug names, and scope placement per deviation D1
+- **Readable debug names.** Every instantiation currently reports as `Box` to
+  the debugger, so GDB sees N distinct types with one name. `symbGetDBGName`
+  needs a per-instantiation readable form on the stabs path only — the mangled
+  path must stay C-identifier-safe.
+- **Scope placement** per deviation D1: instantiations land in the current
+  namespace rather than by `symbLookupInternallyMangledSubtype`'s rules. Fine at
+  module level, which is what the tests cover.
+- **The chain's TEXT is not regression-tested.** The golden error harness agreed
+  in the interview does not exist yet; `fail-error-in-body.bas` only asserts that
+  compilation fails.
+- **In-body line numbers** — see above.
 
 ---
 

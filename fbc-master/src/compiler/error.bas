@@ -18,6 +18,16 @@ type ERRPARAMLOCATION
 	paramid         as zstring ptr
 end type
 
+type ERRINSTLOCATION
+	'' While a generic instantiation is in progress, errors reported inside the
+	'' replayed body are followed by this chain, innermost first:
+	''     in instantiation of 'Box( of MyStruct )'
+	''     required from app.bas(88)
+	desc            as zstring ptr          '' e.g. "Box( of MyStruct )"
+	fname           as zstring ptr          '' where the instantiation was asked for
+	linenum         as integer
+end type
+
 type FB_ERRCTX
 	inited                  as integer
 	cnt                     as integer
@@ -26,12 +36,15 @@ type FB_ERRCTX
 	laststmt                as integer
 	undefhash               as THASH                '' undefined symbols
 	paramlocations          as TLIST  '' ERRPARAMLOCATION's
+	instlocations           as TLIST  '' ERRINSTLOCATION's
 end type
 
 type FBWARNING
 	level       as integer
 	text        as const zstring ptr
 end type
+
+declare sub hPrintInstChain( )
 
 declare function hMakeParamDesc _
 	( _
@@ -474,6 +487,7 @@ sub errInit( )
 	hashInit( @errctx.undefhash, 64, TRUE )
 
 	listInit( @errctx.paramlocations, 4, sizeof( ERRPARAMLOCATION ) )
+	listInit( @errctx.instlocations, 4, sizeof( ERRINSTLOCATION ) )
 
 	'' sanity check that warningMsgs() and errorMsgs() are the correct length
 	assert( ubound(warningMsgs) = FB_WARNINGMSGS )
@@ -484,6 +498,7 @@ end sub
 
 sub errEnd( )
 	listEnd( @errctx.paramlocations )
+	listEnd( @errctx.instlocations )
 	hashEnd( @errctx.undefhash )
 
 	errctx.inited -= 1
@@ -521,6 +536,51 @@ sub errPushParamLocation _
 	l->tk = tk
 	l->paramnum = paramnum
 	l->paramid = paramid
+end sub
+
+'' Print the instantiation chain, innermost first.
+''
+'' Deliberately not routed through errReportEx: these are notes, not errors, so
+'' they must not bump errctx.cnt (which drives -maxerr) and must not be eaten by
+'' the one-error-per-statement filter.
+private sub hPrintInstChain( )
+	dim as ERRINSTLOCATION ptr l = any
+
+	if( errctx.inited <= 0 ) then
+		exit sub
+	end if
+
+	l = listGetTail( @errctx.instlocations )
+	while( l <> NULL )
+		print "  in instantiation of '"; *l->desc; "'"
+		if( l->fname ) then
+			if( len( *l->fname ) > 0 ) then
+				print "  required from "; *l->fname; "("; str( l->linenum ); ")"
+			end if
+		end if
+		l = listGetPrev( l )
+	wend
+end sub
+
+'' Record that a generic instantiation is under way, and where it was asked for.
+'' The site must be captured BEFORE the replay swaps env.inf, or the chain would
+'' point at the generic's own file instead of the code that triggered it.
+sub errPushInstLocation _
+	( _
+		byval desc as zstring ptr, _
+		byval fname as zstring ptr, _
+		byval linenum as integer _
+	)
+
+	dim as ERRINSTLOCATION ptr l = listNewNode( @errctx.instlocations )
+	l->desc = desc
+	l->fname = fname
+	l->linenum = linenum
+end sub
+
+sub errPopInstLocation( )
+	assert( listGetTail( @errctx.instlocations ) )
+	listDelNode( @errctx.instlocations, listGetTail( @errctx.instlocations ) )
 end sub
 
 sub errPopParamLocation( )
@@ -655,6 +715,7 @@ sub errReportEx _
 	end if
 
 	hPrintErrMsg( errnum, msgex, options, linenum, env.clopt.showerror, customText )
+	hPrintInstChain( )
 
 	errctx.cnt += 1
 

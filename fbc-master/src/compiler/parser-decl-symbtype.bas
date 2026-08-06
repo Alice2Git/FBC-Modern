@@ -249,6 +249,25 @@ sub AmbigiousSizeofInfo.maybeWarn( byval tk as integer, byval refers_to_type as 
 	errReportWarn( FB_WARNINGMSG_AMBIGIOUSLENSIZEOF, , , msg )
 end sub
 
+'' Does the current token name a generic?  Cheap: the lexer already attached the
+'' symbol chain, so this costs no extra look-ahead.
+private function hIsGenericName( ) as integer
+	dim as FBSYMCHAIN ptr chain_ = lexGetSymChain( )
+
+	while( chain_ <> NULL )
+		dim as FBSYMBOL ptr sym = chain_->sym
+		while( sym <> NULL )
+			if( symbIsGeneric( sym ) ) then
+				return TRUE
+			end if
+			sym = sym->hash.next
+		wend
+		chain_ = symbChainGetNext( chain_ )
+	wend
+
+	function = FALSE
+end function
+
 function cTypeOrExpression _
 	( _
 		byval tk as integer, _
@@ -308,7 +327,23 @@ function cTypeOrExpression _
 			case FB_TK_TYPEOF, FB_TK_SUB, FB_TK_FUNCTION
 
 			case else
+				'' 'Foo( of ... )' is a generic instantiation, and so a type --
+				'' a call argument can never begin with 'of', which is what makes
+				'' this unambiguous.  Without this, sizeof/len fall through to the
+				'' expression parser and report the generic as an undeclared
+				'' variable.
+				''
+				'' The look-ahead is guarded by a cheap symbol test on the CURRENT
+				'' token and not done unconditionally: peeking two tokens ahead
+				'' drives the lexer further than this path otherwise would, which
+				'' disturbs macro expansion.  Doing it for every '(' broke ordinary
+				'' macro calls like 'check( 0, and, 0, 0 )'.
 				maybe_type = FALSE
+				if( hIsGenericName( ) ) then
+					if( ucase( *lexGetLookAheadText( 2 ) ) = "OF" ) then
+						maybe_type = TRUE
+					end if
+				end if
 			end select
 		end select
 	end if

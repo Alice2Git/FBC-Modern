@@ -350,9 +350,12 @@ sub cGenericTypeDecl _
 	sym->gen.toktail = NULL
 	sym->gen.instances = NULL
 	sym->gen.srcline = startline
-	'' interned, so it stays valid after this file is popped -- the same
-	'' pointer ast-node-proc.bas records for debug info
-	sym->gen.srcfile = env.inf.incfile
+	'' A private copy in the file's ORIGINAL case.  env.inf.incfile is interned
+	'' and may be up-cased, which would make every diagnostic from an instantiated
+	'' body shout the file name; env.inf.name itself is a reused fixed buffer that
+	'' is overwritten as includes pop.
+	sym->gen.srcfile = ZstrAllocate( len( env.inf.name ) )
+	*sym->gen.srcfile = env.inf.name
 
 	if( hTypeParamList( sym ) = FALSE ) then
 		'' error recovery: swallow the body

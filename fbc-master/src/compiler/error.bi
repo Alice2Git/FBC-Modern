@@ -438,6 +438,15 @@ declare sub errPushParamLocation _
 	)
 declare sub errPopParamLocation( )
 
+declare sub errPushInstLocation _
+	( _
+		byval desc as zstring ptr, _
+		byval fname as zstring ptr, _
+		byval linenum as integer _
+	)
+
+declare sub errPopInstLocation( )
+
 declare function errGetLastStmt( ) as integer
 declare sub errSetLastStmt( byval n as integer )
 

@@ -409,7 +409,8 @@ function genInstantiateType _
 	dim as FB_SYMBATTRIB attrib = FB_SYMBATTRIB_NONE
 	dim as FB_PROCATTRIB pattrib = FB_PROCATTRIB_NONE
 	dim as FB_PARSERSTATE st
-	dim as string id, text, nspid
+	dim as string id, text, nspid, desc
+	dim as zstring ptr descz = any
 	dim as integer firstline = any
 
 	function = NULL
@@ -509,12 +510,36 @@ function genInstantiateType _
 	text = "type " + GENINST_NAME + LFCHAR + _
 	       genFlattenTokens( @gensym->gen, firstline ) + LFCHAR + "end type"
 
+	'' Readable form for diagnostics, e.g. "Box( of MyStruct )".  Built from the
+	'' arguments as written, not from the mangled key, which is unreadable.
+	dim as zstring ptr gname = gensym->id.alias
+	if( gname = NULL ) then
+		gname = gensym->id.name
+	end if
+	desc = *gname + "( of "
+	for i as integer = 0 to argcount-1
+		if( i > 0 ) then
+			desc += ", "
+		end if
+		desc += symbTypeToStr( argdtype(i), argsubtype(i) )
+	next
+	desc += " )"
+
+	descz = ZstrAllocate( len( desc ) )
+	*descz = desc
+
+	'' Captured BEFORE genReplayBegin swaps env.inf: the chain must point at the
+	'' code that asked for the instantiation, not at the generic's own file.
+	errPushInstLocation( descz, @env.inf.name, lexLineNum( ) )
+
 	if( genReplayBegin( st, text, gensym->gen.srcline, gensym->gen.srcfile ) ) then
 		genctx2.depth += 1
 		cTypeDecl( FB_SYMBATTRIB_NONE )
 		genctx2.depth -= 1
 		genReplayEnd( st )
 	end if
+
+	errPopInstLocation( )
 
 	symbNestEnd( FALSE )
 

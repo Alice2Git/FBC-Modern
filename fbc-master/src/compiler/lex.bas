@@ -40,11 +40,22 @@ dim shared as string pponly_ln
 '' instantiated body must point at the line in the generic, not at the
 '' instantiation site.  The capture keeps one LFCHAR per source line, so
 '' counting them here tracks the original exactly.
-#define UPDATE_LINENUM( )                                       _
-	if( (lex.ctx->deflen = 0) orelse                             _
-	    (lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC) ) then      :_
-		lex.ctx->linenum += 1                                   :_
+#define UPDATE_LINENUM( )            _
+	if( lex.ctx->deflen = 0 ) then  :_
+		lex.ctx->linenum += 1       :_
 	end if
+
+'' NOTE: line numbers are deliberately NOT tracked while replaying a generic
+'' body, so an error inside an instantiated body reports the INSTANTIATION SITE
+'' and the "in instantiation of ..." chain supplies the rest.
+''
+'' Counting LFs in the replayed text was tried and reverted.  Each newline is
+'' counted by both the character-level sites above and the token-level site in
+'' lexSkipToken, and measurement showed replay lines coming out at
+'' start + 2*newlines + 1 -- i.e. still double-counted after separating the two,
+'' because an EOL token can be consumed more than once through the look-ahead
+'' ring.  A confidently wrong line number inside the file is worse than none, so
+'' the frozen-but-honest behaviour stands until the token path is understood.
 
 '':::::
 sub lexPushCtx( )
