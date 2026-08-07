@@ -1,0 +1,2 @@
+=== the iterator has IsValid and Value but no MoveNext ===
+	error 343: Not an iterator type, an iterator needs IsValid( ) as boolean, Value( ) [byref] as E and MoveNext( ), missing, MoveNext( )

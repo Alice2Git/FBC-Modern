@@ -1,0 +1,225 @@
+FB.Map( of K, V ) -- an open-addressed hash map
+==============================================
+
+    #include once "fb/map.bi"            ' or "containers.bi" for all four
+    using FB
+
+    dim ages as Map( of string, long )
+
+    ages.Put( "ada", 36 )
+    ages.Add( "grace", 85 )
+
+    if ages.Contains( "ada" ) then print ages[ "ada" ]
+
+    dim n as long
+    if ages.TryGet( "edsger", n ) then print n
+
+    for each kv in ages
+        print kv.key, kv.value
+    next
+
+
+WHY IT EXISTS
+-------------
+
+FreeBASIC had no hash map. The available answer was a COM Scripting.Dictionary
+from the Windows Script Runtime:
+
+    Portability   Windows-only.  No dictionary on Linux or macOS builds.
+    Startup       CoInitialize / CoCreateInstance per instance.
+    Types         Every key and value becomes a VARIANT.
+    Errors        HRESULT, checked by hand.
+    Speed         Late-bound IDispatch dispatch per lookup.
+
+Nobody reaches for OLE automation to get a hash table by preference.
+
+
+READING vs WRITING -- READ THIS FIRST
+-------------------------------------
+
+    m[ k ]        INSERTS a default-constructed V if k is absent
+    m.TryGet      does not
+    m.Contains    does not
+
+The indexer inserting on a miss is what makes the counting idiom work:
+
+    counts[ word ] += 1                  ' just works
+
+and it is a trap when used to read:
+
+    if m[ "missing" ] = 0 then ...       ' silently GREW the map
+
+Use TryGet or Contains to read. Every dictionary API in every language has this
+argument and none has won it; C# splits it the same way, and C++'s
+operator[]-inserts versus at()-throws is the same problem with a worse answer.
+
+
+MEMBERS
+-------
+
+    Count( ) as long                          O(1)
+    IsEmpty( ) as boolean                     O(1)
+    Capacity( ) as long                       O(1)
+
+    m[ k ] byref as V                         avg O(1)  lvalue, INSERTS ON MISS
+    Add( k, v ) as boolean                    avg O(1)  false if present;
+                                                        does NOT overwrite
+    Put( k, v ) as boolean                    avg O(1)  insert or overwrite;
+                                                        true if the key was new
+    TryGet( k, byref out as V ) as boolean    avg O(1)  no insertion on a miss
+    Contains( k ) as boolean                  avg O(1)  no insertion
+    Remove( k ) as boolean                    avg O(1)  true if something went
+
+    Clear( )                                  O(n)
+    Reserve( byval n as long )                O(n)
+    Keys( ) as Array( of K )                  O(n)      snapshot
+    Values( ) as Array( of V )                O(n)      snapshot
+    GetIterator( ) as MapIterator( of K, V )  O(1)
+
+Add versus Put is the other half of the distinction above:
+
+    m.Add( "ada", 36 )       ' true  -- inserted
+    m.Add( "ada", 99 )       ' false -- already there, value UNCHANGED
+    m.Put( "ada", 99 )       ' false -- key existed, value now 99
+
+
+THE HASH CONTRACT
+-----------------
+
+A key type K must satisfy:
+
+    FB.HashOf( k )       must resolve
+    k = k                must compare
+    EQUAL KEYS MUST PRODUCE EQUAL HASH CODES
+
+The converse is not required -- two different keys may collide, and the map
+handles that. But equal keys that hash differently produce a map that LOSES
+DATA, which is why the invariant is stated in capitals.
+
+Overloads are supplied for every built-in type: all integer types, both float
+types, pointers, string, zstring and wstring. Strings hash by CONTENT, so a
+string built at run time finds the literal it equals. +0.0 and -0.0 hash the
+same, because they compare equal.
+
+A user type is made usable as a key by RE-OPENING the namespace:
+
+    type PairKey
+        as long a, b
+    end type
+
+    operator = ( byref x as PairKey, byref y as PairKey ) as boolean
+        return (x.a = y.a) andalso (x.b = y.b)
+    end operator
+
+    namespace FB
+        function HashOf overload ( byref k as PairKey ) as ulongint
+            return HashOf( k.a ) xor (HashOf( k.b ) shl 1)
+        end function
+    end namespace
+
+Derive the hash only from the fields '=' compares, or equal keys will hash
+differently.
+
+A key type with no overload fails at the INSTANTIATION site:
+
+    error 99: No matching overloaded function, HASHOF()
+      in instantiation of 'Map( of NOHASH, long )'
+
+That is what unconstrained generics can offer today, and it is the strongest
+single argument for adding constraints later.
+
+Why an overloaded function rather than a HashCode( ) member: a member cannot be
+added to 'long' or 'string', and a generic body cannot branch on its type
+parameter -- 'typeof( T )' inside a generic sees the parameter, not what it is
+bound to. Ordinary overload resolution at the instantiation site is the
+mechanism that works.
+
+Source: src/inc/fb/hash.bi
+
+
+ITERATION
+---------
+
+    for each kv in ages
+        print kv.key, kv.value
+    next
+
+Iteration yields a KeyValuePair( of K, V ) -- a pair rather than two loop
+variables, because destructuring syntax does not exist yet.
+
+The pair is ASSEMBLED BY THE ITERATOR and does not live in the map, so writing
+to it changes nothing. Use m[ k ] to write.
+
+ITERATION ORDER IS UNSPECIFIED and changes across insertions. It is not
+randomised per process -- that is a hash-flooding defence FreeBASIC has no
+threat model for, and stability within one unmodified map is more useful when
+debugging.
+
+Keys( ) and Values( ) are SNAPSHOTS, returned as Array( of K ) and
+Array( of V ). Changing them does not change the map.
+
+
+IMPLEMENTATION
+--------------
+
+Open addressing with linear probing, power-of-two capacity, tombstones on
+removal, load factor 0.75, rehash doubles.
+
+Open addressing is chosen over chaining for one allocation instead of one per
+entry, which matters more in a language with no garbage collector and with
+direct memory access. The cost is tombstones and worse behaviour at high load
+factors, both bounded by the load factor.
+
+Removal leaves a TOMBSTONE rather than an empty slot. Probing stops at the first
+EMPTY slot, so blanking a slot would cut the probe chain and hide every key that
+had collided past it. Rehashing drops every tombstone, which is what stops an
+add/remove churn loop from filling the table with them.
+
+Source: src/inc/fb/map.bi
+
+
+OWNERSHIP AND COPYING
+---------------------
+
+The map owns its storage. COPY AND ASSIGNMENT ARE DEEP -- 'dim b = a' copies
+every key and value. That is expensive and there is no move constructor in the
+language to avoid it; pass maps BYREF where it matters.
+
+A Map( of K, V ptr ) frees the TABLE, not the pointees.
+
+
+ITERATOR INVALIDATION
+---------------------
+
+Nothing detects a violation.
+
+    Add or Put causing a rehash                 all iterators invalidated
+    Remove                                      all iterators invalidated
+
+Both the indexer and Put can rehash, so do not insert while iterating. Collect
+first, then mutate:
+
+    dim doomed as Array( of string )
+    for each kv in m
+        if kv.value = 0 then doomed.Push( kv.key )
+    next
+    for i as long = 0 to doomed.Count( )-1
+        m.Remove( doomed[ i ] )
+    next
+
+
+TESTS
+-----
+
+src/tests/generics/container-map.bas is exhaustive: every member, empty / one /
+many states, the four readers and writers pinned against each other, the growth
+path, tombstones and churn, deep copy and assignment independence in both
+directions, destructor balance with a counting value type, key types including
+integers, doubles (with the +0.0 / -0.0 case), strings and a user type with its
+own HashOf, a value type that is itself a container, and FOR EACH.
+
+Complexity is ASSERTED, not assumed: 100k insertions must respect the 0.75 load
+factor, overwriting all 100k must not grow the table at all, and a 200-round
+add/remove churn must not let tombstones grow the capacity.
+
+src/tests/generics/fail-container-nohash.bas pins the missing-HashOf diagnostic.

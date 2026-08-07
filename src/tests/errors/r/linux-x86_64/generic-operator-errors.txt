@@ -1,0 +1,6 @@
+=== a self op cannot be global, there is no parent type ===
+	error 152: Operator must be a member function, before '('
+=== operands binding T two ways report a plain type mismatch ===
+	error 20: Type mismatch
+=== unbalanced body, reported at the operator declaration line ===
+	error 338: Unbalanced block in generic body, operator -

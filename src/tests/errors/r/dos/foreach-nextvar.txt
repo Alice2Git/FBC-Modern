@@ -1,0 +1,2 @@
+=== next naming the loop variable ===
+	error 346: NEXT cannot name the FOR EACH variable, it is scoped to the loop body, found 'v'

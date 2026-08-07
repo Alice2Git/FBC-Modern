@@ -23,8 +23,8 @@
 set -e
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-FBC="$ROOT/fbc-master/bin/fbc.exe"
-INC="$ROOT/fbc-master/inc"
+FBC="$ROOT/src/bin/fbc.exe"
+INC="$ROOT/src/inc"
 CLANG=${1:-"/c/Program Files/LLVM/bin/clang.exe"}
 T="$ROOT/tests/ustring_llvm_test"
 

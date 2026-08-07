@@ -15,7 +15,15 @@
 '' fbc's CONST accepts only FB_DATATYPE_STRING -- WSTRING is rejected too. See
 '' the "Known gap" section of README.md. Everything else here works.
 
-#define ASTRAL wchr(&h1D11E)      '' one character, TWO code units
+'' The astral character used throughout. Change ASTRAL_CP alone -- every
+'' surrogate assertion below is DERIVED from it, so the two cannot drift apart.
+''   &h1D11E  |𝄞|  MUSICAL SYMBOL G CLEF   surrogates D834 DD1E
+''   &h1F989  |🦉| OWL                     surrogates D83E DD89
+#define ASTRAL_CP &h1F989
+#define ASTRAL    wchr(ASTRAL_CP)          '' one character, TWO code units
+
+#define ASTRAL_HI (&hD800 + ((ASTRAL_CP - &h10000) shr 10))
+#define ASTRAL_LO (&hDC00 + ((ASTRAL_CP - &h10000) and &h3FF))
 
 dim shared as integer g_run, g_fail
 
@@ -588,13 +596,13 @@ sub indexing( )
     dim as ustring m = "a" & ASTRAL & "b"
     chk( "astral string is 4 units",    len(m), 4 )
     chk( "m[0] is 'a'",                 m[0], asc("a") )
-    chk( "m[1] is the HIGH surrogate",  m[1], &hD834 )
-    chk( "m[2] is the LOW surrogate",   m[2], &hDD1E )
+    chk( "m[1] is the HIGH surrogate",  m[1], ASTRAL_HI )
+    chk( "m[2] is the LOW surrogate",   m[2], ASTRAL_LO )
     chk( "m[3] is 'b'",                 m[3], asc("b") )
 
     '' the pair can be rebuilt from its two units
     dim as uinteger cp = &h10000 + ((m[1] - &hD800) shl 10) + (m[2] - &hDC00)
-    chk( "units recombine to U+1D11E",  cp, &h1D11E )
+    chk( "units recombine to the codepoint", cp, ASTRAL_CP )
 
     '' -- indexing a FIXED-length ustring, read and write
     dim as ustring * 8 f = "abc"
@@ -831,3 +839,4 @@ unicode_( )
 print
 print g_run; " checks,"; g_fail; " failed"
 if( g_fail <> 0 ) then end 1
+

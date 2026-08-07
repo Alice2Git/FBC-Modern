@@ -1,0 +1,2 @@
+=== for each over a two-dimensional array ===
+	error 344: Cannot FOR EACH over a multi-dimensional array, iterate one dimension explicitly

@@ -1,0 +1,2 @@
+=== for each over a fixed-length string ===
+	error 342: Type is not iterable, it needs: declare function GetIterator( ) as <iterator>, a fixed-length string; assign it to a STRING first

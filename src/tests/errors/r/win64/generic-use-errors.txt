@@ -1,0 +1,5 @@
+=== wrong number of type arguments ===
+	error 336: Wrong number of type arguments, Pair
+=== a generic used with no type argument list ===
+	error 335: Generic used without a type argument list, Box
+=== done ===

@@ -1,0 +1,15 @@
+=== one level ===
+	error 14: Expected identifier, found 'Wdiget'
+  in instantiation of 'Box( of long )'
+  required from generic-inst-chain.bas(N)
+=== two levels: the chain shows both ===
+	error 14: Expected identifier, found 'Gadgit'
+  in instantiation of 'Inner( of long )'
+  required from generic-inst-chain.bas(N)
+  in instantiation of 'Outer( of long )'
+  required from generic-inst-chain.bas(N)
+=== the same generic at a second argument reports again ===
+	error 14: Expected identifier, found 'Wdiget'
+  in instantiation of 'Box( of string )'
+  required from generic-inst-chain.bas(N)
+=== done ===

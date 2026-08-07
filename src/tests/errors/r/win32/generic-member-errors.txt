@@ -1,0 +1,8 @@
+=== renamed type parameter ===
+	error 341: Type parameter list does not match the generic's declaration, A
+=== extra type parameter on the body ===
+	error 341: Type parameter list does not match the generic's declaration, B
+=== error inside a member body, with the instantiation chain ===
+	error 18: Element not defined, nosuchfield
+  in instantiation of 'C( of long )'
+  required from generic-member-errors.bas(N)
