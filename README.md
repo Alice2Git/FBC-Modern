@@ -10,7 +10,7 @@
 [![Licence](https://img.shields.io/badge/licence-GPLv2%2B%20%2F%20LGPLv2.1%2B-lightgrey)](#-license)
 [![Status](https://img.shields.io/badge/status-complete%2C%20offered%20upstream-orange)](#-project-goals)
 
-[Features](#-key-features) · [Why](#-why-this-compiler) · [Examples](#-example-code) · [Quick start](#-quick-start) · [Docs](#-documentation) · [Contributing](#-contributing)
+[Features](#-key-features) · [Why](#-why-this-compiler) · [Examples](#-example-code) · [Quick start](#-quick-start) · [Ecosystem](#-ecosystem) · [Docs](#-documentation)
 
 </div>
 
@@ -53,8 +53,8 @@ These appear on many compiler READMEs. They are **not** part of FBC-Modern, and 
 
 | | Status |
 |---|---|
-| LSP / language server | ❌ Not present. *[Placeholder — no implementation, no plan recorded.]* |
-| Package manager | ❌ Not present. *[Placeholder.]* |
+| LSP / language server | ❌ Not present. |
+| Package manager | ❌ Not present. |
 | Incremental compilation | ❌ Not present. fbc's per-module compilation is unchanged. |
 | Module system | ❌ Not present. FreeBASIC's `#include` model is unchanged. |
 | New parser / new front end | ❌ **No.** This is fbc's own recursive-descent parser, extended. |
@@ -62,7 +62,7 @@ These appear on many compiler READMEs. They are **not** part of FBC-Modern, and 
 | Faster compilation | ❌ Not a goal and not measured as a win. Compile times track stock fbc. |
 | Static analysis / linting | ❌ Not present. |
 | New build system | ❌ No. The project uses fbc's own makefile. |
-| macOS support | ⚠️ Untested here. fbc supports `darwin` upstream; this tree has never been built on it. *[Placeholder — needs a machine.]* |
+| macOS support | ⚠️ Untested. fbc supports `darwin` upstream; this tree has never been built on it. |
 | ARM / JS / DOS targets | ⚠️ Untested here. |
 
 </details>
@@ -251,7 +251,7 @@ A **native** Linux build, not a cross-compile — produced through fbc's own boo
 
 ### macOS
 
-> ⚠️ **[Placeholder — not available.]** No macOS build exists and this tree has never been built on darwin. Upstream FreeBASIC supports it, so the path is likely short, but nothing here is verified. See [Building From Source](#-building-from-source) if you want to try.
+No macOS build exists — this tree has never been built on darwin. Upstream FreeBASIC supports the target, so the path is likely short, but nothing here is verified. See [Building From Source](#-building-from-source) if you want to try it.
 
 ---
 
@@ -354,29 +354,22 @@ Full detail: **[docs/generics/generics.txt](docs/generics/generics.txt)**.
 
 ## 🧩 Ecosystem
 
-> ⚠️ **[Placeholder — no editor or tooling integration ships in this repository.]**
+### Tiko Editor
 
-**Tiko Editor.** [Tiko](https://github.com/PaulSquires/tiko) is a Scintilla-based FreeBASIC editor by the same author. It is a natural home for FBC-Modern support — pointing its toolchain at these compilers, and teaching its lexer the `( of T )` form and the new keywords. **No such integration exists today**, and nothing in either repository references the other. This section is a marker for work not yet done, not a description of shipped behaviour.
+**[Tiko](https://github.com/PaulSquires/tiko)** is a Scintilla-based FreeBASIC editor and IDE. It keeps its compilers in a `toolchains/` folder and lets you switch between them, so using FBC-Modern from Tiko is a copy and a menu selection — no configuration files to edit.
 
-Anything else — syntax files, formatters, language servers, package tooling — does not exist for this project. Contributions are the fastest way for that to change.
+**1. Copy the toolchains.** Take the folders under this repository's `toolchains/` and drop them into Tiko's `toolchains/` folder:
 
----
+```
+FBC-Modern/toolchains/fbc-modern-windows/   →   tiko/toolchains/fbc-modern-windows/
+FBC-Modern/toolchains/fbc-modern-linux/     →   tiko/toolchains/fbc-modern-linux/
+```
 
-## 🤝 Contributing
+Copy the folder whole. Each one is a complete, self-contained FreeBASIC installation — compiler, assembler, linker, headers and runtime — and `fbc` locates its own `bin/`, `inc/` and `lib/` relative to where the executable sits.
 
-The most useful contribution right now is **review**. This work is offered upstream, and a careful reading of the generics implementation is worth more than a feature.
+**2. Select it in Tiko.** Open **Options → Compiler Setup** and choose the toolchain you just added. Tiko's existing toolchains are left in place, so you can switch back at any time.
 
-> ⚠️ **[Placeholder]** — there is no `CONTRIBUTING.md`, no issue templates and no code of conduct in this repository yet. The conventions below are what the project follows in practice.
-
-**Pull requests.** One logical change per PR, with a commit message that says *why*, not just *what*. If a change touches the compiler, the [gate](#tests) must be green and the PR should say so with numbers.
-
-**Issues.** A bug report needs the compiler version (`fbc -version`), the target, the backend (`-gen gcc` / `-gen gas64`), and the smallest source file that reproduces it. Before filing a generics bug, **check the plain-FreeBASIC control** — this project has hit twelve false alarms that turned out to be ordinary FB rules (reserved words, case-insensitive identifiers, integer promotion).
-
-**Coding standards.** Follow the surrounding code — fbc's own style, lowercase keywords, tabs as they already are. Do not reformat neighbouring lines.
-
-**Testing.** Every behaviour change needs a test in `src/tests/generics/`, and every new diagnostic needs a golden file in `src/tests/errors/` — **one case per file**, because the compiler stops at the first error. Run behaviour tests under **both** backends; three separate defects in this work were visible to only one of them.
-
-**Discussions.** For language design — constraints on type parameters, `typeof` through a type parameter, the container API — open an issue for discussion before writing code. The design decisions and their reasoning are recorded in `docs/`.
+That is the whole setup. Build and run from Tiko as usual, and generics, `FOR EACH`, the containers and `USTRING` are available.
 
 ---
 
@@ -499,9 +492,8 @@ Everything below is in this repository. There is no documentation website.
 | **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
 | **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
 | **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
-| **Language reference (general FreeBASIC)** | *[Placeholder]* — see the [FreeBASIC manual](https://www.freebasic.net/wiki/DocToc). `src/doc/manual/` is a mirror of that wiki and is not edited here. |
-| **API reference / tutorials** | *[Placeholder — none written.]* The container docs are the closest thing today. |
-| **Compiler internals** | *[Placeholder]* — [the architecture section](#-compiler-architecture) above and the generics doc are what exists. |
+| **[FreeBASIC manual](https://www.freebasic.net/wiki/DocToc)** | The language itself, unchanged by this project. `src/doc/manual/` is a local mirror of that wiki and is regenerated from it rather than edited here. |
+| **Compiler internals** | [The architecture section](#-compiler-architecture) above, and the *How it works* part of the generics reference. |
 
 ### Known limitations
 
@@ -535,7 +527,7 @@ The linking exception is what lets a program link the runtime statically without
 
 ### FreeBASIC did not need replacing. It needed two gaps closed.
 
-The containers in this repository are written in ordinary FreeBASIC, with no compiler privileges of any kind — which means **anything you write is on exactly equal footing**. Better containers, an editor integration, a macOS build, constraints on type parameters, or a bug report with a five-line repro: all of it moves this forward.
+The containers in this repository are written in ordinary FreeBASIC, with no compiler privileges of any kind — which means **anything you write is on exactly equal footing**. Better containers, a macOS build, constraints on type parameters, or a bug report with a five-line repro: all of it moves this forward.
 
 **[Open an issue](https://github.com/PaulSquires/FBC-Modern/issues) · [Read the generics doc](docs/generics/generics.txt) · [Run the gate](tests/BASELINE.md)**
 
