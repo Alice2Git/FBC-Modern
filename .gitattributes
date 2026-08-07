@@ -1,7 +1,7 @@
 # The Linux installation is a shipped tree: no line-ending conversion, or a
 # Windows clone would rewrite its linker script and includes to CRLF.
-fbc-linux/** -text
+toolchains/fbc-modern-linux/** -text
 
 # Windows toolchain/lib payload is binary or Windows-native already.
-fbc-win/bin/** -text
-fbc-win/lib/** -text
+toolchains/fbc-modern-windows/bin/** -text
+toolchains/fbc-modern-windows/lib/** -text

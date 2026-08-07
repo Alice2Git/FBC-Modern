@@ -288,5 +288,10 @@ end union
 
 	dim as Pun( of double ) u
 	u.b = 0
-	u.a = 1.5
+	'' NOT 1.5: its low 32 bits are zero, so on a 32-bit target -- where
+	'' INTEGER is 4 bytes and b overlaps only the low half -- b would read 0
+	'' and the assertion would fail for a reason that has nothing to do with
+	'' generics.  Plain FreeBASIC does the same with PlainPun.  1.3 has
+	'' non-zero bits in both halves.
+	u.a = 1.3
 	assert_( u.b <> 0 )                 '' the fields really do overlap

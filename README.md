@@ -456,9 +456,13 @@ toolchains\fbc-modern-windows\fbc64.exe -target win32 hello.bas
 
 ```
 bin/fbc
-inc/
+include/freebasic/          FreeBASIC headers, including fb/*.bi
 lib/freebasic/linux-x86_64
 ```
+
+The standard FreeBASIC *normal* (non-standalone) layout, which is what this
+compiler is built as — a normal-layout `fbc` looks for its headers in
+`include/freebasic/`, not `inc/`.
 
 ```bash
 toolchains/fbc-modern-linux/bin/fbc hello.bas
@@ -633,14 +637,21 @@ deliberately injected bug to confirm it can actually fail.
 
 | Target | Built | Suites run |
 |---|---|---|
-| win64 | ✅ | lang 140/0, io 36/0, gfx 13/0 |
-| win32 | ✅ | lang 140/0, io 36/0 |
-| linux-x86_64 | ✅ | lang 140/0, io 36/0 |
+| win64 | ✅ | generics 17/0, lang 140/0, io 36/0, gfx 13/0 |
+| win32 | ✅ | generics 17/0, lang 140/0, io 36/0 |
+| linux-x86_64 | ✅ | generics 17/0, lang 140/0, io 36/0 |
+
+"generics 17/0" is every behaviour file in `src/tests/generics/` (the 25
+`fail-*` diagnostic files are gated separately, on win64), run against the
+**prebuilt compiler in `toolchains/`** rather than the build tree — so the
+number describes what a user of this repository actually gets.
 
 Linux matters most for USTRING, because `sizeof(wstring)` is 4 there — so the
 UTF-32 path is exercised for real, not just by a unit test. Building for 32-bit
 is what uncovered the last real USTRING bug: literal emission in the gas x86
-backend, reachable *only* on 32-bit targets.
+backend, reachable *only* on 32-bit targets — and, this time round, a
+32-bit-only type error in the generics parser that the win64 build could not
+see.
 
 **Not verified**: the LLVM backend for generics (no LLVM toolchain here, and it
 is not in the gate); ARM, JS and DOS targets.
@@ -663,7 +674,8 @@ src/                    the fbc tree, with everything this project adds
 
 toolchains/
     fbc-modern-windows/ prebuilt: fbc32.exe + fbc64.exe, inc, libs
-    fbc-modern-linux/   prebuilt: bin/fbc, inc, lib/freebasic/linux-x86_64
+    fbc-modern-linux/   prebuilt: bin/fbc, include/freebasic,
+                        lib/freebasic/linux-x86_64
 
 docs/
     generics/           RFC-0001

@@ -302,7 +302,8 @@ function cGenericTypeArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
 
 	dim as integer argdtype( 0 to FB_MAXGENERICARGS-1 )
 	dim as FBSYMBOL ptr argsubtype( 0 to FB_MAXGENERICARGS-1 )
-	dim as integer argcount = 0, dtype = any, lgt = any
+	dim as integer argcount = 0, dtype = any
+	dim as longint lgt = any                        '' cSymbolType takes byref as longint
 	dim as FBSYMBOL ptr subtype = any
 
 	function = NULL
@@ -1867,7 +1868,8 @@ function cGenericProcArgs( byval gensym as FBSYMBOL ptr ) as FBSYMBOL ptr
 
 	dim as integer argdtype( 0 to FB_MAXGENERICARGS-1 )
 	dim as FBSYMBOL ptr argsubtype( 0 to FB_MAXGENERICARGS-1 )
-	dim as integer argcount = 0, dtype = any, lgt = any
+	dim as integer argcount = 0, dtype = any
+	dim as longint lgt = any                        '' cSymbolType takes byref as longint
 	dim as FBSYMBOL ptr subtype = any
 
 	function = NULL
