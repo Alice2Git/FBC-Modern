@@ -464,6 +464,8 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_DEFERNEEDSSTATEMENT                '/ @"DEFER requires a statement", _
 		/'FB_ERRMSG_DEFERATMODULELEVEL                 '/ @"DEFER is not allowed at module level", _
 		/'FB_ERRMSG_BRANCHCROSSINGDEFER                '/ @"Branch crossing a DEFER statement", _
+		/'FB_ERRMSG_UNBALANCEDLAMBDAHEADER             '/ @"Malformed lambda header, expected ')' or a result type", _
+		/'FB_ERRMSG_UNBALANCEDLAMBDABODY               '/ @"Unterminated lambda body, expected END SUB or END FUNCTION", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

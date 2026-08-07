@@ -221,6 +221,7 @@ sub cProgram()
 		'' procedure body -- this same loop parses those.
 		if( stackGetTOS( @parser.stmt.stk ) = NULL ) then
 			genDrainProcBodies( )
+			lambdaDrainBodies( )
 		end if
 	loop while (lexGetToken() <> FB_TK_EOF)
 
@@ -237,6 +238,7 @@ sub cProgram()
 	'' still owes its member bodies, and the loop above exited before draining.
 	if( env.includerec = 0 ) then
 		genDrainProcBodies( )
+		lambdaDrainBodies( )
 	end if
 
 	'' only check compound stmts if not parsing an include file

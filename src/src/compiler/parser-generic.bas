@@ -37,46 +37,8 @@
 '' parser.stmt.cnt is a different thing despite living next door: a running
 '' count of statement separators, not a depth.  It IS copied, because replaying
 '' a procedure body runs cProgram(), which bumps it once per line.
-type FB_PARSERSTATE
-	'' parser
-	options         as FB_PARSEROPT
-	prntcnt         as integer
-	nsprefix        as FBSYMCHAIN ptr
-	mangling        as FB_MANGLING
-	stage           as uinteger
-	scope           as uinteger
-	currproc        as FBSYMBOL ptr
-	currblock       as FBSYMBOL ptr
-	ctx_dtype       as integer
-	ctxsym          as FBSYMBOL ptr
-	have_eq         as integer
-	stmtcnt         as integer
-	stmttos         as any ptr                  '' compound-stmt stack top, for the balance assert
-
-	'' cProcHeader's pending procedure name.
-	''
-	'' A replay is triggered from the MIDDLE of cProcHeader whenever a parameter
-	'' or return type names a generic, and the instantiated type's own member
-	'' prototypes run through cProcHeader again.  Without this,
-	''     declare function GetIterator( ) as ArrayIterator( of T )
-	'' was added under the name of ArrayIterator's LAST member, and GetIterator
-	'' itself never existed -- the body then failed with 'error 158: Declaration
-	'' outside the original namespace or class'.
-	procheaderid    as zstring * FB_MAXNAMELEN+1
-
-	'' ast
-	astproc         as ASTNODE ptr
-	astblock        as ASTNODE ptr
-	doemit          as integer
-	typeinicount    as integer
-
-	'' input file
-	inf             as FBFILE
-
-	'' error context: the one-error-per-statement filter keys off this, and a
-	'' replay must not make the caller's next real error disappear
-	laststmt        as integer
-end type
+'' FB_PARSERSTATE and FB_GENSCOPE moved to parser.bi -- parser-lambda.bas
+'' reuses this same replay/scope machinery.
 
 sub genSaveState( byref st as FB_PARSERSTATE )
 	st.options      = parser.options
@@ -187,18 +149,7 @@ end sub
 '' because a namespace nested in another can reference the outer one's names the
 '' same way.  symbNamespaceSearchPush is refcounted, so this composes with a real
 '' USING on the same namespace and with nested instantiations.
-type FB_GENSCOPE
-	scope           as uinteger
-	currproc        as FBSYMBOL ptr
-	currblock       as FBSYMBOL ptr
-	astproc         as ASTNODE ptr
-	astblock        as ASTNODE ptr
-	symtb           as FBSYMBOLTB ptr
-	hashtb          as FBHASHTB ptr
-	ns              as FBSYMBOL ptr
-	declns          as FBSYMBOL ptr             '' generic's declaring ns, or NULL
-	hidelocals       as integer                  '' did this entry bump symb.hidelocals?
-end type
+
 
 '' Push/pop every namespace from the generic's declaring namespace up to global.
 private sub hDeclNsSearch( byval declns as FBSYMBOL ptr, byval ispush as integer )
@@ -215,7 +166,7 @@ private sub hDeclNsSearch( byval declns as FBSYMBOL ptr, byval ispush as integer
 	loop
 end sub
 
-private sub genEnterGlobalScope _
+sub genEnterGlobalScope _
 	( _
 		byref gs as FB_GENSCOPE, _
 		byval gensym as FBSYMBOL ptr, _
@@ -272,7 +223,7 @@ private sub genEnterGlobalScope _
 	hDeclNsSearch( gs.declns, TRUE )
 end sub
 
-private sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
+sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
 	hDeclNsSearch( gs.declns, FALSE )
 
 	if( gs.hidelocals ) then

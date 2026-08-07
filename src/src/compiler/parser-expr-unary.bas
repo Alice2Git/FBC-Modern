@@ -274,6 +274,14 @@ function cHighestPrecExpr _
 		case FB_TK_NEW
 			expr = cOperatorNew( )
 
+		'' LambdaExpr -- 'sub(' / 'function(' in expression position.
+		''
+		'' No ambiguity to resolve: both are a syntax error here today
+		'' ("error 9: Expected expression, found 'function'"), so nothing that
+		'' compiles now changes meaning.
+		case FB_TK_SUB, FB_TK_FUNCTION
+			return cLambdaExpr( )
+
 		'' Atom
 		case else
 			'' PP expression?
