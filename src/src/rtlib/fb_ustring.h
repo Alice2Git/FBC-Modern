@@ -460,4 +460,36 @@ FBCALL FBUSTRING   *fb_WStrShrink        ( const FB_WCHAR *s, FBUSTRING *mask );
 FBCALL FBUSTRING   *fb_WStrMCase         ( const FB_WCHAR *s );
 FBCALL FBUSTRING   *fb_WStrRemoveBetween ( const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
 
+/* Pad, wrap, escape and predicates (phase 4). Same return rule. */
+
+FBCALL FBSTRING    *fb_StrPadRight   ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrPadLeft    ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrPadCenter  ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrWrap       ( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBSTRING    *fb_StrUnwrap     ( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBSTRING    *fb_StrEscape     ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrUnescape   ( FBSTRING *s );
+FBCALL int          fb_StrIsNumeric  ( FBSTRING *s );
+FBCALL int          fb_StrIsBlank    ( FBSTRING *s );
+
+FBCALL FBUSTRING   *fb_UStrPadRight  ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrPadLeft   ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrPadCenter ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrWrap      ( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBUSTRING   *fb_UStrUnwrap    ( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBUSTRING   *fb_UStrEscape    ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrUnescape  ( FBUSTRING *s );
+FBCALL int          fb_UStrIsNumeric ( FBUSTRING *s );
+FBCALL int          fb_UStrIsBlank   ( FBUSTRING *s );
+
+FBCALL FBUSTRING   *fb_WStrPadRight  ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrPadLeft   ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrPadCenter ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrWrap      ( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBUSTRING   *fb_WStrUnwrap    ( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBUSTRING   *fb_WStrEscape    ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrUnescape  ( const FB_WCHAR *s );
+FBCALL int          fb_WStrIsNumeric ( const FB_WCHAR *s );
+FBCALL int          fb_WStrIsBlank   ( const FB_WCHAR *s );
+
 #endif /*__FB_USTRING_H__*/

@@ -641,6 +641,200 @@ extern "C"
 	declare function MCase overload alias "fb_UStrMCase" _
 		( byref s as const ustring ) as ustring
 
+	'' =====================================================================
+	'' PAD, WRAP, ESCAPE, PREDICATES
+	'' =====================================================================
+
+	'' Justified into a field of exactly `width`, padded with `pad`.
+	''
+	''     PadRight( "FreeBasic", 12, "*" )    '' "FreeBasic***"
+	''     PadLeft ( "FreeBasic", 12, "*" )    '' "***FreeBasic"
+	''     PadCenter("FreeBasic", 13, "*" )    '' "**FreeBasic**"
+	''
+	'' THE RESULT IS ALWAYS EXACTLY `width`. A string longer than the field is
+	'' TRUNCATED, keeping its left -- that is what makes a column line up
+	'' whatever is in it, and it is what all three AfxNova pad functions do.
+	'' A width of 0 or less gives "".
+	''
+	'' PadCenter puts the odd unit on the RIGHT: one character in a field of
+	'' four gets one pad before and two after. Integer division decides it, so
+	'' it is written down rather than left to be found out.
+	''
+	'' `pad` is ONE character. Anything else -- empty, longer, or an astral
+	'' character, which is two code units -- pads with a SPACE instead, rather
+	'' than writing half a character. On the byte family a unit is a byte, so
+	'' a non-ASCII pad is a UTF-8 lead byte and falls back the same way.
+
+	declare function PadRight overload alias "fb_StrPadRight" _
+		( byref s as const string, byval width as integer, _
+		  byref pad as const ustring = " " ) as string
+
+	declare function PadRight overload alias "fb_WStrPadRight" _
+		( byref s as const wstring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	declare function PadRight overload alias "fb_UStrPadRight" _
+		( byref s as const ustring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	declare function PadLeft overload alias "fb_StrPadLeft" _
+		( byref s as const string, byval width as integer, _
+		  byref pad as const ustring = " " ) as string
+
+	declare function PadLeft overload alias "fb_WStrPadLeft" _
+		( byref s as const wstring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	declare function PadLeft overload alias "fb_UStrPadLeft" _
+		( byref s as const ustring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	declare function PadCenter overload alias "fb_StrPadCenter" _
+		( byref s as const string, byval width as integer, _
+		  byref pad as const ustring = " " ) as string
+
+	declare function PadCenter overload alias "fb_WStrPadCenter" _
+		( byref s as const wstring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	declare function PadCenter overload alias "fb_UStrPadCenter" _
+		( byref s as const ustring, byval width as integer, _
+		  byref pad as const ustring = " " ) as ustring
+
+	'' ------------------------------------------------------- wrap/unwrap
+	''
+	'' AN EMPTY `closing` MEANS "THE SAME AS `opening`". That one rule covers
+	'' all three AfxNova forms with a single function:
+	''
+	''     Wrap( "Paul" )              '' "Paul" in double quotes
+	''     Wrap( "Paul", "'" )         '' 'Paul'
+	''     Wrap( "Paul", "<", ">" )    '' <Paul>
+	''
+	'' A genuinely one-sided wrap is InsertAt's job.
+
+	declare function Wrap overload alias "fb_StrWrap" _
+		( byref s as const string, byref opening as const ustring = """", _
+		  byref closing as const ustring = "" ) as string
+
+	declare function Wrap overload alias "fb_WStrWrap" _
+		( byref s as const wstring, byref opening as const ustring = """", _
+		  byref closing as const ustring = "" ) as ustring
+
+	declare function Wrap overload alias "fb_UStrWrap" _
+		( byref s as const ustring, byref opening as const ustring = """", _
+		  byref closing as const ustring = "" ) as ustring
+
+	'' The inverse: ONE leading `opening` and ONE trailing `closing` removed,
+	'' AND ONLY IF BOTH ARE PRESENT and do not overlap.
+	''
+	''     Unwrap( "<Paul>", "<", ">" )   '' "Paul"
+	''     Unwrap( "<Paul",  "<", ">" )   '' "<Paul"  -- unbalanced, untouched
+	''     Unwrap( "''x''", "'" )         '' "'x'"    -- one pair, not all
+	''
+	'' AfxStrUnWrap uses LTRIM/RTRIM with the delimiter, so it strips REPEATED
+	'' occurrences and does not require a pair -- "'''x'''" loses all six
+	'' quotes and "'x" loses its opener with nothing matching it. Stripping a
+	'' delimiter that was never balanced is how a quoted field containing a
+	'' quote gets silently mangled. Deliberate divergence.
+
+	declare function Unwrap overload alias "fb_StrUnwrap" _
+		( byref s as const string, byref opening as const ustring = """", _
+		  byref closing as const ustring = "", _
+		  byval ignoreCase as boolean = false ) as string
+
+	declare function Unwrap overload alias "fb_WStrUnwrap" _
+		( byref s as const wstring, byref opening as const ustring = """", _
+		  byref closing as const ustring = "", _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	declare function Unwrap overload alias "fb_UStrUnwrap" _
+		( byref s as const ustring, byref opening as const ustring = """", _
+		  byref closing as const ustring = "", _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	'' --------------------------------------------------- escape/unescape
+	''
+	'' Backslash escaping -- what makes a string safe to write between quotes
+	'' in a config file, a log line or generated source, and reversible after.
+	''
+	''     \  "            ->  \\  \"
+	''     LF CR TAB NUL   ->  \n  \r  \t  \0
+	''     other units below 32, and 127  ->  \xHH
+	''     everything else, INCLUDING ALL NON-ASCII, passes through
+	''
+	'' Non-ASCII is left alone on purpose: escaping it would make a ustring
+	'' unreadable and reduce a UTF-8 STRING to a wall of hex, and the job here
+	'' is to neutralise what breaks quoting, not to force the text to ASCII.
+	''
+	'' UNESCAPE IS THE EXACT INVERSE. Unescape( Escape( s ) ) = s for every
+	'' input, including one that already contains backslashes. An unrecognised
+	'' escape yields the escaped character ("\q" -> "q"); a trailing lone
+	'' backslash is kept, since there is nothing after it to unquote.
+	''
+	'' NOT AfxNova's DWStrEscape, which escapes REGULAR EXPRESSION
+	'' metacharacters so a literal can be used as a pattern. That is only
+	'' meaningful beside a regex engine -- it is built on CRegExp, a COM class
+	'' -- and there is no regex engine here, so it is not carried across.
+
+	declare function Escape overload alias "fb_StrEscape" _
+		( byref s as const string ) as string
+
+	declare function Escape overload alias "fb_WStrEscape" _
+		( byref s as const wstring ) as ustring
+
+	declare function Escape overload alias "fb_UStrEscape" _
+		( byref s as const ustring ) as ustring
+
+	declare function Unescape overload alias "fb_StrUnescape" _
+		( byref s as const string ) as string
+
+	declare function Unescape overload alias "fb_WStrUnescape" _
+		( byref s as const wstring ) as ustring
+
+	declare function Unescape overload alias "fb_UStrUnescape" _
+		( byref s as const ustring ) as ustring
+
+	'' ----------------------------------------------------------- predicates
+
+	'' Does the WHOLE string parse as a decimal number?
+	''
+	''     [ws] [+|-] ( digits [ . [digits] ] | . digits )
+	''          [ (e|E|d|D) [+|-] digits ] [ws]
+	''
+	'' At least one digit is required, and trailing junk fails -- "", "+", ".",
+	'' "e5" and "12abc" are all false; " -1.5e+3 " is true.
+	''
+	'' A DIFFERENT FUNCTION FROM AfxIsNumeric, not a port of it. That one asks
+	'' whether every character is drawn from "+-.0123456789", which makes
+	'' "++--.." numeric -- it is a character-set test, and RetainChars already
+	'' does those, better. A predicate called IsNumeric should answer whether
+	'' the thing is a number.
+	''
+	'' Radix literals (&H, &O, &B) are NOT accepted. VAL does take them, but
+	'' they are FreeBASIC literal syntax rather than numeric text.
+
+	declare function IsNumeric overload alias "fb_StrIsNumeric" _
+		( byref s as const string ) as boolean
+
+	declare function IsNumeric overload alias "fb_WStrIsNumeric" _
+		( byref s as const wstring ) as boolean
+
+	declare function IsNumeric overload alias "fb_UStrIsNumeric" _
+		( byref s as const ustring ) as boolean
+
+	'' Empty, or nothing but whitespace -- space, tab, LF, VT, FF, CR. The set
+	'' is spelled out rather than taken from isspace(), so it does not shift
+	'' with the locale.
+
+	declare function IsBlank overload alias "fb_StrIsBlank" _
+		( byref s as const string ) as boolean
+
+	declare function IsBlank overload alias "fb_WStrIsBlank" _
+		( byref s as const wstring ) as boolean
+
+	declare function IsBlank overload alias "fb_UStrIsBlank" _
+		( byref s as const ustring ) as boolean
+
 end extern
 
 end namespace

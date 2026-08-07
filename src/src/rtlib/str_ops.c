@@ -846,3 +846,193 @@ FBCALL FBSTRING *fb_StrRemoveBetween
 	hPatRel( &p2 );
 	return dst;
 }
+
+/* --- pad, wrap, escape, predicates: byte width --- */
+
+/* The pad character is ONE unit. `pad` arrives as a ustring, so on this family
+** it is first encoded to UTF-8: a non-ASCII pad is two or more bytes and has no
+** one-byte form, so a space is used instead of writing a lone lead byte. An
+** empty pad is a space for the same reason. Stated in inc/fb/string.bi. */
+static char hStrPadUnit( HPAT *p )
+{
+	if( p->len == 1 )
+		return p->ptr[0];
+
+	return ' ';
+}
+
+static FBSTRING *hStrPad( FBSTRING *s, ssize_t width, FBUSTRING *pad, int mode )
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( pad, &p );
+
+	dst = hStrTempAlloc( width, &out );
+	if( out != NULL )
+	{
+		w = hb_hPadFill( out, sp, sl, width, hStrPadUnit( &p ), mode );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrPadRight( FBSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	return hStrPad( s, width, pad, 0 );
+}
+
+FBCALL FBSTRING *fb_StrPadLeft( FBSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	return hStrPad( s, width, pad, 1 );
+}
+
+FBCALL FBSTRING *fb_StrPadCenter( FBSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	return hStrPad( s, width, pad, 2 );
+}
+
+/* An EMPTY `closing` means "the same as `opening`", which is what makes
+** Wrap( s ) quote it and Wrap( s, "'" ) single-quote it without a second
+** overload. A genuinely one-sided wrap is InsertAt's job. */
+FBCALL FBSTRING *fb_StrWrap( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl )
+{
+	const char *sp;
+	ssize_t sl, n;
+	FBSTRING *dst;
+	char *out;
+	HPAT a, b;
+	const char *clp;
+	ssize_t cll;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( op, &a );
+	hPatArg( cl, &b );
+
+	if( b.len > 0 )
+	{
+		clp = b.ptr;
+		cll = b.len;
+	}
+	else
+	{
+		clp = a.ptr;
+		cll = a.len;
+	}
+
+	n = a.len + sl + cll;
+
+	dst = hStrTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		if( a.len > 0 )
+			memcpy( out, a.ptr, a.len );
+		if( sl > 0 )
+			memcpy( out + a.len, sp, sl );
+		if( cll > 0 )
+			memcpy( out + a.len + sl, clp, cll );
+		hStrTempTrim( dst, n );
+	}
+
+	hPatRel( &a );
+	hPatRel( &b );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrUnwrap( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT a, b;
+	const char *clp;
+	ssize_t cll;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( op, &a );
+	hPatArg( cl, &b );
+
+	if( b.len > 0 )
+	{
+		clp = b.ptr;
+		cll = b.len;
+	}
+	else
+	{
+		clp = a.ptr;
+		cll = a.len;
+	}
+
+	hb_hUnwrapSpan( sp, sl, a.ptr, a.len, clp, cll, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &a );
+	hPatRel( &b );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrEscape( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl, n;
+	FBSTRING *dst;
+	char *out;
+
+	hStrArg( s, &sp, &sl );
+
+	n = hb_hEscapeFill( NULL, sp, sl );     /* measure */
+
+	dst = hStrTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		hb_hEscapeFill( out, sp, sl );
+		hStrTempTrim( dst, n );
+	}
+
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrUnescape( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+
+	hStrArg( s, &sp, &sl );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		w = hb_hUnescapeFill( out, sp, sl );
+		hStrTempTrim( dst, w );
+	}
+
+	return dst;
+}
+
+FBCALL int fb_StrIsNumeric( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl;
+
+	hStrArg( s, &sp, &sl );
+
+	return hb_hIsNumeric( sp, sl );
+}
+
+FBCALL int fb_StrIsBlank( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl;
+
+	hStrArg( s, &sp, &sl );
+
+	return hb_hIsBlank( sp, sl );
+}

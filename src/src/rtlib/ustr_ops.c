@@ -1300,4 +1300,357 @@ FBCALL FBUSTRING *fb_WStrRemoveBetween
 	return r;
 }
 
+
+/* --- pad, wrap, escape, predicates: 16-bit width --- */
+
+/* One code unit, so any BMP character pads. An astral pad is two units and has
+** no one-unit form, so a space is used rather than a lone surrogate. */
+static FB_UCHAR hUPadUnit( const FB_UCHAR *p, ssize_t plen )
+{
+	if( plen == 1 )
+		return p[0];
+
+	return (FB_UCHAR)' ';
+}
+
+static FBUSTRING *hUPad
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		ssize_t width, FB_UCHAR pad, int mode
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( width, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hPadFill( out, sp, sl, width, pad, mode ) );
+
+	return dst;
+}
+
+static FBUSTRING *hUWrap
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *ap, ssize_t al,
+		const FB_UCHAR *bp, ssize_t bl
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+	ssize_t n;
+
+	/* an empty closing means "same as opening" */
+	if( bl <= 0 )
+	{
+		bp = ap;
+		bl = al;
+	}
+
+	n = al + sl + bl;
+
+	dst = hUTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		if( al > 0 )
+			memcpy( out, ap, al * sizeof( FB_UCHAR ) );
+		if( sl > 0 )
+			memcpy( out + al, sp, sl * sizeof( FB_UCHAR ) );
+		if( bl > 0 )
+			memcpy( out + al + sl, bp, bl * sizeof( FB_UCHAR ) );
+		hUTempTrim( dst, n );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hUUnwrap
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *ap, ssize_t al,
+		const FB_UCHAR *bp, ssize_t bl, int ic
+	)
+{
+	ssize_t off, cnt;
+
+	if( bl <= 0 )
+	{
+		bp = ap;
+		bl = al;
+	}
+
+	hu_hUnwrapSpan( sp, sl, ap, al, bp, bl, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+static FBUSTRING *hUEscape( const FB_UCHAR *sp, ssize_t sl )
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+	ssize_t n;
+
+	n = hu_hEscapeFill( NULL, sp, sl );
+
+	dst = hUTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		hu_hEscapeFill( out, sp, sl );
+		hUTempTrim( dst, n );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hUUnescape( const FB_UCHAR *sp, ssize_t sl )
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hUnescapeFill( out, sp, sl ) );
+
+	return dst;
+}
+
+/* ----------------------------------------------------------------- USTRING */
+
+FBCALL FBUSTRING *fb_UStrPadRight( FBUSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pad, &pp, &pl );
+
+	return hUPad( sp, sl, width, hUPadUnit( pp, pl ), 0 );
+}
+
+FBCALL FBUSTRING *fb_UStrPadLeft( FBUSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pad, &pp, &pl );
+
+	return hUPad( sp, sl, width, hUPadUnit( pp, pl ), 1 );
+}
+
+FBCALL FBUSTRING *fb_UStrPadCenter( FBUSTRING *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pad, &pp, &pl );
+
+	return hUPad( sp, sl, width, hUPadUnit( pp, pl ), 2 );
+}
+
+FBCALL FBUSTRING *fb_UStrWrap( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl )
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( op, &ap, &al );
+	hUStrArg( cl, &bp, &bl );
+
+	return hUWrap( sp, sl, ap, al, bp, bl );
+}
+
+FBCALL FBUSTRING *fb_UStrUnwrap( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic )
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( op, &ap, &al );
+	hUStrArg( cl, &bp, &bl );
+
+	return hUUnwrap( sp, sl, ap, al, bp, bl, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrEscape( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hUEscape( sp, sl );
+}
+
+FBCALL FBUSTRING *fb_UStrUnescape( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hUUnescape( sp, sl );
+}
+
+FBCALL int fb_UStrIsNumeric( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hu_hIsNumeric( sp, sl );
+}
+
+FBCALL int fb_UStrIsBlank( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hu_hIsBlank( sp, sl );
+}
+
+/* ----------------------------------------------------------------- WSTRING */
+
+FBCALL FBUSTRING *fb_WStrPadRight( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pad, &pp, &pl );
+
+	r = hUPad( sp, sl, width, hUPadUnit( pp, pl ), 0 );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrPadLeft( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pad, &pp, &pl );
+
+	r = hUPad( sp, sl, width, hUPadUnit( pp, pl ), 1 );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrPadCenter( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pad, &pp, &pl );
+
+	r = hUPad( sp, sl, width, hUPadUnit( pp, pl ), 2 );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrWrap( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl )
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( op, &ap, &al );
+	hUStrArg( cl, &bp, &bl );
+
+	r = hUWrap( sp, sl, ap, al, bp, bl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrUnwrap( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl, int ic )
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( op, &ap, &al );
+	hUStrArg( cl, &bp, &bl );
+
+	r = hUUnwrap( sp, sl, ap, al, bp, bl, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrEscape( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hUEscape( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrUnescape( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hUUnescape( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL int fb_WStrIsNumeric( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	int r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hu_hIsNumeric( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL int fb_WStrIsBlank( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	int r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hu_hIsBlank( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
 #undef FB_UPOS

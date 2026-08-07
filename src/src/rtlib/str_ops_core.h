@@ -845,3 +845,349 @@ static ssize_t FB_SOP(hRemoveBetweenFill)
 
 	return w;
 }
+
+/* ==========================================================================
+** PAD, WRAP, ESCAPE, PREDICATES
+** ========================================================================== */
+
+/* Justify into a field of exactly `width`, padding with `pad`.
+**
+**   mode 0  left-justified  (PadRight -- padding goes on the right)
+**   mode 1  right-justified (PadLeft)
+**   mode 2  centred
+**
+** THE RESULT IS ALWAYS EXACTLY `width` UNITS. A string longer than the field is
+** TRUNCATED, keeping its left, which is what all three AfxNova pad functions do
+** and what makes a column line up whatever is in it. A width of 0 or less gives
+** the empty string.
+**
+** Centring puts the odd unit on the RIGHT: a 1-unit string in a 4-unit field
+** gets 1 before and 2 after. Integer division decides it and the choice is
+** arbitrary, so it is written down rather than left to be discovered. */
+static ssize_t FB_SOP(hPadFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		ssize_t width, FB_SOP_UNIT pad, int mode
+	)
+{
+	ssize_t i, at, keep;
+
+	if( width <= 0 )
+		return 0;
+
+	if( slen >= width )
+	{
+		/* truncate, keeping the left */
+		memcpy( dst, s, width * sizeof( FB_SOP_UNIT ) );
+		return width;
+	}
+
+	for( i = 0; i < width; i++ )
+		dst[i] = pad;
+
+	keep = slen;
+
+	switch( mode )
+	{
+	case 1:  at = width - keep;          break;   /* right-justified */
+	case 2:  at = (width - keep) / 2;    break;   /* centred, odd unit right */
+	default: at = 0;                     break;   /* left-justified */
+	}
+
+	if( keep > 0 )
+		memcpy( &dst[at], s, keep * sizeof( FB_SOP_UNIT ) );
+
+	return width;
+}
+
+/* Unwrap: strip ONE leading `open` and ONE trailing `close`, and only if BOTH
+** are there and they do not overlap. Returns the span to keep.
+**
+** AfxStrUnWrap uses LTRIM/RTRIM with the delimiter, so it strips REPEATED
+** occurrences and does not require a pair: "'''x'''" loses all six quotes, and
+** "'x" loses its opener with nothing matching it. Removing a delimiter that was
+** never balanced is how a quoted field containing a quote gets silently
+** mangled, so this needs both ends and takes one from each. Deliberate
+** divergence. */
+static void FB_SOP(hUnwrapSpan)
+	(
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *op, ssize_t oplen,
+		const FB_SOP_UNIT *cl, ssize_t cllen,
+		int ic,
+		ssize_t *off, ssize_t *cnt
+	)
+{
+	*off = 0;
+	*cnt = (slen > 0) ? slen : 0;
+
+	if( slen <= 0 || oplen <= 0 || cllen <= 0 )
+		return;
+
+	/* the two must fit without overlapping -- "'" is not both ends of itself */
+	if( slen < oplen + cllen )
+		return;
+
+	if( !FB_SOP(hStartsWith)( s, slen, op, oplen, ic ) )
+		return;
+
+	if( !FB_SOP(hEndsWith)( s, slen, cl, cllen, ic ) )
+		return;
+
+	*off = oplen;
+	*cnt = slen - oplen - cllen;
+}
+
+/* --- escape / unescape ---
+**
+** Backslash escaping, the kind that makes a string safe to write inside quotes
+** in a config file, a log line or generated source, and reversible afterwards.
+**
+** NOTE: this is NOT AfxNova's DWStrEscape, which escapes REGULAR EXPRESSION
+** metacharacters so a literal can be used as a pattern. That one is only
+** meaningful next to a regex engine -- it is built on CRegExp, a COM class --
+** and there is no regex engine here, so it is not carried across.
+**
+** The mapping:
+**
+**     \  "  ->  \\  \"
+**     LF CR TAB NUL  ->  \n \r \t \0
+**     any other unit below 32, and 127  ->  \xHH
+**     everything else, including all non-ASCII, passes through
+**
+** Non-ASCII is left alone deliberately. Escaping it would make a ustring
+** unreadable and would turn a UTF-8 STRING into a wall of hex for no gain --
+** the point is to neutralise the characters that break quoting, not to reduce
+** the string to ASCII.
+**
+** UNESCAPE IS THE EXACT INVERSE: Unescape( Escape( s ) ) is s for every input,
+** including one that already contains backslashes. */
+
+static const char FB_SOP(hHexDigit)[16] =
+	{ '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' };
+
+/* Measure when dst is NULL, fill otherwise. Returns the escaped length. */
+static ssize_t FB_SOP(hEscapeFill)
+	(
+		FB_SOP_UNIT *dst, const FB_SOP_UNIT *s, ssize_t slen
+	)
+{
+	ssize_t i, w = 0;
+
+#define FB_SOP_EMIT(u)  do { if( dst ) dst[w] = (FB_SOP_UNIT)(u); w++; } while(0)
+
+	for( i = 0; i < slen; i++ )
+	{
+		FB_SOP_UUNIT c = (FB_SOP_UUNIT)s[i];
+
+		switch( c )
+		{
+		case '\\': FB_SOP_EMIT('\\'); FB_SOP_EMIT('\\'); break;
+		case '"':  FB_SOP_EMIT('\\'); FB_SOP_EMIT('"');  break;
+		case 10:   FB_SOP_EMIT('\\'); FB_SOP_EMIT('n');  break;
+		case 13:   FB_SOP_EMIT('\\'); FB_SOP_EMIT('r');  break;
+		case 9:    FB_SOP_EMIT('\\'); FB_SOP_EMIT('t');  break;
+		case 0:    FB_SOP_EMIT('\\'); FB_SOP_EMIT('0');  break;
+		default:
+			if( c < 32 || c == 127 )
+			{
+				FB_SOP_EMIT('\\');
+				FB_SOP_EMIT('x');
+				FB_SOP_EMIT( FB_SOP(hHexDigit)[ (c >> 4) & 0x0F ] );
+				FB_SOP_EMIT( FB_SOP(hHexDigit)[ c & 0x0F ] );
+			}
+			else
+			{
+				FB_SOP_EMIT( c );
+			}
+			break;
+		}
+	}
+
+#undef FB_SOP_EMIT
+
+	return w;
+}
+
+/* One hex digit's value, or -1. */
+static int FB_SOP(hHexVal)( FB_SOP_UUNIT c )
+{
+	if( c >= '0' && c <= '9' ) return (int)(c - '0');
+	if( c >= 'a' && c <= 'f' ) return (int)(c - 'a') + 10;
+	if( c >= 'A' && c <= 'F' ) return (int)(c - 'A') + 10;
+	return -1;
+}
+
+/* The inverse. Output is never longer than the input, so one pass into a
+** buffer of slen is enough.
+**
+** An UNRECOGNISED escape yields the escaped character itself, so "\q" becomes
+** "q" -- the backslash did its job of quoting and is consumed. A TRAILING LONE
+** BACKSLASH has nothing to quote and is kept as a backslash, which is the only
+** choice that does not lose a character. */
+static ssize_t FB_SOP(hUnescapeFill)
+	(
+		FB_SOP_UNIT *dst, const FB_SOP_UNIT *s, ssize_t slen
+	)
+{
+	ssize_t i = 0, w = 0;
+
+	while( i < slen )
+	{
+		FB_SOP_UUNIT c = (FB_SOP_UUNIT)s[i];
+
+		if( c != '\\' )
+		{
+			dst[w++] = s[i++];
+			continue;
+		}
+
+		if( i + 1 >= slen )
+		{
+			/* trailing backslash: nothing follows it to unquote */
+			dst[w++] = s[i++];
+			continue;
+		}
+
+		{
+			FB_SOP_UUNIT e = (FB_SOP_UUNIT)s[i+1];
+
+			switch( e )
+			{
+			case 'n':  dst[w++] = (FB_SOP_UNIT)10; i += 2; continue;
+			case 'r':  dst[w++] = (FB_SOP_UNIT)13; i += 2; continue;
+			case 't':  dst[w++] = (FB_SOP_UNIT)9;  i += 2; continue;
+			case '0':  dst[w++] = (FB_SOP_UNIT)0;  i += 2; continue;
+			case 'x':
+				if( i + 3 < slen )
+				{
+					int hi = FB_SOP(hHexVal)( (FB_SOP_UUNIT)s[i+2] );
+					int lo = FB_SOP(hHexVal)( (FB_SOP_UUNIT)s[i+3] );
+					if( hi >= 0 && lo >= 0 )
+					{
+						dst[w++] = (FB_SOP_UNIT)( (hi << 4) | lo );
+						i += 4;
+						continue;
+					}
+				}
+				/* not a well-formed \xHH: fall through and take the 'x' */
+				dst[w++] = s[i+1];
+				i += 2;
+				continue;
+			default:
+				/* \\ and \" land here, as does any unknown escape */
+				dst[w++] = s[i+1];
+				i += 2;
+				continue;
+			}
+		}
+	}
+
+	return w;
+}
+
+/* --- predicates --- */
+
+/* Whitespace: space, tab, LF, VT, FF, CR. The same six C's isspace() uses,
+** spelled out so it does not depend on a locale. */
+static int FB_SOP(hIsSpace)( FB_SOP_UUNIT c )
+{
+	return (c == 32) || (c >= 9 && c <= 13);
+}
+
+/* Empty, or nothing but whitespace. */
+static int FB_SOP(hIsBlank)( const FB_SOP_UNIT *s, ssize_t slen )
+{
+	ssize_t i;
+
+	for( i = 0; i < slen; i++ )
+	{
+		if( !FB_SOP(hIsSpace)( (FB_SOP_UUNIT)s[i] ) )
+			return 0;
+	}
+
+	return 1;
+}
+
+/* Does the whole string parse as a decimal number?
+**
+**     [ws] [+|-] ( digits [ . [digits] ] | . digits ) [ (e|E|d|D) [+|-] digits ] [ws]
+**
+** At least one digit is required, so "", "+", "." and "e5" are all false, and
+** trailing junk fails: "12abc" is not a number.
+**
+** THIS IS A DIFFERENT FUNCTION FROM AfxIsNumeric, not a port of it. That one
+** asks whether every character is drawn from "+-.0123456789", which makes
+** "++--.." numeric and is really a character-set test -- RetainChars already
+** does that, and better. A predicate called IsNumeric should answer whether the
+** thing is a number.
+**
+** Radix literals (&H, &O, &B) are NOT accepted. VAL does take them; they are a
+** FreeBASIC literal syntax rather than a numeric string, and admitting them
+** would make "&HZZ" a parse question with no good answer. */
+static int FB_SOP(hIsNumeric)( const FB_SOP_UNIT *s, ssize_t slen )
+{
+	ssize_t i = 0;
+	int digits = 0;
+
+	/* leading whitespace */
+	while( i < slen && FB_SOP(hIsSpace)( (FB_SOP_UUNIT)s[i] ) )
+		i++;
+
+	if( i >= slen )
+		return 0;                       /* empty or all whitespace */
+
+	if( (FB_SOP_UUNIT)s[i] == '+' || (FB_SOP_UUNIT)s[i] == '-' )
+		i++;
+
+	while( i < slen && (FB_SOP_UUNIT)s[i] >= '0' && (FB_SOP_UUNIT)s[i] <= '9' )
+	{
+		digits++;
+		i++;
+	}
+
+	if( i < slen && (FB_SOP_UUNIT)s[i] == '.' )
+	{
+		i++;
+		while( i < slen && (FB_SOP_UUNIT)s[i] >= '0' && (FB_SOP_UUNIT)s[i] <= '9' )
+		{
+			digits++;
+			i++;
+		}
+	}
+
+	if( digits == 0 )
+		return 0;                       /* a sign and a dot are not a number */
+
+	if( i < slen )
+	{
+		FB_SOP_UUNIT e = (FB_SOP_UUNIT)s[i];
+		if( e == 'e' || e == 'E' || e == 'd' || e == 'D' )
+		{
+			ssize_t save = i;
+			int expDigits = 0;
+
+			i++;
+			if( i < slen && ((FB_SOP_UUNIT)s[i] == '+' || (FB_SOP_UUNIT)s[i] == '-') )
+				i++;
+
+			while( i < slen && (FB_SOP_UUNIT)s[i] >= '0' && (FB_SOP_UUNIT)s[i] <= '9' )
+			{
+				expDigits++;
+				i++;
+			}
+
+			/* an exponent marker with no digits is not an exponent, and
+			   whatever follows is then trailing junk */
+			if( expDigits == 0 )
+				i = save;
+		}
+	}
+
+	/* trailing whitespace, then it must be the end */
+	while( i < slen && FB_SOP(hIsSpace)( (FB_SOP_UUNIT)s[i] ) )
+		i++;
+
+	return (i == slen);
+}
