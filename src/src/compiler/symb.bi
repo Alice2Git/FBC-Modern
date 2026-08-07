@@ -202,6 +202,7 @@ enum FB_SYMBATTRIB
 	FB_SYMBATTRIB_ANONYMOUS        = &h01000000  '' anonymous / unnamed id
 	FB_SYMBATTRIB_GENERICSCOPE     = &h02000000  '' synthetic namespace holding one instantiation's type params
 	FB_SYMBATTRIB_GENERICINST      = &h04000000  '' an instantiation of a generic - affects name mangling
+	FB_SYMBATTRIB_WEAK             = &h08000000  '' emit weak: one copy survives if several modules define it
 end enum
 
 '' proc symbol attributes mask
@@ -2675,6 +2676,7 @@ declare sub symbProcRecalcRealType( byval proc as FBSYMBOL ptr )
 '' The synthetic namespace wrapping one instantiation, holding its type-parameter
 '' TYPEDEFs.  Skipped by name mangling and by symbGetDBGName.
 #define symbIsGenericScope(s) ((s->attrib and FB_SYMBATTRIB_GENERICSCOPE) <> 0)
+#define symbIsWeak(s) ((s->attrib and FB_SYMBATTRIB_WEAK) <> 0)
 
 #define symbIsConstant(s) ((s->attrib and FB_SYMBATTRIB_CONST) <> 0)
 

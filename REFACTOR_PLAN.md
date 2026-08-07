@@ -65,7 +65,7 @@ rm -f tests/fbc-tests.exe tests/unit-tests.inc tests/unit-tests-obj.lst
 | 10 — RFC-0002 iterator protocol | **done** — gate green |
 | 11 — RFC-0003 `for each` | **done** — gate green |
 | 12 — RFC-0004 containers | **done** — gate green, no compiler change |
-| 13 — weak/COMDAT | not started |
+| 13 — weak/COMDAT | **done** — gate green; module-private, weak not achievable on PE |
 | 14 — docs + merge | not started |
 
 ---
@@ -738,7 +738,7 @@ calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
 
 ### State of the tree
 
-Branch `feat/generics`, **nothing pushed**. Phases 0-12 complete and gated.
+Branch `feat/generics`, pushed to `origin/feat/generics`. Phases 0-13 complete and gated.
 
 Last commits:
 
@@ -751,54 +751,25 @@ de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
 
 ### What to do next
 
-Phase 13 — weak symbols / COMDAT, then Phase 14 — docs and merge.
+Phase 14 — documentation and merge, and it is the last one.
 
-Phase 13 is the last piece of engineering: an instantiation emitted in two
-translation units currently produces a duplicate symbol at link time. Every test
-so far has been single-module or has taken care not to instantiate the same
-thing twice across modules (`tests/generics/member-mangling/` is the exception,
-and it splits deliberately). Until that is done, generics work within one module
-and are fragile across several, which is the last thing between this branch and
-being usable.
+`docs/` already carries the feature pages written along the way: `ustring/`,
+`for_each/`, `array/`, `map/`, `set/`, `linkedlist/`. What is owed is
+`src/doc/manual` pages if the manual is to know about any of this, a changelog
+entry, regenerating `src/bootstrap/` if self-hosting is affected, **deleting
+REFACTOR_PLAN.md**, and `git merge --no-ff` into main.
 
-Phase 14 is `doc/`, the changelog and the merge. `doc/` already has
-`generics`-adjacent pages from Phases 10-12: `iterator-protocol.txt`,
-`for-each.txt`, `containers.txt`. **`REFACTOR_PLAN.md` is internal and is
-deleted at merge time.**
+Two things to weigh before merging rather than after:
+
+- **The README still describes only USTRING.** It is the repository front page
+  and now covers one of five features.
+- **True weak/COMDAT is not done** and cannot be from this machine — see the end
+  of the Phase 13 section. Multi-module generics work; they cost one copy of
+  each instantiation per module.
 
 Carried since Phase 4 and still open: readable debug names, in-body line
 numbers, function-template return types not mangled, and the LLVM backend not
 being in the gate.
-
-### Test standard for this phase — the author's instruction
-
-**Extremely comprehensive tests for each container, showing all possibilities.**
-Not a representative sample. Per container, at minimum:
-
-- every declared member, including the ones that look trivial (`Count`,
-  `IsEmpty`, `Capacity`)
-- empty, one-element and many-element states
-- boundary indices: first, last, one past the end, negative
-- the growth path — enough elements to force several reallocations or rehashes
-- removal in every form, and re-insertion afterwards
-- deep copy and assignment independence, checked in both directions
-- destructor balance (`constructed = destroyed`) with an element type that counts
-- element types that stretch it: a scalar, `string`, a UDT with a
-  constructor/destructor, and a nested container
-- `for each` in both binding forms, plus `exit for` / `continue for`
-- the documented failure modes, as `COMPILE_ONLY_FAIL` tests
-- **complexity asserted, not assumed** — 100k appends must not be O(n²), which
-  is the entire point of RFC-0004
-
-This is not belt-and-braces. A standard library is the one place a gap is
-expensive: once `Array` and `Map` are in the distribution every program depends
-on them, and a member that was never exercised is a bug shipped to everyone.
-The two defects this phase has already produced — an empty-string hash walking
-off the end of a buffer, and a member that silently constrained the whole type —
-were both found by exercising a case a sampled test would have skipped.
-
-Nothing is owed from Phase 11. The items still open are the ones carried since
-Phase 4, listed at the end of the Phase 11 section.
 
 ### Gate protocol — do not skip
 
@@ -816,7 +787,7 @@ outer directory reports "No rule to make target 'compiler'".
   A 16th failure is a regression.
 - **Reconcile the log-test count, do not just read "no failures".**
   `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 12: **1726 passed / 4 failed / 1730 logs**.
+  tests added. Baseline after Phase 13: **1727 passed / 4 failed / 1731 logs**.
   Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
   "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
   inflate a naive count by four.
@@ -863,6 +834,143 @@ outer directory reports "No rule to make target 'compiler'".
   any mangling at all. Take its address, and mutate the name to prove the test
   fails.
 - Empty output is not a pass; look for the summary line.
+
+---
+
+## Phase 13 — what landed
+
+**Multi-module generics link.** Before this phase they did not, at all:
+
+```
+ld: multiple definition of `Box<int>::GET_()'
+ld: multiple definition of `_Z5TwiceIiEi'
+```
+
+Two modules that both say `Box( of long )` mean the same type, and each emits
+the members it reached, under the same mangled name. That is not a corner case
+— it is what happens the moment a generic lives in a `.bi` included twice, which
+is how every one of the containers is meant to be used.
+
+### What it is NOT
+
+It is not weak/COMDAT emission. **That is not achievable on this target**, and
+the phase spent most of its time establishing why rather than assuming it.
+
+`FB_SYMBATTRIB_WEAK` exists and is set on every instantiated procedure — an
+instantiated generic procedure, an instantiated global operator, and any member
+of an instantiated type. What the backends do with it is emit the symbol
+**module-private**, so each module carries its own copy.
+
+That is exactly what fbc already does for vtables and RTTI, which is deviation
+D3's own precedent, and it costs one copy per module rather than one per
+program.
+
+### Why weak does not work here, measured twice
+
+**gas64, `.weak` instead of `.globl`:** the binary crashes before reaching main
+— with a SINGLE module, so it is not a duplicate-symbol interaction.
+
+**gcc, `__attribute__((weak))`:** compiles, links, and produces WRONG CODE. The
+Phase 9 inheritance test failed on a virtual call:
+
+```
+inheritance.bas(190): assertion failed: p->nm( ) = "Sq"
+```
+
+`nm` on the object file says why:
+
+```
+.weak._ZN2SqIu7INTEGERE2NMEv._ZN5SHAPE2NMEv
+```
+
+On PE/COFF, `__attribute__((weak))` produces a **weak EXTERNAL** — a reference
+with a fallback — rather than a weak definition. The real symbol stops existing,
+so the vtable slot resolves to whatever arbitrary symbol became the fallback and
+the virtual call returns the wrong function, silently. The same encoding is why
+`.weak` crashed in gas64.
+
+A real COMDAT on PE needs the function in its own `.text$name` section with
+`.linkonce discard`, and a different form again on ELF. That is emitter surgery
+per target, and it cannot be verified for a target this machine cannot link for,
+so it is not attempted. The plan anticipated exactly this: *"If a target cannot
+support it, fall back to module-private for that target."*
+
+**The lesson worth keeping: the gcc route did not fail loudly.** It compiled, it
+linked, and it changed what a virtual call did. It was caught by the existing
+Phase 9 test, not by the new one.
+
+### Where it is set, and where it is emitted
+
+| | |
+| --- | --- |
+| `symb.bi` | `FB_SYMBATTRIB_WEAK = &h08000000` (bit 27), `symbIsWeak` |
+| `symb-proc.bas` | set in `hSetupProc` when the parent is a GENERICINST struct — the one place every replayed member body passes through |
+| `parser-generic.bas` | set on instantiated generic procedures and global operators |
+| `ir-hlc.bas` | `static` |
+| `ir-gas64.bas` | no `.globl` |
+| `emit_x86.bas` | no `hPUBLIC` |
+| `ir-llvm.bas` | `linkonce_odr` — **unverified**, no LLVM toolchain here and the backend is not gated; if wrong, the fallback is `private` like the others |
+
+### What this costs
+
+- **Code size.** N modules using `Array( of long )` carry N copies of its
+  members. Real, and the reason weak/COMDAT is worth revisiting.
+- **Procedure addresses differ across modules.** `@obj.Push` in two modules
+  gives two pointers. Nothing in the language compares them, and RTTI already
+  compares type NAME strings rather than vtable addresses (Phase 9 verified that
+  path), so `is` and virtual dispatch are unaffected.
+
+### A test was weakened, deliberately
+
+`tests/generics/member-mangling/` was two modules: `probe.bas` named each
+instantiated method by its exact Itanium ALIAS and took its address, so the LINK
+failed if mangling drifted. That is how the Phase 5 collapse — four
+instantiations sharing one external name — was caught.
+
+Module-private symbols cannot be named from another module, so that assertion is
+no longer expressible. It is now a single-module `member-mangling.bas` keeping
+the behavioural half.
+
+**What survives:** a collapse would put two C functions with the same name in one
+file, which the C compiler rejects outright rather than silently keeping one.
+**What is lost:** the assertion on the exact NAME. Mangling could drift to some
+other distinct scheme and this would not notice. Recorded rather than papered
+over.
+
+### Tests added
+
+| Path | Kind |
+| --- | --- |
+| `tests/generics/multimodule/` | `MULTI_MODULE_OK` — two modules both instantiating `Box( of long )`, `Box( of string )`, `Twice( of long )` and `operator +( of long )`, covering all three emission paths (member, generic procedure, global operator); the second module's copies are called to prove the surviving copy is a working one and not a stub; and an instantiation only one module reaches |
+| `tests/generics/member-mangling.bas` | converted from the two-module version |
+
+**Shown to have teeth**: with `symbIsWeak` forced to FALSE, the multimodule test
+fails with **8 duplicate-definition errors on each backend**, and goes green
+again on restore.
+
+### Phase 13 gate
+
+| Check | Result |
+| --- | --- |
+| build | clean, zero warnings |
+| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` — unchanged since Phase 3 |
+| unit-tests, `GEN=gas64` | `1154420 / 1154409 / 11 / 2308` — identical |
+| log-tests | **1727 passed / 4 failed / 1731 logs** — none missing a `RESULT=` |
+| `tests/warnings` golden, 5 targets | clean |
+| `tests/errors` golden, 5 targets | clean |
+
+The multimodule and inheritance tests were run by hand on **both** backends,
+which is how the gcc weak-external defect was found.
+
+### Still open
+
+- **True weak/COMDAT**, which is the size optimisation this phase was originally
+  scoped as. It needs per-target section emission (`.text$name` +
+  `.linkonce discard` on PE, `,comdat` on ELF) and a machine that can link for
+  each target.
+- **The LLVM backend's `linkonce_odr` is unverified.**
+- Carried since Phase 4: readable debug names, in-body line numbers.
+- Carried since Phase 6: function-template return types are not mangled.
 
 ---
 

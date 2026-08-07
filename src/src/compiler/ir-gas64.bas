@@ -7920,7 +7920,26 @@ private sub _emitprocbegin(byval proc as FBSYMBOL ptr,byval initlabel as FBSYMBO
 
 	asm_code(".text")
 	if symbisprivate(proc)=FALSE then
-		asm_code(".globl "+*symbGetMangledName( proc ))
+		'' A generic instantiation is emitted by every module that reaches it,
+		'' under one mangled name, so it must not be '.globl' or the link fails
+		'' with 'multiple definition'.
+		''
+		'' It is emitted MODULE-PRIVATE here rather than weak.  '.weak' was tried
+		'' first and is wrong on this target: on PE/COFF a '.weak' definition
+		'' becomes a weak EXTERNAL rather than a weak definition, and the
+		'' resulting binary crashes before reaching main -- measured with a
+		'' SINGLE module, so it is not a duplicate-symbol interaction.  A real
+		'' COMDAT needs the function in its own '.text$name' section with
+		'' '.linkonce discard' on PE and a different form again on ELF, which is
+		'' emitter surgery that cannot be verified for a target this machine
+		'' cannot link for.
+		''
+		'' Module-private is what fbc already does for vtables and RTTI, and it
+		'' costs one copy per module rather than one per program.  The C backend,
+		'' which is the release backend, gets the real thing.
+		if symbIsWeak( proc ) = FALSE then
+			asm_code(".globl "+*symbGetMangledName( proc ))
+		end if
 	end if
 	cfi_windows_asm_code(".seh_proc "+*symbGetMangledName( proc ))
 	asm_code(*symbGetMangledName( proc )+":")

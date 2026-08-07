@@ -1104,6 +1104,24 @@ function symbAddProc _
 	symtb = @symbGetCompSymbTb( parent )
 	hashtb = @symbGetCompHashTb( parent )
 
+	'' A member of a generic instantiation is emitted WEAK.
+	''
+	'' The same instantiation reached from two modules produces the same
+	'' mangled name in both, and without this the link fails outright:
+	''
+	''     multiple definition of `Box<int>::GET_()'
+	''
+	'' Weak lets the linker keep one copy and discard the rest, which is what
+	'' C++ does with COMDAT for exactly this.  Set here rather than in the
+	'' generics parser because a member body is created by an ordinary
+	'' cProcHeader during the replay, and this is the one place every one of
+	'' them passes through.
+	if( parent <> NULL ) then
+		if( symbIsStruct( parent ) andalso symbIsGenericInst( parent ) ) then
+			attrib or= FB_SYMBATTRIB_WEAK
+		end if
+	end if
+
 	'' Procedures are always "globals", assuming that local/nested
 	'' procedures aren't allowed
 	attrib or= FB_SYMBATTRIB_SHARED

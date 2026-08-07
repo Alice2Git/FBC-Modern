@@ -2506,6 +2506,17 @@ private sub _emitProcBegin _
 	elseif( symbIsPrivate( proc ) ) then
 		ln += "private "
 		''ln += "internal "
+
+	'' A generic instantiation is emitted by every module that reaches it under
+	'' one mangled name.  linkonce_odr is LLVM's spelling of exactly this: keep
+	'' one copy, discard the rest, and it is what clang emits for a C++ template
+	'' instantiation.
+	''
+	'' UNVERIFIED -- there is no LLVM toolchain on this machine and the backend
+	'' is not in the test gate.  If it turns out to be wrong, the safe fallback
+	'' is 'private', matching what gas64 and emit_x86 do.
+	elseif( symbIsWeak( proc ) ) then
+		ln += "linkonce_odr "
 	end if
 	ln += hEmitProcHeader( proc, FALSE, FALSE )
 

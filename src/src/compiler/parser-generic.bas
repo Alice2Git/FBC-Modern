@@ -1294,6 +1294,8 @@ function genInstantiateProc _
 			return NULL
 		end if
 
+		inst->attrib or= FB_SYMBATTRIB_WEAK
+
 		'' No FB_SYMBATTRIB_GENERICINST here, deliberately.  hMangleProc takes
 		'' the operator branch for the id, so the flag would only add an 'I...E'
 		'' list, and it is not needed to keep instantiations apart: an operator
@@ -1313,6 +1315,10 @@ function genInstantiateProc _
 		'' to stay __FBGENPROC: the deferred body replay finds its own prototype by
 		'' that name.
 		inst->attrib or= FB_SYMBATTRIB_GENERICINST
+
+		'' ...and WEAK, so two modules instantiating the same generic procedure
+		'' link.  Without it: multiple definition of `_Z5TwiceIiEi'.
+		inst->attrib or= FB_SYMBATTRIB_WEAK
 
 		if( inst->id.alias = NULL ) then
 			dim as zstring ptr src = genGenericName( gensym )

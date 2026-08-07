@@ -7940,7 +7940,13 @@ private sub _procFooter _
 	''
 	hALIGN( 16 )
 
-	if( ispublic ) then
+	'' A generic instantiation is emitted by every module that reaches it, under
+	'' one mangled name, so it must not be made public or the link fails with
+	'' 'multiple definition'.  Module-private here, for the same reason as the
+	'' gas64 backend: a real COMDAT is a per-target section form that cannot be
+	'' verified from this machine, and one copy per module is what fbc already
+	'' accepts for vtables and RTTI.
+	if( ispublic andalso (symbIsWeak( proc ) = FALSE) ) then
 		hPUBLIC( mangledName, symbIsExport( proc ) )
 	end if
 

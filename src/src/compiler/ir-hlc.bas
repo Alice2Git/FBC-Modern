@@ -552,7 +552,28 @@ private function hEmitProcHeader _
 	end if
 
 	if( (options and EMITPROC_ISPROCPTR) = 0 ) then
-		if( symbIsPrivate( proc ) ) then
+		'' A generic instantiation is emitted by EVERY module that reaches it,
+		'' under the same mangled name.  Left global, the link fails outright:
+		''
+		''     ld: multiple definition of `Box<int>::GET_()'
+		''
+		'' It is emitted MODULE-PRIVATE, so each module carries its own copy.
+		''
+		'' __attribute__((weak)) was tried first and is WRONG ON THIS TARGET.
+		'' On PE/COFF it produces a weak EXTERNAL -- a reference with a fallback
+		'' -- rather than a weak definition, and the real symbol stops existing:
+		''
+		''     nm:  .weak._ZN2SqIu7INTEGERE2NMEv._ZN5SHAPE2NMEv
+		''
+		'' A vtable slot then resolves to whatever the arbitrary fallback is, and
+		'' a virtual call returns the wrong function while compiling and linking
+		'' silently.  The same thing happens with '.weak' in the gas64 backend.
+		'' Neither route gives a weak DEFINITION on PE; a real COMDAT needs a
+		'' per-target section form that cannot be verified from here.
+		''
+		'' Module-private is what fbc already does for vtables and RTTI, and it
+		'' costs one copy per module rather than one per program.
+		if( symbIsPrivate( proc ) orelse symbIsWeak( proc ) ) then
 			ln += "static "
 		end if
 	end if
