@@ -11,6 +11,200 @@ Source RFCs: `C:\dev\fb-rfcs`
 
 ---
 
+## HANDOFF — read this first
+
+### What this branch is
+
+`feat/generics` adds four language features to fbc 1.20.0, each depending on the
+one before it:
+
+| | RFC | Where it lives |
+| --- | --- | --- |
+| Generics | 0001 | `src/src/compiler/parser-generic*.bas` |
+| Iterator protocol | 0002 | a contract, not code — `docs/for_each/iterator-protocol.txt` |
+| `for each` | 0003 | `src/src/compiler/parser-compound-for.bas` |
+| Standard containers | 0004 | `src/inc/fb/*.bi` — **no compiler code at all** |
+
+Phases 0-13 are complete and gated. Phase 14 (documentation and merge) is the
+only one left.
+
+### State of the tree
+
+Branch `feat/generics`, **1 commit ahead of `origin/feat/generics`** — push
+before doing anything else, or the last phase exists only on this machine.
+
+22 commits ahead of `main`. Working tree clean.
+
+```
+7541a3e  Phase 13: multi-module generics link
+e85c3b9  Restructure: USTRING becomes FBC-Modern
+9ea3499  Phase 12: the standard containers -- Array, Map, Set, LinkedList
+649caaa  Phase 11: FOR EACH
+522a047  Phase 10: the RFC-0002 iterator protocol
+de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
+0562db4  Phase 8: operators and properties on generics
+```
+
+Two commits are labelled "in progress" (`539a19f`, `4fc03a8`) and were
+superseded by the phase commits that follow them. They are history, not
+outstanding work.
+
+### What to do next — Phase 14
+
+1. **Push.** One commit is unpushed.
+2. **The README still describes only USTRING.** It is the repository front page
+   and now covers one of five features. Its Layout section was updated for the
+   new tree; the prose was not. This is the single most visible thing left.
+3. **There is no user-facing page for GENERICS.** `docs/` has `ustring/`,
+   `for_each/`, `array/`, `map/`, `set/` and `linkedlist/`. The feature all four
+   of the others are built on has no page — only `REFACTOR_PLAN.md`, which is
+   deleted at merge.
+4. `src/doc/manual` pages, if the manual is to know about any of this.
+5. A changelog entry in `src/changelog.txt`.
+6. Regenerate `src/bootstrap/` if self-hosting is affected. **Note it is
+   gitignored**, so this is a decision, not an oversight.
+7. **Delete `REFACTOR_PLAN.md`** — it is internal and was never meant to ship.
+   Move anything from *Known limitations* below into a page that survives first.
+8. `git merge --no-ff feat/generics` into `main`.
+
+### Known limitations — these must survive the deletion of this file
+
+Real, measured, and none of them blocking. A user hitting one should find it
+written down somewhere permanent before this file goes.
+
+- **One copy of each instantiation per module.** True weak/COMDAT is not
+  achievable on PE/COFF by either route tried: `__attribute__((weak))` produces
+  a weak *external* and silently breaks virtual dispatch, and `.weak` in gas64
+  crashes the binary. See the Phase 13 section for the `nm` output that proves
+  it. Costs size, not correctness.
+- **The LLVM backend's `linkonce_odr` is unverified** — no LLVM toolchain here,
+  and the backend is not in the gate. If it is wrong, the fallback is `private`,
+  matching the other three.
+- **Readable debug names.** Every instantiation reports as `Box` to the
+  debugger, so GDB sees N distinct types with one name. Carried since Phase 4.
+- **In-body line numbers.** An error inside a replayed generic body reports the
+  body's opening line, not the offending one; the instantiation chain supplies
+  the detail. Tried, measured and reverted in Phase 4 — read that section before
+  attempting it again.
+- **Function-template return types are not mangled.** `_Z3IncIiEi` where Itanium
+  wants the return type after the `I…E` list. Names are unique and stable, which
+  is all Phase 6 claimed. Carried since Phase 6.
+- **No constraints on type parameters.** A container member that needs `=` on T
+  makes the whole type unusable for any T without one, which is why
+  `Array`'s `Sort`/`IndexOf`/`Contains` are free procedures. The diagnostic
+  lands at the instantiation site. This is the strongest practical argument for
+  adding constraints, and four `fail-container-*` tests pin the current
+  behaviour.
+- **`typeof( T )` does not see through a type parameter.** An ordinary TYPEDEF
+  is transparent to `typeof`; the one an instantiation binds is not, so a
+  generic body cannot branch on what T is bound to. This is why the hash
+  contract is an overloaded `HashOf` rather than an `#if` dispatch. Worth fixing
+  in the compiler; nothing currently needs it.
+- **`zstring`/`wstring` are refused by `for each`**, and a `string` expression
+  with side effects is too. Both deliberate — see `docs/for_each/for-each.txt`.
+- **`member-mangling` is weaker than it was.** Phase 13 made instantiations
+  module-private, so the exact-mangled-name link assertion is no longer
+  expressible. A collapse is still caught; a drift to a different distinct
+  scheme is not.
+
+### Gate protocol — do not skip
+
+```
+cd src && make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
+cd tests && make unit-tests [GEN=gas64] ... && make log-tests ...
+tests/warnings/test.sh  and  tests/errors/test.sh   then  git diff on r/
+```
+
+The makefile root is **`src/`**, not `C:/dev/FBC-Modern/` — `make` from the
+repository root reports "No rule to make target 'compiler'".
+
+- **Environmental floor: 11 `threadcall_` + 4 `cpp`.** The 4 are missing
+  `libstdc++` in this mingw64, proven by rebuilding at HEAD with the changes
+  stashed. A 16th failure is a regression.
+- **Reconcile the log-test count, do not just read "no failures".**
+  `passed + failed = total logs`, and passed should move by exactly the number
+  of tests added. Baseline after Phase 13: **1727 passed / 4 failed / 1731
+  logs**. Count with `find tests -name "*.log" ! -name "log-tests-results*"
+  ! -name "failed-*"` — the four `failed-<lang>.log` aggregates are not test
+  logs and inflate a naive count by four.
+- **A new test FILE in an existing directory is not picked up** without
+  `make clean-tests` **from `src/`** — the generated list is cached. This
+  silently hid two Phase 6 tests behind a green-looking gate.
+- **A new test DIRECTORY** needs `tests/dirlist.mk` *and* a `make clean`.
+- Check no log lacks a `RESULT=` line; a timed-out run leaves one truncated.
+- Never run two `make log-tests` concurrently — they race and invent failures.
+- **Run behaviour tests under BOTH backends by hand.** Three separate defects
+  were visible to only one: Phase 9's emission-order bug was invisible to gas64;
+  Phase 11's stale-stack bug was a C compile error under gcc and a segfault
+  under gas64; Phase 13's weak-external bug compiled, linked and silently
+  returned the wrong function under gcc.
+- **Golden error files: one case per file.** The compiler stops at the first
+  error in many situations, so a file with several cases reports only the first.
+
+### How the generics implementation actually works
+
+Four sentences, because nothing else in the compiler looks like this:
+
+1. A generic's body is **captured as a token chain** at declaration and
+   **replayed through the real parser** once per distinct type-argument list,
+   with the type parameters bound as TYPEDEFs in a synthetic namespace. There is
+   no textual substitution and no separate template AST.
+2. Member bodies and generic-procedure bodies are **deferred** to the next
+   module-level statement boundary, because an instantiation happens
+   mid-statement and a procedure cannot be opened there. This is also what makes
+   declaration order irrelevant.
+3. Every instantiation is built **at module level**, whatever the parser was
+   doing, because a UDT with member procedures is illegal below module level.
+4. `for each` is a **desugaring**, with two lowerings — an iterator walk for a
+   user collection, an ordinary counter `FOR` for an array or string — and no
+   new AST node, IR node, backend change or runtime call.
+
+### Traps this project has actually hit
+
+- `git` without `-C <abspath>` runs against the wrong repo. Always
+  `git -C /c/dev/FBC-Modern`.
+- **`git stash push -- <file>` reverts the WHOLE file, not the hunk you meant.**
+  To neutralise one condition, edit it (`if( FALSE andalso ... )`), rebuild,
+  observe, edit it back.
+- Delete the old `.exe` before every probe. A stale binary has twice produced
+  output that looked like a passing fix.
+- **An unexpected result is more often the test than the compiler.** Twelve
+  false alarms so far: `base`, `Fix` and `Mid` are reserved; `A`/`a` and `K`/`k`
+  collide case-insensitively; `K` cannot be a parameter type; `long + long`
+  promotes to INTEGER; `str()` emits no leading space; a UDT FOR variable needs
+  a default constructor; `x is T` needs a genuine downcast; an override must
+  itself be `virtual` to be overridden again; constness alone does not
+  distinguish an overload. **Check the plain-FB control before concluding.**
+- **A construct that works in isolation can still be broken in context.** All
+  three Phase 11 bugs needed a procedure with several preceding loops. Bisect
+  the TEST FILE, not the construct.
+- **Compiler-internal scratch is not always safe to reuse.**
+  `symbAddImplicitVar` registers no construction or destruction; the
+  compound-statement stack is pooled and only three fields are reset on push;
+  `cProcHeader`'s name buffer was a function-static and the function re-enters
+  itself. Three phases found three of these.
+- An unreferenced `declare ... alias "..."` emits no relocation and links
+  against any mangling at all. Take its address, and mutate the name to prove
+  the test fails.
+- Empty output is not a pass; look for the summary line.
+
+### Where things are
+
+```
+src/                      the fbc tree; the makefile is HERE
+    src/compiler/         parser-generic.bas, parser-generic-capture.bas,
+                          parser-compound-for.bas
+    inc/fb/               array.bi map.bi set.bi linkedlist.bi hash.bi
+    inc/containers.bi     the single include
+    tests/generics/       42 test files, plus multimodule/
+    tests/errors/         golden diagnostics, 5 targets, built in Phase 4
+    tests/warnings/       golden warnings, pre-existing
+toolchains/               prebuilt fbc for windows and linux
+docs/                     one folder per feature
+```
+
+---
+
 ## Baseline (recorded 2026-08-06, on `main`)
 
 Reproduced from scratch — full clean rebuild of the suite, not a stale binary:
@@ -731,109 +925,6 @@ misleading results. Delete the artifact before every probe.
 Tests added: `generic-procs.bas` (explicit and inferred, `T ptr`, two type
 parameters, return-type-only, generic calling generic, generic type method
 calling a generic procedure) and `fail-infer-mixed-promotion.bas`.
-
----
-
-## HANDOFF — read this first
-
-### State of the tree
-
-Branch `feat/generics`, pushed to `origin/feat/generics`. Phases 0-13 complete and gated.
-
-Last commits:
-
-```
-539a19f  Phase 11 in progress: for each -- state recorded, compiler changes NOT committed
-522a047  Phase 10: the RFC-0002 iterator protocol
-de3e624  Phase 9: inheritance, virtual, abstract and RTTI across generics
-0562db4  Phase 8: operators and properties on generics
-```
-
-### What to do next
-
-Phase 14 — documentation and merge, and it is the last one.
-
-`docs/` already carries the feature pages written along the way: `ustring/`,
-`for_each/`, `array/`, `map/`, `set/`, `linkedlist/`. What is owed is
-`src/doc/manual` pages if the manual is to know about any of this, a changelog
-entry, regenerating `src/bootstrap/` if self-hosting is affected, **deleting
-REFACTOR_PLAN.md**, and `git merge --no-ff` into main.
-
-Two things to weigh before merging rather than after:
-
-- **The README still describes only USTRING.** It is the repository front page
-  and now covers one of five features.
-- **True weak/COMDAT is not done** and cannot be from this machine — see the end
-  of the Phase 13 section. Multi-module generics work; they cost one copy of
-  each instantiation per module.
-
-Carried since Phase 4 and still open: readable debug names, in-body line
-numbers, function-template return types not mangled, and the LLVM backend not
-being in the gate.
-
-### Gate protocol — do not skip
-
-```
-make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
-cd tests && make unit-tests [GEN=gas64] ... && make log-tests ...
-tests/warnings/test.sh  and  tests/errors/test.sh   then  git diff on r/
-```
-
-The makefile root is **`src/`**, not `C:/dev/FBC-Modern/` — `make` from the
-outer directory reports "No rule to make target 'compiler'".
-
-- **Environmental floor: 11 `threadcall_` + 4 `cpp`.** The 4 are missing
-  `libstdc++` in this mingw64; proven by rebuilding at HEAD with changes stashed.
-  A 16th failure is a regression.
-- **Reconcile the log-test count, do not just read "no failures".**
-  `passed + failed = total logs`, and passed should move by exactly the number of
-  tests added. Baseline after Phase 13: **1727 passed / 4 failed / 1731 logs**.
-  Count with `find tests -name "*.log" ! -name "log-tests-results*" ! -name
-  "failed-*"` — the four `failed-<lang>.log` aggregates are not test logs and
-  inflate a naive count by four.
-- **A new test FILE in an existing directory is not picked up** without
-  `make clean-tests` **from `src/`** — the generated list is cached.
-  This silently hid two Phase 6 tests behind a green-looking gate.
-- Check no log lacks a `RESULT=` line; a timed-out run leaves one truncated.
-- Never run two `make log-tests` concurrently — they race and invent failures.
-- **Run behaviour tests under BOTH backends by hand.** Phase 9's emission-order
-  bug was invisible to gas64; Phase 11's stale-stack bug showed up as a C compile
-  error under gcc and a segfault under gas64, and it was the difference between
-  the two that identified it as an AST problem rather than an emission one.
-- **Golden error files: one case per file.** The compiler stops at the first
-  error in many situations, so a file with several independent cases silently
-  reports only the first.
-
-### Traps this project has actually hit
-
-- `git` without `-C <abspath>` runs against the wrong repo. Always
-  `git -C /c/dev/FBC-Modern`.
-- **`git stash push -- <file>` reverts the WHOLE file, not the hunk you had in
-  mind.** Reached for to check whether one fix had teeth, it silently backed out
-  the rest of the phase's work in that file too. To neutralise a single
-  condition, edit it (`if( FALSE andalso ... )`), rebuild, observe, edit it back.
-- Delete the old `.exe` before every probe. A stale binary has twice produced
-  output that looked like a passing fix.
-- **An unexpected result is more often the test than the compiler** — `base` is
-  reserved, `A`/`a` collide case-insensitively, `K` cannot be a parameter type,
-  `long + long` promotes to INTEGER, `str()` emits no leading space, a UDT used
-  as a FOR variable needs a **default constructor** as well as its for/step/next
-  trio, `x is T` requires a genuine DOWNCAST, an override must itself be
-  `virtual` to be overridden AGAIN a level down, and constness alone does NOT
-  distinguish an overload. Reserved so far: `base`, `Fix`, `Mid`. Ten false
-  alarms now. Check the plain-FB control first.
-- **A construct that works in isolation can still be broken in context.** All
-  three Phase 11 bugs needed a procedure with several preceding loops and none
-  reproduced on its own. Bisect the TEST FILE, not the construct.
-- **Compiler-internal scratch is not always safe to reuse.** `symbAddImplicitVar`
-  registers no construction or destruction; the compound-statement stack is
-  pooled and only three fields are reset on push; `cProcHeader`'s name buffer was
-  a function-static and the function re-enters itself. Three separate phases
-  found three of these.
-- An unreferenced `declare ... alias "..."` emits no relocation and links against
-  any mangling at all. Take its address, and mutate the name to prove the test
-  fails.
-- Empty output is not a pass; look for the summary line.
 
 ---
 
