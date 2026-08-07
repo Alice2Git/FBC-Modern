@@ -205,3 +205,59 @@ cd src && make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC
 
 A full compiler rebuild is ~6 s at `-j8` (146 modules); touching any `.bi`
 rebuilds everything.
+
+## FB string library (`fb/string.bi`) — baseline after phases 0–6
+
+Added by the string-library work, on branch `feat/fb-string-library`.
+
+```
+1155912 assertions   1155901 passed   11 failed   2397 modules
+```
+
+The 11 are the same `fbc_tests.threads.threadcall_` failures documented above —
+`libffi` absent — and no others. **Any 12th failure is a regression.**
+
+The delta from the 1,154,420 baseline is 1,492 assertions across five new suites
+in `src/tests/string/`:
+
+| Suite | Assertions | Covers |
+|---|---|---|
+| `fbstr_search` | 207 | Tally, TallyChars, InstrChars, VerifySet, SpanOf, StartsWith, EndsWith, Contains |
+| `fbstr_extract` | 186 | Extract, Remain, Between, Clip, DeleteAt, InsertAt and their `*Chars` forms |
+| `fbstr_transform` | 205 | Replace, Remove, Retain, Reverse, Repeat, Shrink, MCase, RemoveBetween |
+| `fbstr_pad` | 693 | pad, wrap, escape/unescape, IsNumeric, IsBlank |
+| `fbstr_split` | 151 | Split, SplitChars, Join |
+| `ustr_concat_ops` | 50 | the `&`-operator ustring fix (see below) |
+
+`src/tests/string/fbstr_split_mod2.bas` has no assertions of its own: it is a
+SECOND module including `fb/string.bi`, so that dropping the `private` on the
+Split/Join bodies breaks the BUILD rather than a test.
+
+`src/tests/generics/namespace-qualified-inst.bas` is a log-test, not an fbcunit
+suite, so it appears in the log-tests count (1,732, up from 1,731) rather than
+here.
+
+### Two compiler bugs fixed along the way
+
+Both pre-existing, both silent, both found by tests written for something else:
+
+- **Namespace-qualified generic instantiation.** `dim x as FB.Array( of string )`
+  did not compile; the replay resolved the generic body in the caller's scope
+  rather than the generic's declaring namespace. Pinned by
+  `src/tests/generics/namespace-qualified-inst.bas`.
+- **`&` sent a ustring operand through the C locale.** `someWstring & someUstring`
+  destroyed non-BMP text. Pinned by `src/tests/string/ustr_concat_ops.bas`,
+  which was verified to FAIL without the fix (12 of its 50 assertions) rather
+  than merely to pass with it.
+
+### Not verified
+
+- **The Linux target is compiled but not RUN.** `-target linux-x86_64` emits
+  cleanly for the whole library, and `warning-tests` covers linux-x86,
+  linux-x86_64, dos, win32 and win64 with 0 diagnostic changes — but nothing
+  here executed on Linux. The byte core's ASCII fold and the WSTRING bridge take
+  a different branch where `wchar_t` is 32 bits (`hWstrArg` re-encodes instead of
+  reinterpreting), and that branch has never been run.
+- **The LLVM backend**, as before.
+- `tests/afxnova_differential.bas` is Windows-only, needs AfxNova, and is NOT in
+  the gate. See its header for the interop limitation that caps its sweep.
