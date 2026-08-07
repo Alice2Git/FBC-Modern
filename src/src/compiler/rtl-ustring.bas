@@ -793,6 +793,28 @@ function rtlUStrConcatAssign _
 	ddtype = astGetDataType( dst )
 	sdtype = astGetDataType( src )
 
+	'' A WSTRING source must be RE-ENCODED, never handed straight to a ustring
+	'' entry point.
+	''
+	'' fb_UStrConcatAssign unpacks its source with FB_USTRSETUP, which reads
+	'' FB_UCHAR -- 16 bits. A WSTRING is wchar_t-width: 2 bytes on Windows and 4
+	'' on Linux. Passing it through unconverted therefore REINTERPRETS a 32-bit
+	'' buffer as 16-bit units, and "pq" (70 00 00 00 71 00 00 00) reads as 'p'
+	'' followed by a NUL -- so
+	''
+	''     dim as ustring u = "xy" : dim as wstring * 8 w = "pq" : u &= w
+	''
+	'' produced "xyp" on Linux and "xypq" on Windows, where the widths happen to
+	'' coincide and the reinterpretation is accidentally right.
+	''
+	'' astUpdStrConcat() already does this for the BOP form; the self-concat
+	'' path did not, and `u = u & w` reaches here too once the optimiser folds
+	'' it into a self-concat.
+	if( typeGet( sdtype ) = FB_DATATYPE_WCHAR ) then
+		src = astNewUStrConv( src )
+		sdtype = astGetDataType( src )
+	end if
+
 	proc = astNewCALL( PROCLOOKUP( USTRCONCATASSIGN ) )
 
 	dlgt = rtlCalcStrLen( dst, ddtype )

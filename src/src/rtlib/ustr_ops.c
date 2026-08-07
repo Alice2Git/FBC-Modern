@@ -78,7 +78,15 @@ static void hUStrArg( FBUSTRING *s, const FB_UCHAR **ptr, ssize_t *len )
 	else
 	{
 		*ptr = s->data;
-		*len = s->len;
+
+		/* FB_USTRSIZE, never ->len raw. fb_ustring.h says so outright: the
+		** temp flag lives in the sign bit of ->len. This is what made the
+		** whole WSTRING family return EMPTY on Linux -- there hWstrArg goes
+		** through fb_WstrToUStr, which hands back a TEMP descriptor, and the
+		** raw read then reported a negative length. Windows never saw it
+		** because a 16-bit wchar_t is reinterpreted, not converted, so no
+		** temporary is involved. */
+		*len = FB_USTRSIZE( s );
 	}
 }
 

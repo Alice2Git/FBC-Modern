@@ -98,7 +98,11 @@ static void hStrArg( FBSTRING *s, const char **ptr, ssize_t *len )
 	else
 	{
 		*ptr = s->data;
-		*len = s->len;
+
+		/* FB_STRSIZE, never ->len raw: the descriptor carries a TEMP FLAG in
+		** the sign bit of its length, so a temporary read raw comes back
+		** hugely negative and the string looks empty. */
+		*len = FB_STRSIZE( s );
 	}
 }
 
@@ -127,11 +131,11 @@ static void hPatArg( FBUSTRING *pat, HPAT *p )
 	p->ptr  = "";
 	p->len  = 0;
 
-	if( pat == NULL || pat->data == NULL || pat->len <= 0 )
+	if( pat == NULL || pat->data == NULL || FB_USTRSIZE( pat ) <= 0 )
 		return;
 
 	up   = pat->data;
-	ulen = pat->len;
+	ulen = FB_USTRSIZE( pat );      /* never ->len raw -- see hStrArg */
 
 	nbytes = fb_hUtf16ToUtf8( up, ulen, NULL, 0 );
 	if( nbytes <= 0 )

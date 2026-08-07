@@ -211,13 +211,13 @@ rebuilds everything.
 Added by the string-library work, on branch `feat/fb-string-library`.
 
 ```
-1155912 assertions   1155901 passed   11 failed   2397 modules
+1155921 assertions   1155910 passed   11 failed   2398 modules
 ```
 
 The 11 are the same `fbc_tests.threads.threadcall_` failures documented above —
 `libffi` absent — and no others. **Any 12th failure is a regression.**
 
-The delta from the 1,154,420 baseline is 1,492 assertions across five new suites
+The delta from the 1,154,420 baseline is 1,501 assertions across five new suites
 in `src/tests/string/`:
 
 | Suite | Assertions | Covers |
@@ -227,7 +227,7 @@ in `src/tests/string/`:
 | `fbstr_transform` | 205 | Replace, Remove, Retain, Reverse, Repeat, Shrink, MCase, RemoveBetween |
 | `fbstr_pad` | 693 | pad, wrap, escape/unescape, IsNumeric, IsBlank |
 | `fbstr_split` | 151 | Split, SplitChars, Join |
-| `ustr_concat_ops` | 50 | the `&`-operator ustring fix (see below) |
+| `ustr_concat_ops` | 59 | the `&`-operator ustring fix, and the `&=` wstring-width fix (see below) |
 
 `src/tests/string/fbstr_split_mod2.bas` has no assertions of its own: it is a
 SECOND module including `fb/string.bi`, so that dropping the `private` on the
@@ -250,14 +250,43 @@ Both pre-existing, both silent, both found by tests written for something else:
   which was verified to FAIL without the fix (12 of its 50 assertions) rather
   than merely to pass with it.
 
+### Cross-platform: now RUN, not just compiled
+
+The Linux gap recorded in the first version of this section is CLOSED. All three
+shipped compilers were rebuilt and the string suites were executed under each:
+
+| Target | How | Result |
+|---|---|---|
+| win64 | full gate, both backends | 1,155,921 / 11 failed (the libffi baseline) |
+| win32 | string suites under the rebuilt **shipped** `fbc32.exe` | **1,501 / 1,501** |
+| linux-x86_64 | string suites under the natively-built **shipped** `fbc` (WSL2) | **1,501 / 1,501** |
+
+Running them found **two more bugs that Windows alone could never show**, both
+now fixed and pinned:
+
+- **The whole WSTRING family returned EMPTY on Linux.** `hUStrArg`/`hStrArg` read
+  the descriptor's `->len` raw, but the temp flag lives in that field's sign bit
+  — `fb_ustring.h` says so outright. On Linux `hWstrArg` goes through
+  `fb_WstrToUStr`, which returns a **temp** descriptor, so the raw read came back
+  negative and every wstring call saw an empty string. Windows never hit it: a
+  16-bit `wchar_t` is reinterpreted, not converted, so no temporary is involved.
+  Fixed by using `FB_STRSIZE`/`FB_USTRSIZE`.
+- **`ustring &= wstring` dropped characters on Linux** — pre-existing, not from
+  this work. `rtlUStrConcatAssign` handed a WSTRING straight to a ustring entry
+  point that unpacks 16-bit units, so a 32-bit buffer was reinterpreted: `"pq"`
+  (`70 00 00 00 71 00 00 00`) read as `p` then NUL, and `u &= w` produced
+  `"xyp"`. `astUpdStrConcat` already converted for the BOP form; the self-concat
+  path did not. Pinned by `concat_amp_assign_wstring_width`, which asserts
+  CONTENT rather than length so a half-copy cannot pass.
+
+The prebuilt toolchains under `toolchains/` were rebuilt from this tree and each
+was verified BY RUNNING IT, from the shipped tree rather than the build tree.
+`gfxlib2` is NOT rebuilt for Linux (no `libxpm-dev` in the build environment);
+that is sound because the only rtlib headers this work touched gained
+DECLARATIONS ONLY, which cannot change gfxlib2's codegen.
+
 ### Not verified
 
-- **The Linux target is compiled but not RUN.** `-target linux-x86_64` emits
-  cleanly for the whole library, and `warning-tests` covers linux-x86,
-  linux-x86_64, dos, win32 and win64 with 0 diagnostic changes — but nothing
-  here executed on Linux. The byte core's ASCII fold and the WSTRING bridge take
-  a different branch where `wchar_t` is 32 bits (`hWstrArg` re-encodes instead of
-  reinterpreting), and that branch has never been run.
 - **The LLVM backend**, as before.
 - `tests/afxnova_differential.bas` is Windows-only, needs AfxNova, and is NOT in
   the gate. See its header for the interop limitation that caps its sweep.

@@ -25,22 +25,27 @@
 
 SUITE( fbc_tests.string_.ustr_concat_ops )
 
-	'' U+1D11E, built from its surrogate halves so the expectation does not
-	'' depend on how this source file happens to be encoded.
-	#define ASTRAL_HI wchr( &hD834 )
-	#define ASTRAL_LO wchr( &hDD1E )
+	'' U+1D11E as a SOURCE LITERAL, not assembled from wchr( &hD834 ) and
+	'' wchr( &hDD1E ).
+	''
+	'' A lone surrogate is not a valid scalar value, so building the character
+	'' from its halves only works where wchar_t is 16 bits and each half IS a
+	'' code unit. On Linux, where wchar_t is 32 bits, each half is an invalid
+	'' scalar and converts to U+FFFD -- so the halves version passed on Windows
+	'' and failed 22 assertions on Linux, testing the test rather than the
+	'' compiler. The rest of this project's ustring tests use the literal for
+	'' the same reason.
+	#define ASTRAL_CHAR "𝄞"
 
 	TEST( astral_is_two_units )
-		dim as ustring a = ASTRAL_HI
-		a &= ASTRAL_LO
+		dim as ustring a = ASTRAL_CHAR
 		CU_ASSERT_EQUAL( len( a ), 2 )
 		CU_ASSERT_EQUAL( a[0], &hD834 )
 		CU_ASSERT_EQUAL( a[1], &hDD1E )
 	END_TEST
 
 	TEST( concat_amp_every_pairing )
-		dim as ustring a = ASTRAL_HI
-		a &= ASTRAL_LO
+		dim as ustring a = ASTRAL_CHAR
 
 		dim as string      s  = "xy"
 		dim as zstring * 8 z  = "xy"
@@ -109,8 +114,7 @@ SUITE( fbc_tests.string_.ustr_concat_ops )
 	TEST( concat_amp_agrees_with_plus )
 		'' The two operators must produce the same text. '+' was always
 		'' correct here, so it is the reference.
-		dim as ustring a = ASTRAL_HI
-		a &= ASTRAL_LO
+		dim as ustring a = ASTRAL_CHAR
 
 		dim as wstring * 8 w = "xy"
 		dim as string      s = "xy"
@@ -188,8 +192,7 @@ SUITE( fbc_tests.string_.ustr_concat_ops )
 
 	TEST( concat_amp_assign )
 		'' '&=' takes its own path, and must agree with '&'.
-		dim as ustring a = ASTRAL_HI
-		a &= ASTRAL_LO
+		dim as ustring a = ASTRAL_CHAR
 
 		dim as ustring acc = "xy"
 		acc &= a
@@ -206,11 +209,58 @@ SUITE( fbc_tests.string_.ustr_concat_ops )
 		CU_ASSERT_EQUAL( len( acc ), 8 )
 	END_TEST
 
+	TEST( concat_amp_assign_wstring_width )
+		'' A WSTRING appended to a USTRING must be RE-ENCODED, not reinterpreted.
+		''
+		'' fb_UStrConcatAssign reads its source as FB_UCHAR -- 16 bits -- while a
+		'' WSTRING is wchar_t-width: 2 bytes on Windows, 4 on Linux. Handing one
+		'' over unconverted reinterprets a 32-bit buffer as 16-bit units, so
+		'' "pq" (70 00 00 00 71 00 00 00) read as units is 'p' then a NUL:
+		''
+		''     u &= w     gave "xyp" on Linux and "xypq" on Windows
+		''
+		'' Windows could never show it -- there the two widths coincide and the
+		'' reinterpretation is accidentally correct. Asserted on CONTENT, not
+		'' just length, so a half-copy cannot pass.
+		dim as wstring * 8 w = "pq"
+
+		dim as ustring a = "xy"
+		a &= w
+		CU_ASSERT_EQUAL( len( a ), 4 )
+		CU_ASSERT_EQUAL( a, "xypq" )
+
+		'' the same through the plain operator, which the optimiser folds into
+		'' the self-concat path above
+		dim as ustring b = "xy"
+		b = b & w
+		CU_ASSERT_EQUAL( len( b ), 4 )
+		CU_ASSERT_EQUAL( b, "xypq" )
+
+		'' and with an explicit conversion, which always worked
+		dim as ustring uw = w
+		dim as ustring c = "xy"
+		c &= uw
+		CU_ASSERT_EQUAL( c, "xypq" )
+
+		'' a longer wstring, so a one-unit truncation cannot look right
+		dim as wstring * 16 lw = "abcdefg"
+		dim as ustring d = ""
+		d &= lw
+		CU_ASSERT_EQUAL( len( d ), 7 )
+		CU_ASSERT_EQUAL( d, "abcdefg" )
+
+		'' non-ASCII, where a width mix-up corrupts rather than truncates
+		dim as wstring * 8 aw = "caf" & wchr( &hE9 )
+		dim as ustring e = ""
+		e &= aw
+		CU_ASSERT_EQUAL( len( e ), 4 )
+		CU_ASSERT_EQUAL( e[3], &hE9 )
+	END_TEST
+
 	TEST( concat_amp_chained )
 		'' A chain builds left to right, so an early wstring operand used to
 		'' poison everything after it.
-		dim as ustring a = ASTRAL_HI
-		a &= ASTRAL_LO
+		dim as ustring a = ASTRAL_CHAR
 
 		dim as wstring * 8 w = "w"
 		dim as string      s = "s"
