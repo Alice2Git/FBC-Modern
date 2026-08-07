@@ -368,6 +368,35 @@ private sub hCheckScopeLocals _
 end sub
 
 '':::::
+'' Splice one registered DEFER's statement in before a branch.
+''
+'' The chain is cloned per exit site for the same reason the dtor calls around
+'' it are rebuilt per exit site: each branch needs its own nodes.
+''
+'' The nodes are inserted in FORWARD order, each after the previous, so the
+'' statement's own internal order survives -- the caller's reverse walk is over
+'' SYMBOLS, not over the nodes within one symbol's statement. Returns the new
+'' insertion point so the caller keeps splicing after this whole chain.
+private function hAddDeferChainAfter _
+	( _
+		byval s as FBSYMBOL ptr, _
+		byval base_expr as ASTNODE ptr _
+	) as ASTNODE ptr
+
+	dim as ASTNODE ptr n = symbGetDeferTree( s )
+	dim as ASTNODE ptr c = any
+
+	while( n )
+		c = astCloneTree( n )
+		if( c <> NULL ) then
+			base_expr = astAddAfter( c, base_expr )
+		end if
+		n = n->next
+	wend
+
+	function = base_expr
+end function
+
 private sub hDestroyBlockLocals _
 	( _
 		byval blk as FBSYMBOL ptr, _
@@ -392,8 +421,12 @@ private sub hDestroyBlockLocals _
 			stmt = symbGetVarStmt( s )
 			if( stmt > top_stmt ) then
 				if( stmt < bot_stmt ) then
+					'' a registered DEFER?
+					if( symbIsDefer( s ) ) then
+						base_expr = hAddDeferChainAfter( s, base_expr )
+
 					'' has a dtor?
-					if( symbGetVarHasDtor( s ) ) then
+					elseif( symbGetVarHasDtor( s ) ) then
 						'' call it..
 						expr = astBuildVarDtorCall( s, TRUE )
 						if( expr <> NULL ) then

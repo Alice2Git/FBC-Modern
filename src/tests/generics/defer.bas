@@ -1,6 +1,6 @@
 ' TEST_MODE : COMPILE_AND_RUN_OK
 
-'' DEFER -- phase 3: registration, and the FALLTHROUGH exits only.
+'' DEFER -- registration, the fallthrough exits, and every break path.
 ''
 '' Covered here: reverse order, fallthrough off 'end scope' and off
 '' 'end sub'/'end function', a defer in a loop body, interleaving with real
@@ -8,10 +8,11 @@
 '' inside IF/SELECT/WITH arms, and backward compatibility for code that uses
 '' 'defer' as an identifier.
 ''
-'' NOT covered here, because phase 3 does not implement it: the break paths --
-'' 'exit sub', 'return', 'exit for/while/do' and 'goto' out of a scope. Those go
-'' through astScopeBreak( ) and hDestroyBlockLocals( ), and phase 4 adds them.
-'' The assertions below are all on paths that fall out of the bottom.
+'' Phase 4 adds the BREAK paths -- 'exit sub', 'exit function', 'return',
+'' 'exit for/while/do' including the multi-level forms, and 'goto' out of one
+'' and out of three nested scopes. Those go through astScopeBreak( ) and
+'' hDestroyBlockLocals( ) rather than astScopeDestroyVars( ), so they are
+'' asserted separately below even where the expected sequence looks the same.
 ''
 '' ORDER IS ASSERTED BY ACCUMULATING INTO A STRING and comparing the exact
 '' sequence, never by eyeballing output: a defer that runs at the wrong time
@@ -52,6 +53,17 @@ declare sub inIfArm( byval n as long )
 declare sub inSelectArm( byval n as long )
 declare sub inWithBlock( )
 declare sub manyDefers( )
+declare sub exitSub( byval n as long )
+declare function exitFunc( byval n as long ) as long
+declare function retStmt( ) as long
+declare sub exitFor( )
+declare sub exitWhile( )
+declare sub exitDo( )
+declare sub exitTwoFors( )
+declare sub gotoOutOne( )
+declare sub gotoOutThree( )
+declare sub neverRegistered( )
+declare sub breakWithDtor( )
 
 	'' ==================================================== reverse order, off end scope
 
@@ -123,6 +135,65 @@ declare sub manyDefers( )
 
 	log_ = "" : manyDefers( )
 	assert_( log_ = "9876543210" )
+
+	'' ==================================================== break paths
+	''
+	'' These leave through astScopeBreak( ) and have their cleanup spliced in
+	'' before the JMP by hDestroyBlockLocals( ), which is a different mechanism
+	'' from the fallthrough above -- so every form is asserted even though some
+	'' expected sequences match.
+
+	log_ = "" : exitSub( 1 )
+	assert_( log_ = "D2D1" )
+
+	'' the same procedure falling out of the bottom, for contrast
+	log_ = "" : exitSub( 0 )
+	assert_( log_ = "tailD2D1" )
+
+	log_ = ""
+	assert_( exitFunc( 1 ) = 0 )
+	assert_( log_ = "F" )
+
+	log_ = ""
+	assert_( retStmt( ) = 7 )
+	assert_( log_ = "R" )
+
+	'' 'exit for' from a loop whose BODY registers a defer: the defers already
+	'' run for completed iterations, plus the one for the iteration being left
+	log_ = "" : exitFor( )
+	assert_( log_ = "L1L2" )
+
+	'' NOTE the values: the deferred statement is evaluated AT EXIT, so it sees
+	'' i AFTER the increment, not the value i had at registration. This is the
+	'' same rule readsLocal( ) pins, restated on a break path because getting it
+	'' wrong here would look like an off-by-one in the loop rather than a defer
+	'' bug.
+	log_ = "" : exitWhile( )
+	assert_( log_ = "W1W2" )
+
+	log_ = "" : exitDo( )
+	assert_( log_ = "O" )
+
+	'' multi-level 'exit for, for' -- both loop scopes are left at once, and
+	'' hDelLocals( ) walks the block.parent chain outward through both
+	log_ = "" : exitTwoFors( )
+	assert_( log_ = "inner1outer1" )
+
+	'' 'goto' out of one scope, and out of three at once
+	log_ = "" : gotoOutOne( )
+	assert_( log_ = "G|done" )
+
+	log_ = "" : gotoOutThree( )
+	assert_( log_ = "G3G2G1|done" )
+
+	'' a defer that is never reached, because the exit precedes its registration
+	log_ = "" : neverRegistered( )
+	assert_( log_ = "before" )
+
+	'' break out of a scope that also holds a real destructor: they interleave
+	'' on the break path exactly as they do on fallthrough
+	log_ = "" : breakWithDtor( )
+	assert_( log_ = "[2]~b[1]~a" )
 
 	'' ==================================================== backward compatibility
 	''
@@ -283,5 +354,103 @@ sub manyDefers( )
 		defer log_ &= "7"
 		defer log_ &= "8"
 		defer log_ &= "9"
+	end scope
+end sub
+
+'' ---------------------------------------------------------------- break paths
+
+sub exitSub( byval n as long )
+	defer log_ &= "D1"
+	defer log_ &= "D2"
+	if( n = 1 ) then exit sub
+	log_ &= "tail"
+end sub
+
+function exitFunc( byval n as long ) as long
+	defer log_ &= "F"
+	if( n = 1 ) then exit function
+	return 5
+end function
+
+function retStmt( ) as long
+	defer log_ &= "R"
+	return 7
+end function
+
+sub exitFor( )
+	for i as long = 1 to 3
+		defer log_ &= "L" & i
+		if( i = 2 ) then exit for
+	next
+end sub
+
+sub exitWhile( )
+	dim as long i = 0
+	while( i < 3 )
+		defer log_ &= "W" & i
+		i += 1
+		if( i = 2 ) then exit while
+	wend
+end sub
+
+sub exitDo( )
+	do
+		defer log_ &= "O"
+		exit do
+	loop
+end sub
+
+'' 'exit for, for' leaves BOTH loops in one statement.
+sub exitTwoFors( )
+	for i as long = 1 to 2
+		defer log_ &= "outer" & i
+		for j as long = 1 to 2
+			defer log_ &= "inner" & j
+			exit for, for
+		next
+	next
+end sub
+
+sub gotoOutOne( )
+	scope
+		defer log_ &= "G"
+		goto done_
+	end scope
+	done_:
+	log_ &= "|done"
+end sub
+
+sub gotoOutThree( )
+	scope
+		defer log_ &= "G1"
+		scope
+			defer log_ &= "G2"
+			scope
+				defer log_ &= "G3"
+				goto done_
+			end scope
+		end scope
+	end scope
+	done_:
+	log_ &= "|done"
+end sub
+
+'' The exit happens BEFORE the defer is registered, so it never runs. The
+'' statement-number window in hDestroyBlockLocals( ) is what gets this right.
+sub neverRegistered( )
+	scope
+		log_ &= "before"
+		if( 1 = 1 ) then exit sub
+		defer log_ &= "SHOULD-NOT-RUN"
+	end scope
+end sub
+
+sub breakWithDtor( )
+	scope
+		dim a as Tr : a.nm = "a"
+		defer log_ &= "[1]"
+		dim b as Tr : b.nm = "b"
+		defer log_ &= "[2]"
+		exit sub
 	end scope
 end sub
