@@ -164,6 +164,29 @@ end sub
 '' outlives that UDT's scope -- the hazard the FBARRAY comment in symb-var.bas
 '' warns about.  The trade is deliberate: descriptor types have no methods, so
 '' the local branch costs them nothing, while for generics it costs everything.
+''
+'' Moving to the global namespace is right for where the instantiation is BUILT
+'' and wrong for what its body can SEE.  A generic declared inside a namespace
+'' resolves its own namespace's names -- a sibling generic, a const -- by plain
+'' unqualified lookup, and once the replay is in the global namespace those names
+'' are gone:
+''
+''     namespace NS
+''         const CAP as long = 8
+''         type Box( of T ) : as T items( 0 to CAP-1 ) : end type
+''     end namespace
+''     dim b as NS.Box( of string )     '' CAP not declared
+''
+'' 'using NS' at the instantiation site hid this for as long as it went unnoticed
+'' -- it puts NS on the search chain, so the replay found CAP by accident of the
+'' CALLER's scope.  That is exactly backwards: what a generic body can see is
+'' fixed where the generic is DECLARED, not where it happens to be used.
+''
+'' So the declaring namespace chain is pushed onto the search chain for the
+'' replay and popped afterwards.  The whole chain up to (not including) global,
+'' because a namespace nested in another can reference the outer one's names the
+'' same way.  symbNamespaceSearchPush is refcounted, so this composes with a real
+'' USING on the same namespace and with nested instantiations.
 type FB_GENSCOPE
 	scope           as uinteger
 	currproc        as FBSYMBOL ptr
@@ -173,10 +196,37 @@ type FB_GENSCOPE
 	symtb           as FBSYMBOLTB ptr
 	hashtb          as FBHASHTB ptr
 	ns              as FBSYMBOL ptr
+	declns          as FBSYMBOL ptr             '' generic's declaring ns, or NULL
 end type
 
-private sub genEnterGlobalScope( byref gs as FB_GENSCOPE )
+'' Push/pop every namespace from the generic's declaring namespace up to global.
+private sub hDeclNsSearch( byval declns as FBSYMBOL ptr, byval ispush as integer )
 	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
+	dim as FBSYMBOL ptr ns = declns
+
+	do while( (ns <> NULL) andalso (ns <> glob) )
+		if( ispush ) then
+			symbNamespaceSearchPush( ns )
+		else
+			symbNamespaceSearchPop( ns )
+		end if
+		ns = symbGetNamespace( ns )
+	loop
+end sub
+
+private sub genEnterGlobalScope _
+	( _
+		byref gs as FB_GENSCOPE, _
+		byval gensym as FBSYMBOL ptr _
+	)
+
+	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
+
+	'' captured before the switch, so the pop in genLeaveGlobalScope is exact
+	gs.declns = NULL
+	if( gensym <> NULL ) then
+		gs.declns = symbGetNamespace( gensym )
+	end if
 
 	gs.scope     = parser.scope
 	gs.currproc  = parser.currproc
@@ -197,9 +247,15 @@ private sub genEnterGlobalScope( byref gs as FB_GENSCOPE )
 	symbSetCurrentSymTb( @symbGetGlobalTb( ) )
 	symbSetCurrentHashTb( @symbGetCompHashTb( glob ) )
 	symbSetCurrentNamespc( glob )
+
+	'' after the switch: the body is now parsed in the global namespace, and
+	'' this is what lets it still see the namespace it was declared in
+	hDeclNsSearch( gs.declns, TRUE )
 end sub
 
 private sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
+	hDeclNsSearch( gs.declns, FALSE )
+
 	symbSetCurrentSymTb( gs.symtb )
 	symbSetCurrentHashTb( gs.hashtb )
 	symbSetCurrentNamespc( gs.ns )
@@ -748,7 +804,7 @@ private sub hReplayProcBody _
 	'' The drain point is already at module level, but it may sit inside a
 	'' user namespace block; the body belongs to the instantiation, not to
 	'' wherever the drain happened to land.
-	genEnterGlobalScope( gs )
+	genEnterGlobalScope( gs, entry->gensym )
 
 	'' Bind the type parameters: they are TYPEDEFs living in this
 	'' instantiation's synthetic namespace, and __FBGENINST resolves there too.
@@ -937,7 +993,7 @@ function genInstantiateType _
 	'' Everything from here to genLeaveGlobalScope builds the instantiation, and
 	'' it is built at module level in the global namespace regardless of where
 	'' the request came from.
-	genEnterGlobalScope( gs )
+	genEnterGlobalScope( gs, gensym )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )
@@ -1173,7 +1229,7 @@ function genInstantiateProc _
 		return inst
 	end if
 
-	genEnterGlobalScope( gs )
+	genEnterGlobalScope( gs, gensym )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )
