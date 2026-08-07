@@ -46,27 +46,6 @@ Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, a
 | **Backends** | All of fbc's backends carry the work: `gcc` (C emission), `gas64`, `gas` (x86 32-bit), and `llvm`. |
 | **Prebuilt compilers** | Ready-to-run Windows and Linux installations are committed to the repository. No bootstrap required to try it. |
 
-<details>
-<summary><b>Not in this project — explicitly</b> (click to expand)</summary>
-
-These appear on many compiler READMEs. They are **not** part of FBC-Modern, and no work toward them exists in this repository. They are listed so nobody has to guess.
-
-| | Status |
-|---|---|
-| LSP / language server | ❌ Not present. |
-| Package manager | ❌ Not present. |
-| Incremental compilation | ❌ Not present. fbc's per-module compilation is unchanged. |
-| Module system | ❌ Not present. FreeBASIC's `#include` model is unchanged. |
-| New parser / new front end | ❌ **No.** This is fbc's own recursive-descent parser, extended. |
-| Improved optimizer | ❌ No optimizer work was done. Code generation is stock fbc. |
-| Faster compilation | ❌ Not a goal and not measured as a win. Compile times track stock fbc. |
-| Static analysis / linting | ❌ Not present. |
-| New build system | ❌ No. The project uses fbc's own makefile. |
-| macOS support | ⚠️ Untested. fbc supports `darwin` upstream; this tree has never been built on it. |
-| ARM / JS / DOS targets | ⚠️ Untested here. |
-
-</details>
-
 ---
 
 ## 🤔 Why This Compiler?
@@ -455,6 +434,8 @@ The 11 failures are all `fbc_tests.threads.threadcall_`, caused by `libffi` bein
 | `tests/ustring_*.bas`, `tests/ustr_*.c` | 464 checks — the language surface, every declaration form, I/O and encodings, `DRAW STRING` compared pixel by pixel, the codecs against malformed input, and the wchar helpers at **all three wchar widths** |
 
 Behaviour tests are additionally run under **both** backends by hand, and against the **prebuilt** compilers rather than the build tree — 17/17 on win64, win32 and linux-x86_64.
+
+**Not verified**: the LLVM backend for generics (no LLVM toolchain on the build machine, and it is not in the gate), and the macOS, ARM, JS and DOS targets.
 
 > **One caveat, stated plainly.** fbc's suite as shipped does not pass untouched. `tests/udt-wstring` and `tests/udt-zstring` each contain `#define ustring …` in 18 files, which becomes `error 4: Duplicated definition` once `USTRING` is a keyword. They are renamed to `uwstr_t` / `uzstr_t`; any upstream patch has to carry that 36-file rename.
 
