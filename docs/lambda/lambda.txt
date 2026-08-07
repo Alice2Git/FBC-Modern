@@ -97,6 +97,12 @@ A struct with one field per capture and the body as its __FBINVOKE method. The
 value of the expression is an object living in the ENCLOSING SCOPE -- no heap,
 no allocation, destroyed with the frame.
 
+It is synthesised as a GENERIC with one type parameter per capture, then
+instantiated with the captured variables' actual types. That is what lets a
+capture be of any type at all -- see ANYTHING CAN BE CAPTURED above -- and it
+also hands the member body to the generics machinery, which already replays
+member bodies once per instantiation.
+
 Two closures over different variables have independent state, which is the case
 a single static thunk would get wrong.
 
@@ -119,20 +125,26 @@ The closure TYPE is hoisted to module level, so it outlives the scope that
 named it -- deviation D1, already carried by the generics work.
 
 
-KNOWN LIMIT: A CAPTURE'S TYPE MUST BE NAMEABLE
-----------------------------------------------
+ANYTHING CAN BE CAPTURED
+------------------------
 
-The closure struct is synthesised as replayed source, so each field is declared
-with its type's printed name. A generic instantiation prints as its mangled
-internal name, which is not an identifier:
+Scalars, strings, UDTs and containers alike:
 
-    dim a as Array( of long )
-    var c = sub[ byref a ]( ) : ... : end sub
-    ' error 14: Expected identifier, found '$'
+    dim src as Array( of long )
+    var c = sub[ byref src ]( ) : src.Push( 9 ) : end sub
 
-So CONTAINERS CANNOT BE CAPTURED yet. Scalars, strings and plain UDTs all can,
-which covers the callback cases the feature exists for. The fix is to build the
-closure struct programmatically instead of by text.
+A BYVAL capture of a container is a DEEP COPY taken when the lambda is
+evaluated, because that is what FreeBASIC's value semantics do.
+
+This works because the closure is declared as a GENERIC over its capture types
+and then instantiated from the captured symbols' types directly -- so a
+capture's type is never written as text. Naming it was the first approach and
+could not express a container: a generic instantiation prints as its mangled
+internal name, which is not an identifier, and
+
+    var c = sub[ byref src ]( ) ...
+
+failed with "error 14: Expected identifier, found '$'".
 
 
 HOW THE BODY SEES ITS CAPTURES
