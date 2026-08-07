@@ -118,3 +118,90 @@ A third environment fix lives in the tree itself: `makefile` matched `MSYS_NT` w
 short `ar` command line, which missed `MINGW64_NT` and made the ~17 KB argument list overflow
 `cmd.exe`'s limit. Changed to match `_NT`. That is a **separate, pre-existing bug**, not part of
 the ustring feature, and should be its own upstream commit.
+
+---
+
+# Gate protocol (generics, FOR EACH, containers)
+
+Added after the USTRING work. Everything above still applies; this is what the
+later phases learned on top of it.
+
+## There are FOUR test targets now
+
+`tests/errors/` was added by this work and runs the same way `tests/warnings/`
+does — regenerate, then `git diff` the reference tree.
+
+```
+cd tests/errors   && FBC="C:/dev/FBC-Modern/src/bin/fbc.exe" bash ./test.sh
+cd tests/warnings && FBC="C:/dev/FBC-Modern/src/bin/fbc.exe" bash ./test.sh
+```
+
+**Golden error files hold ONE case each.** The compiler stops at the first error
+in many situations, so a file with several cases reports only the first and the
+rest are never checked.
+
+## The environmental floor
+
+**11 `threadcall_` unit-test failures + 4 `cpp` log-test failures.** The 11 are
+`-DDISABLE_FFI` (above); the 4 are a missing `libstdc++` in this mingw64, proven
+by rebuilding at HEAD with the changes stashed. A 12th unit-test failure or a
+5th log-test failure is a regression.
+
+## Reconcile the log-test count — do not just read "no failures"
+
+`passed + failed = total logs`, and `passed` should move by exactly the number
+of tests added. The count after the generics work is
+**1727 passed / 4 failed / 1731 logs**.
+
+Count the logs with:
+
+```
+find tests -name "*.log" ! -name "log-tests-results*" ! -name "failed-*"
+```
+
+The four `failed-<lang>.log` aggregates are not test logs and inflate a naive
+count by four. Also check that no log is missing its `RESULT=` line — a
+timed-out run leaves one truncated, and it reads as neither passed nor failed.
+
+**Never run two `make log-tests` concurrently.** They race and invent failures.
+
+## New tests are not picked up automatically
+
+- A new test **FILE** in an existing directory needs `make clean-tests` **from
+  `src/`** — the generated list is cached. This silently hid two tests behind a
+  green-looking gate.
+- A new test **DIRECTORY** needs an entry in `tests/dirlist.mk` *and* a
+  `make clean`.
+
+## Run behaviour tests under BOTH backends, by hand
+
+`GEN=gas64` as well as the default gcc. Three separate defects in this work were
+visible to only one backend:
+
+- an emission-order bug invisible to gas64;
+- a stale-stack bug that was a C compile error under gcc and a segfault under
+  gas64;
+- a weak-external bug that compiled, linked and silently returned the **wrong
+  function** under gcc.
+
+## Two smaller traps
+
+- **Delete the old `.exe` before every probe.** A stale binary has twice
+  produced output that looked like a passing fix.
+- **An unexpected result is more often the test than the compiler.** `base`,
+  `Fix` and `Mid` are reserved; `A`/`a` collide case-insensitively; `K` cannot
+  be a parameter type; `long + long` promotes to INTEGER; a UDT FOR variable
+  needs a default constructor; `x is T` needs a genuine downcast. Check the
+  plain-FreeBASIC control before concluding the compiler is wrong.
+
+## Build invocation
+
+The makefile root is **`src/`**. `make` from the repository root reports
+"No rule to make target 'compiler'".
+
+```
+cd src && make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
+```
+
+A full compiler rebuild is ~6 s at `-j8` (146 modules); touching any `.bi`
+rebuilds everything.

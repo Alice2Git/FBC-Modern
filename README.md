@@ -1,21 +1,186 @@
-# USTRING — a portable, dynamic Unicode string for FreeBASIC
+# FBC-Modern — FreeBASIC with a Unicode string, generics, `FOR EACH` and containers
 
-A proposed fourth string type for the [FreeBASIC](https://www.freebasic.net/)
-compiler: **dynamic, Unicode, and byte-identical on every target**.
+A working implementation of four proposed language features against the
+[FreeBASIC](https://www.freebasic.net/) compiler, version 1.20.0 — compiler,
+runtime, tests, documentation and prebuilt binaries for Windows and Linux,
+intended for upstream discussion.
 
-This repository contains a full implementation against fbc 1.20.0 — compiler,
-runtime, tests, and documentation — intended for upstream discussion.
+Every one of them is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, the
+existing `FOR` and the existing `OPERATOR FOR/NEXT/STEP` protocol are unchanged,
+`each` and `in` are not reserved words, and nothing is added to the global
+namespace.
 
-`STRING`, `ZSTRING` and `WSTRING` are **not changed in any way**. USTRING is
-purely additive.
+```basic
+dim as ustring u = "héllo wörld"          '' dynamic, UTF-16 on every target
+
+type Box( of T )                          '' generics
+    as T value
+end type
+
+dim names as FB.Array( of string )        '' the standard containers
+names.Push( "ada" )
+
+for each n in names                       '' FOR EACH
+    print n
+next
+```
+
+| | Feature | Docs |
+|---|---|---|
+| **USTRING** | a portable, dynamic Unicode string — an intrinsic type, not a library | [docs/ustring/ustring.txt](docs/ustring/ustring.txt) |
+| **Generics** | types and procedures parameterised by type (RFC-0001) | [docs/generics/generics.txt](docs/generics/generics.txt) |
+| **Iterator protocol** | a structural contract, not a base class (RFC-0002) | [docs/for_each/iterator-protocol.txt](docs/for_each/iterator-protocol.txt) |
+| **`FOR EACH`** | arrays, strings and any type satisfying the protocol (RFC-0003) | [docs/for_each/for-each.txt](docs/for_each/for-each.txt) |
+| **Containers** | `Array`, `Map`, `Set`, `LinkedList` (RFC-0004) | [array](docs/array/array.txt) · [map](docs/map/map.txt) · [set](docs/set/set.txt) · [linkedlist](docs/linkedlist/linkedlist.txt) |
+
+The last three build on the second, and the container library is written in
+**ordinary FreeBASIC with no compiler support at all** — which is the strongest
+evidence that the generics underneath it are good enough for real code.
+
+---
+
+# Generics
+
+```basic
+type Box( of T )
+    as T value
+end type
+
+dim b as Box( of long )
+dim s as Box( of string )        '' a distinct, unrelated type
+
+function Max( of T )( byval a as T, byval b as T ) as T
+    if a > b then return a
+    return b
+end function
+
+print Max( 3, 9 )                '' T inferred
+print Max( of double )( 1.5, 2.5 )
+```
+
+**Not a macro, and not a separate template language.** A generic's body is
+captured as a *token chain* at declaration and replayed through the real parser
+once per distinct type-argument list, with the type parameters bound as TYPEDEFs
+in a synthetic namespace. So the code inside a generic is ordinary FreeBASIC and
+is diagnosed as such — an error inside a body reports at the body, then prints
+the instantiation chain that reached it:
+
+```
+box.bas(13) error 14: Expected identifier, found 'Wdiget'
+  in instantiation of 'Box( of long )'
+  required from box.bas(18)
+```
+
+What is supported: out-of-line member bodies (`sub Stack( of T ).Push`),
+constructors, destructors and copy, member operators and properties including
+`FOR`/`STEP`/`NEXT`, generic procedures with inference, generic *global*
+operators (inferred through the nested operand type), all three inheritance
+directions — generic extends concrete, concrete extends instantiation, generic
+extends generic — plus `VIRTUAL`, `ABSTRACT` and RTTI, self-reference through a
+pointer, nesting, and a depth limit (`-maxinstdepth`, default 64).
+
+Declaration order does not matter, because member bodies are deferred to the
+next module-level statement boundary. Instantiations are Itanium-mangled, so
+`$3BoxIiE` demangles to `Box<int>` and two modules that both say
+`Box( of long )` link.
+
+The main gap is **no constraints on type parameters** — a member that needs `=`
+on `T` makes the whole type unusable for a `T` without one. That, and the rest,
+are in [docs/generics/generics.txt](docs/generics/generics.txt) under
+*Known limits*.
+
+---
+
+# `FOR EACH` and the iterator protocol
+
+```basic
+for each n as string in names            '' a copy of each element
+for each byref v as long in values       '' a reference — v *= 2 modifies it
+```
+
+Walks a fixed or dynamic array (any `lbound`), a var-len `STRING` (one byte per
+iteration), and any type satisfying the RFC-0002 protocol:
+
+```basic
+declare function GetIterator( ) as <iterator>
+    '' with IsValid( ) as boolean, Value( ) [byref] as E, MoveNext( )
+```
+
+A **structural** contract — no base class, no interface, no registration, and
+nothing to inherit from. A user collection lowers to an iterator walk; an array
+or string lowers to an ordinary counter `FOR`, so `for each` over an array emits
+what the hand-written index loop emits and costs exactly the same. There is no
+new AST node, no IR node, no backend change and no runtime call.
+
+The collection expression is evaluated **exactly once**. `EXIT FOR` and
+`CONTINUE FOR` work, including the multi-level forms, and an iterator with a
+destructor is destroyed on every exit path.
+
+Because the failure mode of a structural protocol is a near-miss, the
+diagnostics name the missing member rather than saying "not iterable":
+
+```
+error 343: Not an iterator type, an iterator needs IsValid( ) as boolean,
+           Value( ) [byref] as E and MoveNext( ), missing, MoveNext( )
+```
+
+---
+
+# The standard containers
+
+```basic
+#include once "containers.bi"
+using FB
+
+dim names as Array( of string )
+dim ages  as Map( of string, long )
+dim seen  as Set( of long )
+dim queue as LinkedList( of string )
+```
+
+| | | |
+|---|---|---|
+| `Array( of T )` | growable array | amortised O(1) append |
+| `Map( of K, V )` | open-addressed hash map | O(1) average lookup |
+| `Set( of T )` | hash set | plus union / intersect / except |
+| `LinkedList( of T )` | doubly-linked list | O(1) insert and remove at a known node |
+
+**No compiler code at all** — `inc/fb/*.bi`, written in FreeBASIC on top of
+generics, the iterator protocol and `for each`. They get no special treatment,
+so a better one written by anybody else is on exactly equal footing. They live
+in `NAMESPACE FB` and add nothing to the global namespace, so a program with its
+own `Array` or `List` is unaffected until it says `using FB`.
+
+`Array`, `Map` and `Set` store elements in ordinary FreeBASIC dynamic array
+fields, `redim preserve`d only when the capacity doubles — never per push. The
+language therefore does element construction, copying and destruction, so deep
+copy, assignment and the destructor fall out for free with no manual memory to
+get wrong. (`LinkedList` holds raw nodes, so those three are hand-written.)
+
+Three things to read before using them:
+
+- **`Array` indices are zero-based** — a deliberate break with `dim arr(1 to 10)`.
+- **`Map`'s indexer `m[ k ]` INSERTS on a miss.** Use `TryGet` or `Contains` to read.
+- **Copy and assignment are deep for all four.** The language has no move
+  constructor, so pass them `byref` where it matters.
+
+A user type becomes a `Map` key or `Set` element by overloading `HashOf` —
+see `inc/fb/hash.bi`. It is an overload rather than a compile-time dispatch
+because `typeof( T )` cannot see through a type parameter; that limitation is
+recorded in the generics doc.
+
+---
+
+# USTRING — a portable, dynamic Unicode string
+
+A proposed fourth string type: **dynamic, Unicode, and byte-identical on every
+target**.
 
 ```basic
 dim as ustring u = "héllo"      '' dynamic, grows on demand
 u += " wörld"                   '' no fixed capacity to overflow
 print len(u)                    '' 11 code units, O(1)
 ```
-
----
 
 ## Why
 
@@ -35,8 +200,6 @@ and every file written.
 
 USTRING fixes both halves at once: one type that is dynamic *and* has a fixed,
 known representation everywhere.
-
----
 
 ## A true intrinsic type, not a library
 
@@ -86,8 +249,6 @@ print mid(c, 8, 5)                     '' world
 print instr(c, "wor")                  '' 8
 print len(c), c[0]                     '' 12   104
 ```
-
----
 
 ## How it relates to the existing types
 
@@ -144,8 +305,6 @@ Where `wchar_t` is wider the text is re-encoded into a temporary and **the
 compiler emits a warning**, so that cost is never invisible to someone
 developing on Windows.
 
----
-
 ## Code units, not characters
 
 `LEN`, `[]`, `ASC`, and every position and length in `LEFT`/`RIGHT`/`MID`/
@@ -169,8 +328,6 @@ introduces.
 `towupper()`/`towlower()` — those are locale-dependent and would fold the same
 string differently depending on the user's locale and which libc the program
 linked against.
-
----
 
 ## Fixed-length form
 
@@ -197,8 +354,6 @@ function f( ) as ustring * 8         '' error 55 — likewise
 Both are general FB rules, not USTRING restrictions. Take a dynamic parameter
 (a fixed-length argument binds to it, and writes are copied back) and return
 the dynamic form.
-
----
 
 ## I/O
 
@@ -231,8 +386,6 @@ whether the output is a console or a file.
 ```basic
 print using "[\   \]"; u             '' a 5-unit field
 ```
-
----
 
 ## What is supported
 
@@ -271,23 +424,22 @@ compile-time pool constant, so nothing is lost at runtime.
 
 ---
 
-## Prebuilt compilers
+# Prebuilt compilers
 
 You do not have to build anything to try this. Two ready-to-run installations
 are in the repository, produced from this tree and verified before being
 committed.
 
-### `fbc-win/` — Windows, 32-bit and 64-bit
+### `toolchains/fbc-modern-windows/` — Windows, 32-bit and 64-bit
 
 ```
-fbc-win/
-  fbc32.exe          32-bit compiler
-  fbc64.exe          64-bit compiler
-  bin/win32          i686 assembler + linker      shared by both
-  bin/win64          x86-64 assembler + linker    shared by both
-  inc/               FreeBASIC headers
-  lib/win32          32-bit runtime
-  lib/win64          64-bit runtime
+fbc32.exe          32-bit compiler
+fbc64.exe          64-bit compiler
+bin/win32          i686 assembler + linker      shared by both
+bin/win64          x86-64 assembler + linker    shared by both
+inc/               FreeBASIC headers
+lib/win32          32-bit runtime
+lib/win64          64-bit runtime
 ```
 
 The standard FreeBASIC *standalone* layout: both compilers sit at the top level
@@ -295,22 +447,21 @@ and share one `bin/` and one `inc/`, each picking the toolchain and runtime that
 matches its target.
 
 ```bat
-fbc-winbc64.exe hello.bas
-fbc-winbc32.exe hello.bas
-fbc-winbc64.exe -target win32 hello.bas   :: 64-bit compiler, 32-bit output
+toolchains\fbc-modern-windows\fbc64.exe hello.bas
+toolchains\fbc-modern-windows\fbc32.exe hello.bas
+toolchains\fbc-modern-windows\fbc64.exe -target win32 hello.bas
 ```
 
-### `fbc-linux/` — Linux x86-64
+### `toolchains/fbc-modern-linux/` — Linux x86-64
 
 ```
-fbc-linux/
-  bin/fbc
-  inc/
-  lib/freebasic/linux-x86_64
+bin/fbc
+inc/
+lib/freebasic/linux-x86_64
 ```
 
 ```bash
-fbc-linux/bin/fbc hello.bas
+toolchains/fbc-modern-linux/bin/fbc hello.bas
 ```
 
 This is a **native** Linux build, not a cross-compile. It came from fbc's own
@@ -326,7 +477,7 @@ needed to reproduce it.
 - **The Linux binary is committed with its executable bit set** (mode `100755`),
   and `.gitattributes` keeps that tree from being CRLF-converted by a Windows
   clone. If you extract it some other way, `chmod +x bin/fbc`.
-- **`fbc-win/bin`'s gcc has no C headers**, exactly as FreeBASIC's own
+- **The Windows `bin`'s gcc has no C headers**, exactly as FreeBASIC's own
   distribution ships it. It assembles and links, which is all fbc asks of it,
   but it cannot rebuild the runtime — that needs a full toolchain.
 - **The Linux `gfxlib2` is built `-DDISABLE_X11 -DDISABLE_GPM`**, because
@@ -336,7 +487,7 @@ needed to reproduce it.
 
 ---
 
-## Performance: appending
+# Performance: appending
 
 `tests/ustring_append_bench.bas`, best of three runs on each platform.
 
@@ -398,28 +549,33 @@ memory system at these sizes, not the growth strategy.
 
 ---
 
-## Tests
+# Tests
 
-### fbc's own test suite
+## fbc's own test suite
 
-fbc has three test targets. **All three were run**; `unit-tests` alone is only
-670 of the 2,515 test files.
+fbc has three test targets. **All three are run**; `unit-tests` alone is only
+part of the suite.
 
 | Target | Scale | Result |
 |---|---|---|
-| `unit-tests` (win64) | 670 modules, 2,302 test modules | **1,154,412 assertions, 11 failed** |
-| `unit-tests` (win32) | 2,311 test modules | **1,613,096 assertions, 11 failed** |
-| `log-tests` | 1,687 tests across `fb`, `fblite`, `qb`, `deprecated` | **0 failed** |
-| `warning-tests` | 68 files × 5 targets = 340 runs | **0 diagnostic changes** |
+| `unit-tests` (win64, gcc) | 2,308 test modules | **1,154,420 assertions, 11 failed** |
+| `unit-tests` (win64, gas64) | 2,308 test modules | **identical** |
+| `log-tests` | 1,731 tests across `fb`, `fblite`, `qb`, `deprecated` | **1,727 passed, 4 failed** |
+| `warning-tests` | 68 files × 5 targets | **0 diagnostic changes** |
+| `error-tests` | golden diagnostics × 5 targets | **0 diagnostic changes** |
 
-The 11 failures are all `fbc_tests.threads.threadcall_`, caused by `libffi` being
-absent in this build environment (`-DDISABLE_FFI` compiles `fb_ThreadCall` to
-`return NULL`). They are **present in the baseline before any USTRING work** and
-are unrelated to it.
+The failures are environmental and present in the baseline before any of this
+work: 11 × `fbc_tests.threads.threadcall_` (`libffi` absent, so `-DDISABLE_FFI`
+compiles `fb_ThreadCall` to `return NULL`) and 4 `cpp` log-tests (no `libstdc++`
+in this mingw64). Both were reproduced at `main` with the changes stashed.
 
 `warning-tests` compiles for **dos, linux-x86, linux-x86_64, win32 and win64**
 and compares against committed reference output; every diagnostic on every
-target is byte-identical to stock fbc.
+target is byte-identical to stock fbc except the ones deliberately added.
+
+Behaviour tests are additionally run by hand under **both** backends, because
+three separate defects in this work were visible to only one of them — including
+one that compiled, linked and silently returned the wrong function under gcc.
 
 > **One caveat, stated plainly.** The suite as shipped does not pass untouched.
 > `tests/udt-wstring` and `tests/udt-zstring` each contain `#define ustring ...`
@@ -427,7 +583,34 @@ target is byte-identical to stock fbc.
 > keyword — fbc's own tests would not compile. They are renamed to `uwstr_t` /
 > `uzstr_t`. Any upstream patch has to carry that 36-file rename.
 
-### USTRING's own tests
+## This project's own tests
+
+### Generics, `FOR EACH` and containers — `src/tests/generics/`
+
+42 files. Every one of the 25 `fail-*` files holds **exactly one** case, because
+the compiler stops at the first error and a multi-case file would report only
+the first.
+
+| File | Covers |
+|---|---|
+| `instantiate-type.bas` | instantiation, cache identity, nesting, UDT arguments |
+| `member-procs.bas` | out-of-line bodies, both parameter orders, both declaration orders |
+| `member-operators.bas` | operators, properties, `FOR`/`STEP`/`NEXT` |
+| `global-operators.bas` | generic global operators and inference through them |
+| `generic-procs.bas` | explicit and inferred type arguments |
+| `ctor-dtor.bas` | construction, destruction, copy |
+| `inheritance.bas` | 44 assertions — all three `EXTENDS` directions, `VIRTUAL`, `ABSTRACT`, RTTI positives **and negatives** |
+| `recursive-generic.bas` | self-reference through a pointer |
+| `iterator-protocol.bas` | ~60 assertions over the RFC-0002 contract |
+| `for-each.bas` | ~45 assertions — both lowerings, backward compatibility, nesting, destructor balance, single evaluation |
+| `container-{array,map,set,linkedlist}.bas` | every member, edge case and complexity claim |
+| `member-mangling.bas`, `sizeof-instantiation.bas`, `capture-boundary.bas` | names, layout, deferral |
+| `multimodule/` | two modules instantiating the same generics, linked |
+
+The multimodule test was shown to have teeth by forcing `symbIsWeak` to FALSE —
+it then fails with 8 duplicate-definition errors on each backend.
+
+### USTRING
 
 | Suite | Checks | What it covers |
 |---|---|---|
@@ -454,28 +637,22 @@ deliberately injected bug to confirm it can actually fail.
 | win32 | ✅ | lang 140/0, io 36/0 |
 | linux-x86_64 | ✅ | lang 140/0, io 36/0 |
 
-Linux matters most, because `sizeof(wstring)` is 4 there — so the UTF-32 path is
-exercised for real, not just by a unit test:
+Linux matters most for USTRING, because `sizeof(wstring)` is 4 there — so the
+UTF-32 path is exercised for real, not just by a unit test. Building for 32-bit
+is what uncovered the last real USTRING bug: literal emission in the gas x86
+backend, reachable *only* on 32-bit targets.
 
-```
-ustring units   = 4      "h" + é + 𝄞 (a surrogate pair)
-sizeof(wstring) = 4
-wstring chars   = 3      the pair collapses to one scalar
-roundtrip units = 4
-identical       = -1
-```
-
-Building for 32-bit is what uncovered the last real bug: literal emission in the
-gas x86 backend, which is reachable *only* on 32-bit targets. Not tested yet:
-ARM, JS and DOS.
+**Not verified**: the LLVM backend for generics (no LLVM toolchain here, and it
+is not in the gate); ARM, JS and DOS targets.
 
 ---
 
-## Layout
+# Layout
 
 ```
 src/                    the fbc tree, with everything this project adds
-    src/compiler/       the compiler
+    src/compiler/       the compiler — parser-generic*.bas,
+                        parser-compound-for.bas
     src/rtlib/          the runtime
     src/gfxlib2/        the graphics library
     inc/fb/             the standard containers (array, map, set,
@@ -489,10 +666,11 @@ toolchains/
     fbc-modern-linux/   prebuilt: bin/fbc, inc, lib/freebasic/linux-x86_64
 
 docs/
-    ustring/            USTRING reference and implementation notes
-    for_each/           FOR EACH and the iterator protocol
-    array/  map/        the standard containers, one folder each
+    generics/           RFC-0001
+    for_each/           FOR EACH and the iterator protocol (RFC-0002/0003)
+    array/  map/        the standard containers, one folder each (RFC-0004)
     set/    linkedlist/
+    ustring/            USTRING reference and implementation notes
 
 tests/                  USTRING's own suites and the append benchmark
 tools/                  generators for the Unicode case table and the CP437
@@ -503,50 +681,63 @@ LICENSE                 licensing, inherited from FreeBASIC (see below)
 Note that the makefile lives in `src/`, not at the top level: builds and test
 runs are `cd src && make compiler`, not `make` from the repository root.
 
-`docs/ustring/implementation-notes.md` is worth reading if you are reviewing this. It records the design
-decisions *and* the mistakes — several bugs in this work compiled cleanly, ran,
-and produced plausible output (an empty generated destructor, a silently
-disabled copy-back, a no-op `LSET`, a `READ` that assigned nothing). They were
-found by reading generated code and by stress testing, not by normal test
-output, and the notes say so.
+[docs/ustring/implementation-notes.md](docs/ustring/implementation-notes.md) is
+worth reading if you are reviewing this. It records the design decisions *and*
+the mistakes — several bugs in this work compiled cleanly, ran, and produced
+plausible output (an empty generated destructor, a silently disabled copy-back,
+a no-op `LSET`, a `READ` that assigned nothing). They were found by reading
+generated code and by stress testing, not by normal test output, and the notes
+say so.
 
-## Building
+# Building
 
 ```
-make rtlib gfxlib2 compiler
+cd src && make rtlib gfxlib2 compiler
 ```
 
 See `tests/BASELINE.md` for the exact invocations, the three test targets, and
 the environment workarounds this particular machine needed (none of them related
-to USTRING).
+to this work).
 
-## Licence
+`src/doc/manual/` is **not** updated. It is a mirror of the online FreeBASIC
+wiki, refreshed by `make refresh` in that directory and regenerated from the
+wiki rather than edited — a page written into it by hand is overwritten on the
+next refresh. Manual pages belong on the wiki once any of this is accepted
+upstream. The reference documentation for this work lives in `docs/`.
+
+`src/bootstrap/` — fbc's self-hosting C snapshot — is **not** regenerated here.
+It is `.gitignore`d in this tree, it is produced by fbc's own release process
+rather than by hand, and nothing in this work changes the language the *compiler
+itself* is written in. A merge upstream would regenerate it there.
+
+# Licence
 
 This is a modified copy of the FreeBASIC compiler, so it carries FreeBASIC's
 licensing **unchanged**. Nothing is relicensed and no licence was chosen — it is
-inherited, and it is a split, because the USTRING work touches both halves:
+inherited, and it is a split, because this work touches both halves:
 
 | Part | Licence |
 |---|---|
-| The compiler — `src/compiler/`, and the `fbc32.exe` / `fbc64.exe` / `bin/fbc` binaries built from it | **GNU GPL v2 or later** ([COPYING.GPL-2.0](COPYING.GPL-2.0)) |
-| The runtime and graphics libraries — `src/rtlib/`, `src/gfxlib2/`, i.e. libfb, libfbmt, libfbgfx, libfbgfxmt | **GNU LGPL v2.1 or later, with a static-linking exception** ([COPYING.LGPL-2.1](COPYING.LGPL-2.1)) |
-| Documentation, including `doc/ustring.txt` | **GNU FDL** |
+| The compiler — `src/src/compiler/`, and the `fbc32.exe` / `fbc64.exe` / `bin/fbc` binaries built from it | **GNU GPL v2 or later** ([COPYING.GPL-2.0](COPYING.GPL-2.0)) |
+| The runtime and graphics libraries — `src/src/rtlib/`, `src/src/gfxlib2/`, i.e. libfb, libfbmt, libfbgfx, libfbgfxmt | **GNU LGPL v2.1 or later, with a static-linking exception** ([COPYING.LGPL-2.1](COPYING.LGPL-2.1)) |
+| The container headers — `src/inc/fb/*.bi`, `src/inc/containers.bi` | **LGPL v2.1 or later, with the same exception** — they compile into the user's program, so they are runtime rather than compiler. Upstream's own `inc/` headers carry no per-file notice, so this is stated here rather than inherited |
+| Documentation under `docs/` | **GNU FDL** |
 
 The linking exception is what lets a program link the runtime statically without
 taking on the LGPL — it is quoted in full in [LICENSE](LICENSE).
 
-So the USTRING work follows the file, exactly as the rest of fbc does: the
-compiler-side changes are GPLv2+, and `ustr_*.c`, `fb_ustring.h` and the
-`DRAW STRING` support are LGPLv2.1+ with the exception.
+So the work follows the file, exactly as the rest of fbc does: the compiler-side
+changes are GPLv2+, and `ustr_*.c`, `fb_ustring.h`, the `DRAW STRING` support
+and the container headers are LGPLv2.1+ with the exception.
 
-**The prebuilt trees carry third-party components.** `fbc-win/` and
-`fbc-linux/` redistribute the toolchain fbc invokes — GNU binutils and gcc under
-**GPLv3**, plus the MinGW-w64 runtime and import libraries under their own
-terms. They are unmodified redistributions; see [LICENSE](LICENSE) for the
-breakdown.
+**The prebuilt trees carry third-party components.** `toolchains/` redistributes
+the toolchain fbc invokes — GNU binutils and gcc under **GPLv3**, plus the
+MinGW-w64 runtime and import libraries under their own terms. They are
+unmodified redistributions; see [LICENSE](LICENSE) for the breakdown.
 
 ---
 
-## Status
+# Status
 
-Implementation complete apart from `CONST`. Offered for upstream discussion.
+All four features are implemented, tested and gated. The one USTRING gap is
+`CONST`. Offered for upstream discussion.

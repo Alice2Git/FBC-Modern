@@ -5,15 +5,16 @@ This repository is a modified copy of the FreeBASIC compiler (fbc), so it
 carries FreeBASIC's licensing unchanged. Nothing here is relicensed, and no
 licence was chosen for this work -- it is inherited.
 
-FreeBASIC is licensed in two parts, and the USTRING work touches both, so both
+FreeBASIC is licensed in two parts, and this work (USTRING, generics, the
+iterator protocol, FOR EACH and the standard containers) touches both, so both
 apply:
 
 
 1. THE COMPILER  --  GNU GPL, version 2 or later
 ------------------------------------------------
 
-Everything under src/compiler/, and the fbc32.exe / fbc64.exe / bin/fbc
-binaries built from it (including those shipped in fbc-win/ and fbc-linux/).
+Everything under src/src/compiler/, and the fbc32.exe / fbc64.exe / bin/fbc
+binaries built from it (including those shipped under toolchains/).
 
 Full text: COPYING.GPL-2.0
 
@@ -22,9 +23,9 @@ Full text: COPYING.GPL-2.0
    with a static-linking exception
 --------------------------------------------------------------------------
 
-Everything under src/rtlib/ and src/gfxlib2/ -- that is libfb, libfbmt,
-libfbgfx and libfbgfxmt, including the libraries shipped in fbc-win/lib/ and
-fbc-linux/lib/.
+Everything under src/src/rtlib/ and src/src/gfxlib2/ -- that is libfb, libfbmt,
+libfbgfx and libfbgfxmt, including the libraries shipped under
+toolchains/fbc-modern-windows/lib/ and toolchains/fbc-modern-linux/lib/.
 
 Full text: COPYING.LGPL-2.1
 
@@ -47,26 +48,38 @@ to link the runtime statically without taking on the LGPL:
 3. DOCUMENTATION  --  GNU FDL
 ------------------------------
 
-FreeBASIC's documentation, including fbc-master/doc/. The USTRING user
-documentation, fbc-master/doc/ustring.txt, is part of that.
+FreeBASIC's documentation, including src/doc/. The user documentation this
+project adds -- everything under docs/ -- is part of that.
 
 
-WHICH LICENCE APPLIES TO THE USTRING WORK
------------------------------------------
+WHICH LICENCE APPLIES TO THIS WORK
+----------------------------------
 
 It follows the file, exactly as it does for the rest of fbc:
 
-  src/compiler/*                 GPLv2+       keyword, datatype, backends,
-                                              rtl-ustring.bas
-  src/rtlib/ustr_*.c             LGPLv2.1+    the runtime: descriptors,
-  src/rtlib/fb_ustring.h         with the     codecs, intrinsics, I/O
-  src/rtlib/ustr_wchar_conv.h    exception
-  src/gfxlib2/gfx_drawstring_ustr.c
-  src/gfxlib2/gfx_cp437.h
+  src/src/compiler/*             GPLv2+       USTRING: keyword, datatype,
+                                              backends, rtl-ustring.bas
+                                              Generics: parser-generic.bas,
+                                              parser-generic-capture.bas
+                                              FOR EACH: parser-compound-for.bas
 
-  doc/ustring.txt                GNU FDL
+  src/src/rtlib/ustr_*.c         LGPLv2.1+    the runtime: descriptors,
+  src/src/rtlib/fb_ustring.h     with the     codecs, intrinsics, I/O
+  src/src/rtlib/ustr_wchar_conv.h  exception
+  src/src/gfxlib2/gfx_drawstring_ustr.c
+  src/src/gfxlib2/gfx_cp437.h
 
-  tests/, tools/, NOTES.md, README.md
+  src/inc/containers.bi          LGPLv2.1+    the standard containers. They
+  src/inc/fb/*.bi                with the     compile into the user's program,
+                                 exception    so they are runtime rather than
+                                              compiler. Upstream's own inc/
+                                              headers carry no per-file notice,
+                                              so this is stated here rather
+                                              than inherited.
+
+  docs/*                         GNU FDL
+
+  src/tests/, tests/, tools/, README.md
                                  GPLv2+, same as the compiler they test and
                                  describe
 
@@ -74,24 +87,24 @@ It follows the file, exactly as it does for the rest of fbc:
 THIRD-PARTY COMPONENTS SHIPPED IN THE PREBUILT TREES
 ----------------------------------------------------
 
-fbc-win/ and fbc-linux/ contain more than FreeBASIC. They redistribute the
-toolchain and support libraries fbc invokes and links against, each under its
-own licence:
+toolchains/fbc-modern-windows/ and toolchains/fbc-modern-linux/ contain more
+than FreeBASIC. They redistribute the toolchain and support libraries fbc
+invokes and links against, each under its own licence:
 
-  fbc-win/bin/win32, fbc-win/bin/win64
+  fbc-modern-windows/bin/win32, fbc-modern-windows/bin/win64
       GNU binutils (as, ld, ar, ...) and gcc -- GPLv3
-  fbc-win/lib/win32, fbc-win/lib/win64
+  fbc-modern-windows/lib/win32, fbc-modern-windows/lib/win64
       MinGW-w64 runtime and import libraries, plus libgcc and libstdc++,
       under their own terms (MinGW-w64 is largely public-domain / BSD-style;
       libgcc and libstdc++ carry the GCC Runtime Library Exception)
 
 These are unmodified redistributions. See the licence files in those
 directories, and the "Dependencies on third-party libraries" section of
-fbc-master/readme.txt.
+src/readme.txt.
 
 LibFFI, used by the runtime for ThreadCall, is under the MIT/Expat licence --
-see fbc-master/doc/libffi-license.txt. Note that the Windows binaries here were
-built with -DDISABLE_FFI and do not link it; the Linux build does.
+see src/doc/libffi-license.txt. Note that the Windows binaries here were built
+with -DDISABLE_FFI and do not link it; the Linux build does.
 
 
 UPSTREAM

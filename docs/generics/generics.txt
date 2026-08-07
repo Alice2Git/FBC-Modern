@@ -1,0 +1,360 @@
+GENERICS -- types and procedures parameterised by type
+======================================================
+
+    type Box( of T )
+        as T value
+    end type
+
+    dim b as Box( of long )
+    b.value = 7
+
+    function Max( of T )( byval a as T, byval b as T ) as T
+        if a > b then return a
+        return b
+    end function
+
+    print Max( 3, 9 )               '' T inferred as INTEGER
+    print Max( of double )( 1.5, 2.5 )
+
+A generic is declared once and compiled once per distinct type-argument list.
+There is no textual substitution, no macro, and no separate template language:
+the body is captured as tokens at declaration and replayed through the real
+parser at instantiation, so the code inside a generic is ordinary FreeBASIC and
+is diagnosed as such.
+
+This is RFC-0001. FOR EACH (RFC-0003), the iterator protocol (RFC-0002) and the
+standard containers (RFC-0004) are all built on top of it.
+
+
+WHY IT EXISTS
+-------------
+
+Before this, a container that worked for more than one element type had to be
+written with macros, with ANY PTR, or once per type. All three lose something:
+a macro has no scope and reports errors at the expansion; ANY PTR discards the
+type and moves every mistake to run time; copies drift.
+
+A generic keeps the type. Box( of long ) and Box( of string ) are two distinct
+types, each fully checked, both written once.
+
+
+DECLARING A GENERIC TYPE
+------------------------
+
+    type Box( of T )
+        as T value
+    end type
+
+    type Pair( of K, V )
+        as K k
+        as V v
+    end type
+
+'of' introduces the type parameter list. One or more parameters, separated by
+commas, each an ordinary identifier. The parameters are visible throughout the
+body -- fields, member prototypes, member bodies, base type, array element
+types, pointers.
+
+The name of a generic is not a type by itself. It must always be written with a
+type argument list:
+
+    dim a as Box                    '' error 335
+    type Bad extends Box            '' error 335
+
+
+INSTANTIATION AND IDENTITY
+--------------------------
+
+An instantiation is created the first time a particular type-argument list is
+seen, and cached. The SAME argument list always yields the SAME type:
+
+    dim b1 as Box( of long )
+    dim b2 as Box( of long )
+    b2 = b1                         '' fine -- one type, not two
+
+Different argument lists are unrelated types with no conversion between them:
+
+    dim c as Box( of double )
+    c = b1                          '' error 181: Invalid assignment/conversion
+
+Type arguments may be anything a type can be: scalars, strings, UDTs, pointers,
+and other instantiations.
+
+    dim n as Box( of Box( of long ) )
+
+SIZEOF, VAR, arrays, pointers, BYREF and BYVAL parameters, function results and
+UDT fields all work on an instantiation exactly as on any other type.
+
+Declaration order does not matter. A generic may be used before its member
+bodies appear, and a member body may be written before any instantiation
+exists -- both are captured and replayed at the next module-level statement
+boundary.
+
+
+MEMBERS
+-------
+
+A prototype inside the body needs nothing special. An out-of-line body repeats
+the type parameter list after the generic's name:
+
+    type Stack( of T )
+        as T items( 0 to 15 )
+        as integer count
+        declare sub Push( byval x as T )
+        declare function Pop( ) as T
+    end type
+
+    sub Stack( of T ).Push( byval x as T )
+        this.items( this.count ) = x
+        this.count += 1
+    end sub
+
+The list must match the declaration in arity and in NAME. Renaming a parameter
+in the out-of-line body is error 341, not an alias:
+
+    sub Stack( of U ).Push( byval x as U )      '' error 341
+
+Constructors, destructors, copy constructors and LET all work, and run for
+fields of a generic exactly as for a plain UDT -- a Box( of string ) constructs
+and destroys its string.
+
+Member operators and properties work:
+
+    type Arr( of T )
+        as T e( 0 to 3 )
+        declare operator [] ( byval i as integer ) byref as T
+        declare operator cast( ) as integer
+        declare property first( ) as T
+        declare property first( byval x as T )
+    end type
+
+    operator Arr( of T ).[] ( byval i as integer ) byref as T
+        return this.e( i )
+    end operator
+
+including the FOR / STEP / NEXT trio, which is what makes an instantiation
+usable as an ordinary FOR counter.
+
+
+GENERIC PROCEDURES
+------------------
+
+    sub Swap2( of T )( byref a as T, byref b as T )
+    function Max( of T )( byval a as T, byval b as T ) as T
+    function Pick( of A, B )( byval x as A, byval y as B ) as A
+
+Call with explicit type arguments, or let them be inferred from the argument
+types:
+
+    print Max( of double )( 1.5, 2.5 )      '' explicit
+    print Max( 3, 9 )                       '' inferred
+
+Inference reads the parameter positions only. A type parameter that appears
+only in the return type is therefore callable but not inferable, which is
+correct rather than a gap:
+
+    function MakeZero( of T )( ) as T
+    dim z as long = MakeZero( of long )( )
+
+When two arguments would bind the same parameter to different types, inference
+does not pick a winner -- it reports error 340 and asks for the arguments to be
+written out. An implicit promotion is not a match.
+
+A generic procedure may call another generic procedure, and a generic type's
+member may call a generic procedure.
+
+
+GENERIC GLOBAL OPERATORS
+------------------------
+
+    operator + ( of T )( byref x as Box( of T ), byref y as Box( of T ) ) as Box( of T )
+        dim as Box( of T ) r
+        r.v = x.v + y.v
+        return r
+    end operator
+
+There is nowhere in 'a + b' to write type arguments, so they are inferred from
+the operand types, including through the nested position: an operand that is an
+instantiation of Box binds T from ITS argument list. Nothing is registered until
+an instantiation exists -- '+' for Box( of integer ) exists because somebody
+added two of them.
+
+Self-assignment operators (+=, -=, ...) must be members, as in plain FreeBASIC:
+
+    operator += ( of T )( ... )     '' error 152: Operator must be a member function
+
+
+INHERITANCE, VIRTUAL AND RTTI
+-----------------------------
+
+All three directions work:
+
+    type Sq( of T ) extends Shape           '' generic extends concrete
+    type IntBox extends Box( of integer )   '' concrete extends instantiation
+    type Der( of T ) extends Root( of T )   '' generic extends generic
+
+VIRTUAL, ABSTRACT, overriding an override, and OBJECT-derived RTTI all behave as
+they do for plain types. 'x is T' works through a base pointer, and -- because
+RTTI compares mangled name strings at run time -- two DIFFERENT instantiations
+correctly report false for each other:
+
+    print ( *r is Der( of long ) )          '' from a Root( of long ) ptr
+
+
+SELF-REFERENCE, NESTING AND DEPTH
+---------------------------------
+
+A generic may refer to itself through a pointer, which is what makes linked
+structures expressible:
+
+    type Node( of T )
+        as T v
+        as Node( of T ) ptr nxt
+    end type
+
+Nesting a generic in its own type ARGUMENT list is fine and terminates:
+Box( of Box( of long ) ) resolves the inner instantiation before the outer body
+is replayed, so it costs no depth.
+
+Depth accrues only when one generic's BODY drives another instantiation. The
+limit is '-maxinstdepth' (default 64); exceeding it is error 339. A genuinely
+runaway self-instantiation is usually caught earlier by the forward-reference
+machinery, so the counter is a backstop.
+
+
+HOW IT WORKS
+------------
+
+Four sentences, because nothing else in fbc looks like this.
+
+1. A generic's body is captured as a TOKEN CHAIN at declaration and replayed
+   through the real parser once per distinct type-argument list, with the type
+   parameters bound as TYPEDEFs in a synthetic namespace. No textual
+   substitution, no separate template AST.
+
+2. Member bodies and generic-procedure bodies are DEFERRED to the next
+   module-level statement boundary, because an instantiation happens
+   mid-statement and a procedure cannot be opened there. This is also what
+   makes declaration order irrelevant.
+
+3. Every instantiation is built AT MODULE LEVEL whatever the parser was doing,
+   because a UDT with member procedures is illegal below module level. A
+   generic instantiated inside a procedure still emits a module-level type.
+
+4. There is no new AST node, no new IR node, no backend change and no runtime
+   call. An instantiation is an ordinary UDT by the time anything downstream
+   sees it.
+
+
+NAMES AND LINKAGE
+-----------------
+
+Instantiations are mangled Itanium-style, so they demangle to something a human
+recognises and are byte-identical regardless of declaration order:
+
+    $3BoxIiE           ->  Box<int>
+    $3BoxIdE           ->  Box<double>
+    $3BoxI3BoxIiEE     ->  Box<Box<int> >
+
+Two modules that both write Box( of long ) mean the same type, and each emits
+the members it reached. Because PE/COFF here offers no working COMDAT (see
+KNOWN LIMITS), each module keeps its own copy and they are module-private. That
+costs size, not correctness: a multi-module program links and behaves as one
+type.
+
+
+DIAGNOSTICS
+-----------
+
+    error 333: Expected type parameter name
+    error 334: Duplicated type parameter
+    error 335: Generic used without a type argument list
+    error 336: Wrong number of type arguments
+    error 337: Type argument list given for something that is not generic
+    error 338: Unbalanced block in generic body
+    error 339: Generic instantiation too deep
+    error 340: Unable to infer type arguments, specify them explicitly
+    error 341: Type parameter list does not match the generic's declaration
+
+Everything else is an ordinary FreeBASIC diagnostic, reported from the replayed
+body and followed by the instantiation chain that reached it, so it is possible
+to see which type argument caused it:
+
+    box.bas(13) error 14: Expected identifier, found 'Wdiget'
+      in instantiation of 'Box( of long )'
+      required from box.bas(18)
+
+
+KNOWN LIMITS
+------------
+
+All measured, none blocking.
+
+  - No constraints on type parameters. A member that needs '=' on T makes the
+    whole type unusable for a T without one -- which is why Array's Sort,
+    IndexOf and Contains are free procedures rather than members. The
+    diagnostic lands inside the container header at the instantiation site,
+    which is honest but not friendly. This is the strongest practical argument
+    for adding constraints later; four fail-container-* tests pin the current
+    behaviour.
+
+  - typeof( T ) does not see through a type parameter. An ordinary TYPEDEF is
+    transparent to typeof; the one an instantiation binds is not, so a generic
+    body cannot branch on what T is bound to. This is why the hash contract is
+    an overloaded HashOf( ) rather than an #if dispatch.
+
+  - One copy of each instantiation per module. True weak/COMDAT is not
+    achievable on PE/COFF by either route tried -- __attribute__((weak))
+    produces a weak EXTERNAL and silently breaks virtual dispatch, and '.weak'
+    in gas64 crashes the binary. Instantiations are therefore module-private.
+    Costs size, not correctness.
+
+  - The LLVM backend's linkonce_odr is UNVERIFIED. No LLVM toolchain was
+    available and the backend is not in the test gate. If it is wrong, the
+    fallback is 'private', matching the other three backends.
+
+  - Debug names are not unique. Every instantiation of Box reports as 'Box' to
+    the debugger, so GDB sees N distinct types sharing one name.
+
+  - In-body line numbers point at the body's opening line, not the offending
+    line inside it. The instantiation chain supplies the detail. Attempted,
+    measured and reverted.
+
+  - Function-template return types are not mangled: '_Z3IncIiEi' where Itanium
+    wants the return type after the I...E list. Names are unique and stable,
+    which is what is claimed.
+
+  - A type parameter cannot be named K. Plain FreeBASIC already rejects a
+    TYPEDEF named K used as a parameter type; this is not a generics rule, but
+    it is met most often here. Names also collide case-insensitively, so a
+    parameter T and a variable t are the same identifier.
+
+
+TESTS
+-----
+
+src/tests/generics/ -- 42 files.
+
+  instantiate-type.bas        instantiation, identity, nesting, UDT arguments
+  member-procs.bas            out-of-line bodies, both parameter orders
+  member-operators.bas        operators, properties, FOR/STEP/NEXT
+  global-operators.bas        generic global operators and their inference
+  generic-procs.bas           explicit and inferred type arguments
+  ctor-dtor.bas               construction, destruction, copy
+  inheritance.bas             all three EXTENDS directions, virtual, RTTI
+  recursive-generic.bas       self-reference through a pointer
+  sizeof-instantiation.bas    layout
+  member-mangling.bas         mangled names are distinct and stable
+  capture-boundary.bas        deferral to the statement boundary
+  multimodule/                two modules instantiating the same generics
+  fail-*.bas                  one diagnostic per file, with golden output
+
+One caveat on member-mangling.bas: since instantiations became module-private,
+an exact-mangled-name link assertion is no longer expressible. The test still
+catches a COLLAPSE -- two instantiations sharing a name -- but would not catch a
+drift to a different, still-distinct scheme.
+
+See also:
+  docs/for_each/iterator-protocol.txt   the RFC-0002 contract
+  docs/for_each/for-each.txt            RFC-0003
+  docs/array|map|set|linkedlist/        RFC-0004, written entirely in FB

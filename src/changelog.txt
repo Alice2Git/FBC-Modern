@@ -61,6 +61,64 @@ Version 1.20.0
   WSTRING * N (error 55). It was accepted and then miscompiled -- the gcc
   backend typed the result as a single uint16, truncating the pointer.
 - USTRING is gated out of '-lang qb', as ZSTRING and WSTRING already are.
+- GENERICS (RFC-0001): types and procedures parameterised by type --
+  'type Box( of T )', 'function Max( of T )( ... ) as T'. A generic's body is
+  captured as a token chain at declaration and replayed through the real parser
+  once per distinct type-argument list, with the type parameters bound as
+  TYPEDEFs, so the code inside a generic is ordinary FreeBASIC and is diagnosed
+  as such. Not a macro and not a separate template language. Supported:
+  out-of-line member bodies ('sub Box( of T ).setit'), ctors/dtors/copy, member
+  operators and properties including FOR/STEP/NEXT, generic procedures with
+  type-argument inference, generic global operators (inferred through the
+  nested operand type), inheritance in all three directions -- generic extends
+  concrete, concrete extends instantiation, generic extends generic -- with
+  VIRTUAL, ABSTRACT and RTTI, self-reference through a pointer, and nesting.
+  Declaration order does not matter: member bodies are deferred to the next
+  module-level statement boundary.
+- GENERICS: an instantiation is cached, so the same type-argument list always
+  yields the SAME type and different lists are unrelated types. Instantiations
+  are Itanium-mangled ('$3BoxIiE' demangles to 'Box<int>') and are emitted
+  module-private, so two modules that both instantiate Box( of long ) link.
+  True weak/COMDAT is not used: on PE/COFF __attribute__((weak)) produces a
+  weak EXTERNAL that silently breaks virtual dispatch. One copy per module
+  costs size, not correctness.
+- GENERICS: an error inside a replayed body is followed by the instantiation
+  chain that reached it ("in instantiation of 'Box( of long )' / required
+  from ..."). New diagnostics, errors 333-341.
+- GENERICS: '-maxinstdepth <n>' (default 64) bounds instantiation depth,
+  error 339. Nested type ARGUMENTS do not accrue depth -- they are resolved
+  before the outer body is replayed -- so Box( of Box( of T ) ) terminates.
+- ITERATOR PROTOCOL (RFC-0002): a structural contract, with no base class,
+  interface or registration. A type is iterable if it has
+  'GetIterator( ) as <iterator>', where the iterator has 'IsValid( ) as
+  boolean', 'Value( ) [byref] as E' and 'MoveNext( )'.
+- FOR EACH (RFC-0003): 'for each x [as E] in c' and 'for each byref x ... in c',
+  over a fixed or dynamic array at any lbound, a var-len STRING (one BYTE per
+  iteration), or any type satisfying the iterator protocol. The loop variable is
+  declared by the statement and scoped to the body; NEXT may not name it. EXIT
+  FOR and CONTINUE FOR work, including the multi-level forms. The collection
+  expression is evaluated EXACTLY ONCE. Implemented as a desugaring with two
+  lowerings -- an iterator walk for a collection, an ordinary counter FOR for an
+  array or string -- so there is no new AST node, IR node, backend change or
+  runtime call, and FOR EACH over an array emits what the index loop emits.
+  New diagnostics, errors 342-346.
+- FOR EACH: 'each' and 'in' are NOT reserved words and are not in the keyword
+  table. 'for each as long = 1 to 3' still compiles with its existing meaning;
+  one token of look-ahead separates the two forms.
+- FOR EACH: ZSTRING and WSTRING are refused (a fixed buffer carries no length),
+  as is a STRING expression with side effects (the pointer and the length are
+  read separately). Multi-dimensional arrays are refused -- there is no
+  defensible default traversal order.
+- STANDARD CONTAINERS (RFC-0004): Array( of T ), Map( of TK, TV ), Set( of T )
+  and LinkedList( of T ) in 'inc/fb/*.bi', with 'inc/containers.bi' as the
+  single include. Written in ordinary FreeBASIC on top of generics, the
+  iterator protocol and FOR EACH -- there is NO compiler support for them, so a
+  better one written by anybody else is on equal footing. They live in NAMESPACE
+  FB and add nothing to the global namespace; the file is not included by
+  default. Array indices are ZERO-based; Map's indexer m[ k ] INSERTS on a miss
+  (use TryGet or Contains to read); copy and assignment are DEEP for all four.
+  A user type becomes a Map key or Set element by overloading HashOf, see
+  'inc/fb/hash.bi'.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
