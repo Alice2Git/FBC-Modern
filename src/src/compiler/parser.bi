@@ -486,6 +486,8 @@ declare sub cUsingStmt( )
 declare sub cExternStmtBegin( )
 declare sub cExternStmtEnd( )
 
+declare function cDeferStmt( ) as integer
+
 declare function cAssignmentOrPtrCall _
 	( _
 		_

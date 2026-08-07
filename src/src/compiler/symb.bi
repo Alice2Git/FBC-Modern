@@ -203,6 +203,7 @@ enum FB_SYMBATTRIB
 	FB_SYMBATTRIB_GENERICSCOPE     = &h02000000  '' synthetic namespace holding one instantiation's type params
 	FB_SYMBATTRIB_GENERICINST      = &h04000000  '' an instantiation of a generic - affects name mangling
 	FB_SYMBATTRIB_WEAK             = &h08000000  '' emit weak: one copy survives if several modules define it
+	FB_SYMBATTRIB_DEFER            = &h10000000  '' VARs: not a variable at all -- a registered DEFER statement
 end enum
 
 '' proc symbol attributes mask
@@ -766,6 +767,15 @@ type FBS_VAR
 	end union
 	array           as FBS_ARRAY
 	desc            as FBVAR_DESC
+	'' DEFER only (FB_SYMBATTRIB_DEFER): the deferred statement, already
+	'' parsed, held as a detached chain of AST nodes linked by ->next.
+	''
+	'' NOT folded into the union above.  Those members are alternatives for
+	'' literal/initializer storage, and symbGetTypeIniTree() reads initree
+	'' unconditionally -- aliasing a statement chain onto it would hand the
+	'' initializer machinery a statement.  FBS_VAR shares space with the
+	'' larger FBS_PROC in FBSYMBOL's union, so this costs nothing.
+	defertree       as ASTNODE_ ptr
 	stmtnum         as integer                  '' can't use colnum as it's unreliable
 	align           as integer                  '' 0 = use default alignment
 	data            as FBVAR_DATA               '' used with DATA stmts
@@ -1328,6 +1338,8 @@ declare function symbAddTempVar _
 		byval dtype as integer, _
 		byval subtype as FBSYMBOL ptr = NULL _
 	) as FBSYMBOL ptr
+
+declare function symbAddDefer( byval tree as ASTNODE_ ptr ) as FBSYMBOL ptr
 
 declare function symbAddImplicitVar _
 	( _
@@ -2649,6 +2661,12 @@ declare sub symbProcRecalcRealType( byval proc as FBSYMBOL ptr )
 #define symbIsCommon(s) ((s->attrib and FB_SYMBATTRIB_COMMON) <> 0)
 
 #define symbIsTemp(s) ((s->attrib and FB_SYMBATTRIB_TEMP) <> 0)
+
+'' A registered DEFER.  It is a VAR symbol so that the three existing cleanup
+'' walks find it with no change, but it names no storage and must be skipped
+'' wherever variables are ALLOCATED or EMITTED.
+#define symbIsDefer(s) ((s->attrib and FB_SYMBATTRIB_DEFER) <> 0)
+#define symbGetDeferTree(s) s->var_.defertree
 
 #define symbIsParamVarByDesc(s) ((s->attrib and FB_SYMBATTRIB_PARAMVARBYDESC) <> 0)
 

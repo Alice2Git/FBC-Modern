@@ -461,6 +461,8 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_FOREACHMULTIDIM                    '/ @"Cannot FOR EACH over a multi-dimensional array, iterate one dimension explicitly", _
 		/'FB_ERRMSG_FOREACHNOBYREF                     '/ @"Cannot bind BYREF in FOR EACH", _
 		/'FB_ERRMSG_FOREACHNEXTVAR                     '/ @"NEXT cannot name the FOR EACH variable, it is scoped to the loop body", _
+		/'FB_ERRMSG_DEFERNEEDSSTATEMENT                '/ @"DEFER requires a statement", _
+		/'FB_ERRMSG_DEFERATMODULELEVEL                 '/ @"DEFER is not allowed at module level", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

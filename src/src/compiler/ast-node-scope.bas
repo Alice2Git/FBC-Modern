@@ -597,6 +597,25 @@ private function hCheckBranch _
 
 end function
 
+'' Emit one registered DEFER's statement.
+''
+'' A clone per exit, because each exit needs its own nodes -- the same reason the
+'' break-path splicer builds a fresh dtor call per site.
+''
+'' Walked as a CHAIN rather than cloned as one tree: astCloneTree() follows ->l
+'' and ->r but not ->next, and one source statement can lower to several linked
+'' nodes (a call plus the destruction of its temporaries, say).  Cloning only the
+'' head would silently drop the rest.  This is also why a DEFER cannot go through
+'' astBuildVarDtorCall(), which returns a single node.
+private sub hAddDeferChain( byval s as FBSYMBOL ptr )
+	dim as ASTNODE ptr n = symbGetDeferTree( s )
+
+	while( n )
+		astAdd( astCloneTree( n ) )
+		n = n->next
+	wend
+end sub
+
 sub astScopeDestroyVars( byval symtbtail as FBSYMBOL ptr )
 	dim as FBSYMBOL ptr s = any
 
@@ -605,8 +624,12 @@ sub astScopeDestroyVars( byval symtbtail as FBSYMBOL ptr )
 	while( s )
 		'' variable?
 		if( symbIsVar( s ) ) then
+			'' a registered DEFER?
+			if( symbIsDefer( s ) ) then
+				hAddDeferChain( s )
+
 			'' has a dtor?
-			if( symbGetVarHasDtor( s ) ) then
+			elseif( symbGetVarHasDtor( s ) ) then
 				astAdd( astBuildVarDtorCall( s, TRUE ) )
 			end if
 		end if
@@ -660,7 +683,14 @@ sub astScopeAllocLocals( byval symtbhead as FBSYMBOL ptr )
 		''
 		while( s )
 			'' non-shared/static variable?
-			if( symbIsVar( s ) and ((symbGetAttrib( s ) and (FB_SYMBATTRIB_SHARED or FB_SYMBATTRIB_STATIC)) = 0) ) then
+			''
+			'' A registered DEFER is a VAR symbol but names NO STORAGE, so it
+			'' must never reach irProcAllocLocal( ).  Only this backend arm
+			'' allocates every local; the C arm below emits temps only, and a
+			'' DEFER is deliberately not a temp -- so without this the bug would
+			'' have been gas64-only.
+			if( symbIsVar( s ) and (symbIsDefer( s ) = FALSE) and _
+			    ((symbGetAttrib( s ) and (FB_SYMBATTRIB_SHARED or FB_SYMBATTRIB_STATIC)) = 0) ) then
 				'' Procedure parameter?
 				if( symbIsParamVar( s ) ) then
 					irProcAllocArg( parser.currproc, s )
