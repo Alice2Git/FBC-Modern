@@ -16,6 +16,7 @@
 '' is what FB.ForEach exists for.
 
 #include once "fb/array.bi"
+#include once "fb/optional.bi"
 using FB
 
 #define assert_(e) if (e) = 0 then fb_Assert(__FILE__, __LINE__, __FUNCTION__, #e)
@@ -220,20 +221,6 @@ end function
 	end scope
 
 	'' ==================================================== capturing a UDT
-	''
-	'' KNOWN LIMIT, pinned here rather than left to be discovered: a captured
-	'' variable's type must be NAMEABLE in source. The closure struct is
-	'' synthesised as replayed text, so each field is declared with the type's
-	'' printed name -- and a generic instantiation prints as its mangled
-	'' internal name ('$GEN$$ARRAY$I$...'), which is not an identifier:
-	''
-	''     dim a as Array( of long )
-	''     var c = sub[ byref a ]( ) : ... : end sub    '' error 14
-	''
-	'' So containers cannot be captured yet. A plain UDT, a string and the
-	'' scalar types all can, which covers the Win32 cases the feature is for.
-	'' The fix is to build the closure struct programmatically instead of by
-	'' text; it is not done here.
 
 	type Pt
 		as long x, y
@@ -263,6 +250,60 @@ end function
 		q.x = 100
 		d( )
 		assert_( got2 = 3 )
+	end scope
+
+	'' ==================================================== capturing a CONTAINER
+	''
+	'' The closure is declared as a GENERIC over its capture types and then
+	'' instantiated from the captured symbols' dtype/subtype, so a capture's
+	'' type is never written as text. That is what makes this section possible:
+	'' naming the type could not express a container, because a generic
+	'' instantiation prints as its mangled internal name and
+	''     var c = sub[ byref a ]( ) ...      '' a is an Array( of long )
+	'' failed with 'error 14: Expected identifier, found $'.
+
+	scope
+		dim src as Array( of long )
+		src.Push( 7 )
+
+		dim as long got = 0
+		var c = sub[ byref src, byref got ]( )
+			got = src[ 0 ]
+			src.Push( 9 )
+		end sub
+
+		c( )
+		assert_( got = 7 )
+		assert_( src.Count( ) = 2 )      '' the closure mutated the caller's container
+		assert_( src[ 1 ] = 9 )
+	end scope
+
+	'' BYVAL a container is a DEEP COPY taken at evaluation, so a later push to
+	'' the source is not seen.
+	scope
+		dim orig as Array( of long )
+		orig.Push( 1 )
+
+		dim as long n = 0
+		var d = sub[ byval orig, byref n ]( )
+			n = orig.Count( )
+		end sub
+
+		orig.Push( 2 )
+		d( )
+		assert_( n = 1 )
+		assert_( orig.Count( ) = 2 )
+	end scope
+
+	'' and an Optional, which is a generic too
+	scope
+		dim o as Optional( of long ) = Some( 5L )
+		dim as long ov = 0
+		var e = sub[ byref o, byref ov ]( )
+			ov = o.Value( )
+		end sub
+		e( )
+		assert_( ov = 5 )
 	end scope
 
 	'' ==================================================== destructor balance

@@ -516,29 +516,81 @@ private function hBuildClosure _
 	( _
 		byval lam as FB_LAMBDA ptr, _
 		byref cloid as zstring, _
-		byref hdr as string _
+		byref hdr as string, _
+		byref body as string _
 	) as integer
 
 	dim as FB_PARSERSTATE st
 	dim as FB_GENSCOPE gs
 	dim as string text
 	dim as string kw = hKeyword( lam->kindtk )
+	dim as integer argdtype( 0 to LAMBDA_MAXCAPTURES-1 )
+	dim as FBSYMBOL ptr argsubtype( 0 to LAMBDA_MAXCAPTURES-1 )
 
-	text = "type " + cloid + LFCHAR
+	'' The closure is declared as a GENERIC, with one type parameter per
+	'' capture, and then instantiated with the captured symbols' real types.
+	''
+	'' That is the whole point: genInstantiateType( ) takes dtype/subtype
+	'' ARRAYS, so the capture types never have to be written as text. Naming
+	'' them was the previous approach and it could not express a container --
+	'' symbTypeToStr( ) prints a generic instantiation as its mangled internal
+	'' name, which is not an identifier:
+	''
+	''     dim a as Array( of long )
+	''     var c = sub[ byref a ]( ) ...   '' error 14: Expected identifier, found '$'
+	''
+	'' The declaration below mentions only the placeholders, so it is always
+	'' valid source whatever is captured.
+	text = "type " + cloid + "( of "
+	for i as integer = 0 to lam->capcount-1
+		if( i > 0 ) then
+			text += ", "
+		end if
+		text += "__C" & i
+	next
+	text += " )" + LFCHAR
 
 	for i as integer = 0 to lam->capcount-1
 		with lam->caps( i )
-			dim as string ty = symbTypeToStr( symbGetFullType( .sym ), symbGetSubtype( .sym ) )
 			if( .isref ) then
-				text += "as " + ty + " ptr " + .fld + LFCHAR
+				text += "as __C" & i & " ptr " + .fld + LFCHAR
 			else
-				text += "as " + ty + " " + .fld + LFCHAR
+				text += "as __C" & i & " " + .fld + LFCHAR
 			end if
 		end with
 	next
 
 	text += "declare " + kw + " " + FB_INVOKE_NAME + " " + hdr + LFCHAR
-	text += "end type"
+	text += "end type" + LFCHAR
+
+	'' The member body goes in the SAME replay, as an out-of-line body of the
+	'' generic. The generics machinery then owns it -- captured with the
+	'' generic, replayed once per instantiation -- so lambdas no longer queue
+	'' capturing bodies on their own pending list at all.
+	text += kw + " " + cloid + "( of "
+	for i as integer = 0 to lam->capcount-1
+		if( i > 0 ) then
+			text += ", "
+		end if
+		text += "__C" & i
+	next
+	text += " )." + FB_INVOKE_NAME + " " + hdr + LFCHAR
+
+	'' One BYREF alias per capture, so the body is replayed unchanged and
+	'' FreeBASIC's own scoping decides what a colliding local means.
+	for i as integer = 0 to lam->capcount-1
+		with lam->caps( i )
+			if( .isref ) then
+				text += "dim byref as typeof( *this." + .fld + " ) " + _
+				        .id + " = *this." + .fld + LFCHAR
+			else
+				text += "dim byref as typeof( this." + .fld + " ) " + _
+				        .id + " = this." + .fld + LFCHAR
+			end if
+		end with
+	next
+
+	text += body + LFCHAR + "end " + kw
 
 	genEnterGlobalScope( gs, NULL, TRUE )
 
@@ -550,14 +602,6 @@ private function hBuildClosure _
 		stk->allowmask = -1
 	end if
 
-	'' env.includerec is bumped for the duration too. cProgram( ) ends with
-	''     if( env.includerec = 0 ) then cCompStmtCheck( )
-	'' and at the replay text's EOF that check sees the CALL SITE's still-open
-	'' SUB and reports 'error 125: Expected END SUB'. A replay is not the end of
-	'' the module, so it must not run the end-of-module check.
-	''
-	'' This is what emptying stk.tos used to hide, before that was replaced --
-	'' one hack was covering for the other.
 	env.includerec += 1
 	lambdactx.inreplay += 1
 	if( genReplayBegin( st, text, lam->srcline, lam->srcfile ) ) then
@@ -572,8 +616,23 @@ private function hBuildClosure _
 	end if
 	genLeaveGlobalScope( gs )
 
-	lam->clo = symbLookupByNameAndClass( @symbGetGlobalNamespc( ), cloid, _
-	                                     FB_SYMBCLASS_STRUCT, FALSE )
+	dim as FBSYMBOL ptr gensym = symbLookupByNameAndClass( @symbGetGlobalNamespc( ), _
+	                             cloid, FB_SYMBCLASS_GENERIC, FALSE )
+	if( gensym = NULL ) then
+		return FALSE
+	end if
+
+	'' Instantiate it with the captured variables' ACTUAL types, taken straight
+	'' off their symbols -- never named, never printed, never re-parsed.
+	for i as integer = 0 to lam->capcount-1
+		argdtype( i ) = symbGetFullType( lam->caps( i ).sym )
+		argsubtype( i ) = symbGetSubtype( lam->caps( i ).sym )
+	next
+
+	genEnterGlobalScope( gs, NULL, TRUE )
+	lam->clo = genInstantiateType( gensym, argdtype(), argsubtype(), lam->capcount )
+	genLeaveGlobalScope( gs )
+
 	if( lam->clo = NULL ) then
 		return FALSE
 	end if
@@ -665,13 +724,16 @@ function cLambdaExpr( ) as ASTNODE ptr
 		end if
 
 		dim as string hdr = genFlattenTokens( lam->hdrhead, firstline )
+		dim as string bdy = genFlattenTokens( lam->tokhead, firstline )
 
-		if( hBuildClosure( lam, id, hdr ) = FALSE ) then
+		if( hBuildClosure( lam, id, hdr, bdy ) = FALSE ) then
 			return NULL
 		end if
 
-		lam->done = FALSE
-		lambdactx.pending += 1
+		'' NOT queued on the lambda pending list: the body is an out-of-line
+		'' member of the synthesised generic, so the generics machinery owns its
+		'' replay -- captured with the generic and replayed once per
+		'' instantiation. lam->done stays TRUE.
 
 		'' The value of the expression is a closure OBJECT living in the
 		'' enclosing scope -- no allocation, destroyed with the frame.

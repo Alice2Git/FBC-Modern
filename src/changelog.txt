@@ -34,8 +34,10 @@ Version 1.20.0
   called the same way, 'f( 3 )'. A capturing lambda cannot convert to a
   procedure pointer (error 355) -- it has state and a procptr has nowhere to put
   it -- so it is passed to a generic parameter instead, which is what the new
-  FB.ForEach takes. KNOWN LIMIT: a capture's type must be nameable in source, so
-  containers cannot yet be captured.
+  FB.ForEach takes. A capture may be of ANY type, containers included: the
+  closure is synthesised as a generic over its capture types and instantiated
+  from the captured symbols directly, so a capture's type is never written as
+  text.
 - FB.Optional( of T ): a value that might not be there, replacing the
   encode-absence-in-the-value idiom that is spelled differently in every library
   and indistinguishable from a real result whenever the sentinel is legal. Zero
