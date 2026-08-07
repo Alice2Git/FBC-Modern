@@ -10,55 +10,37 @@ below).
 
 ## HANDOFF — read this first
 
-### STOP. The working tree is dirty, and none of it is this project's.
+### State of the tree
 
-`main` is at `67911ad`, in sync with `origin/main`. But there are **~1,810 lines of uncommitted,
-in-progress work** in the tree from two unrelated workstreams. Nothing below was written by the
-session that produced this plan, and none of it has been gated. **Do not branch, do not stash, and
-do not commit any of it without asking the author what state it is in.**
+Branch **`feat/fb-string-library`**, working tree clean, **not pushed**, 3 commits ahead of
+`main` (`67911ad`). Two other workstreams landed here first, both gated:
 
 ```
- M src/src/compiler/parser-generic.bas         A: generics namespace lookup
- M src/src/compiler/symb-namespace.bas         A
- M src/src/compiler/symb.bi                    A
-?? src/tests/generics/namespace-qualified-inst.bas   A  (148 lines)
-
- M src/src/rtlib/fb_string.h                   B: the FB.* string library
- M src/src/rtlib/fb_ustring.h                  B
-?? src/inc/fb/string.bi                        B  (236 lines)
-?? src/src/rtlib/str_ops.c                     B  (295)
-?? src/src/rtlib/str_ops_core.h                B  (272)
-?? src/src/rtlib/ustr_ops.c                    B  (375)
-?? src/tests/string/fbstr_search.bas           B  (484)
+144f7c4  this handoff
+46aeb37  FB string library, phase 1: the C kernel and the search group
+e464188  Generics: a qualified instantiation could not see its own namespace
+67911ad  main
 ```
 
-**Workstream A — a real generics bug, apparently fixed.** An instantiation is built in the global
-namespace, so a generic declared inside a namespace loses every unqualified name it owns — a
-sibling generic, a const. Every existing test and doc example writes `using FB` first, which put
-the namespace on the search chain for an unrelated reason and hid it. So
-`dim x as FB.Array( of string )` — the qualified form, the one a user writes before reaching for
-`using` — did not compile. The fix adds refcounted `symbNamespaceSearchPush`/`Pop` in
-`symb-namespace.bas` and threads the generic's declaring namespace through `genEnterGlobalScope`.
-Read the comment at the top of `namespace-qualified-inst.bas`; it is written up properly.
+**`e464188` — a real generics bug, fixed.** An instantiation is built in the global namespace, so a
+generic declared inside a namespace lost every unqualified name it owned — a sibling generic, a
+const. Every existing test and doc example writes `using FB` first, which put the namespace on the
+search chain for an unrelated reason and hid it, so `dim x as FB.Array( of string )` — the
+qualified form, the one a user writes before reaching for `using` — did not compile. The fix adds
+refcounted `symbNamespaceSearchPush`/`Pop` in `symb-namespace.bas` and threads the declaring
+namespace through `genEnterGlobalScope`. **Note the signature change to `genEnterGlobalScope` —
+Part 3 of this plan calls that function.**
 
-**Workstream B — a new `FB.*` string library.** `Tally`, `StartsWith`, `EndsWith`, `Contains`,
-`InstrChars`, `VerifySet`, `SpanOf`, declared three times each (STRING / WSTRING / USTRING, with
-ZSTRING served by the STRING overload) and implemented in the runtime. This is **not** one of the
-four sketches and is not in this plan.
+**`46aeb37` — a new `FB.*` string library**, phase 1 of its own project: `Tally`, `TallyChars`,
+`InstrChars`, `VerifySet`, `SpanOf`, `StartsWith`, `EndsWith`, `Contains`, three overloads each,
+algorithms written once in `str_ops_core.h` and instantiated at both widths. Not one of the four
+sketches and not in this plan — but it is **in flight**, so expect more phases of it, and it
+touches `rtlib`, which means the prebuilt toolchains are stale until it ships.
 
-**Both look finished and neither is verified here.** Before anything else:
-
-```
-cd src && make rtlib && make compiler -j8 FBC="C:/dev/FBC-Modern/src/bin/fbc.exe -i C:/dev/FBC-Modern/src/inc"
-```
-
-then the full gate (below). `src/tests/string/` is already in `tests/dirlist.mk`, so
-`fbstr_search.bas` needs only `make clean-tests` **from `src/`** to be picked up — but B touches
-`rtlib`, so `make rtlib` is required and the prebuilt toolchains would need rebuilding before B
-could ship.
-
-**Resolve A and B first — land them or park them — then start Phase 0.** Branching with this in
-the tree carries it onto the new branch.
+**Two consequences for Phase 0.** This handoff commit is on `feat/fb-string-library` rather than
+`main` because that is where HEAD was; move it if you would rather it lived elsewhere. And branch
+`feat/sketches` off whichever of the two is correct once the string-library work has landed —
+branching off `main` today misses the generics namespace fix that Part 3 depends on.
 
 ### Where this project actually stands
 
@@ -71,11 +53,11 @@ are baked into Parts 2-4 with file paths and line numbers.
 
 ### What to do next
 
-1. Resolve the dirty tree (above).
-2. `git checkout -b feat/sketches` off `main`.
-3. Reproduce the baseline yourself — do not quote the numbers in this file. Full gate, both
-   backends, from a clean rebuild.
-4. Phase 1: `src/inc/fb/optional.bi`. No compiler change, so it is the cheapest way to confirm the
+1. `git checkout -b feat/sketches` — off `feat/fb-string-library` if that work is still unmerged
+   and Part 3 needs the generics namespace fix, off `main` once it has landed there.
+2. Reproduce the baseline yourself — do not quote the numbers in this file. Full gate, both
+   backends, from a clean rebuild. It has moved twice in the last two commits.
+3. Phase 1: `src/inc/fb/optional.bi`. No compiler change, so it is the cheapest way to confirm the
    toolchain and the test harness are behaving before touching the parser.
 
 ### Decisions already taken — do not relitigate
@@ -155,13 +137,14 @@ cd src/tests/warnings && FBC="…" bash ./test.sh     # then git diff r/
 cd src/tests/errors   && FBC="…" bash ./test.sh     # then git diff r/
 ```
 
-Reference figures from the last green run on `main` — **reproduce them, do not trust them**:
+Reference figures **as of `46aeb37`** — reproduce them, do not trust them. They moved twice in the
+two commits before this handoff, which is the argument for reproducing:
 
 | | |
 | --- | --- |
-| unit-tests, gcc | `1154420 / 1154409 / 11 / 2308` |
+| unit-tests, gcc | `1,154,627` assertions / 11 failed — baseline `1,154,420` plus the string library's 207 |
 | unit-tests, gas64 | identical |
-| log-tests | `1731 passed / 0 failed / 1731 logs` |
+| log-tests | `1,732 passed / 0 failed` |
 | warnings + errors | no diff, 5 targets each |
 
 - **Environmental floor: 11 `threadcall_`.** A 12th is a regression. The 4 `cpp` log-test failures
