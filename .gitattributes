@@ -5,3 +5,8 @@ toolchains/fbc-modern-linux/** -text
 # Windows toolchain/lib payload is binary or Windows-native already.
 toolchains/fbc-modern-windows/bin/** -text
 toolchains/fbc-modern-windows/lib/** -text
+
+# PDFs are binary. Without this git guesses "text" for them and plans a CRLF
+# conversion on checkout, which corrupts the file -- committing one produced
+# "LF will be replaced by CRLF the next time Git touches it".
+*.pdf -text
