@@ -197,6 +197,7 @@ type FB_GENSCOPE
 	hashtb          as FBHASHTB ptr
 	ns              as FBSYMBOL ptr
 	declns          as FBSYMBOL ptr             '' generic's declaring ns, or NULL
+	hidelocals       as integer                  '' did this entry bump symb.hidelocals?
 end type
 
 '' Push/pop every namespace from the generic's declaring namespace up to global.
@@ -217,7 +218,8 @@ end sub
 private sub genEnterGlobalScope _
 	( _
 		byref gs as FB_GENSCOPE, _
-		byval gensym as FBSYMBOL ptr _
+		byval gensym as FBSYMBOL ptr, _
+		byval hidelocals as integer _
 	)
 
 	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
@@ -248,6 +250,23 @@ private sub genEnterGlobalScope _
 	symbSetCurrentHashTb( @symbGetCompHashTb( glob ) )
 	symbSetCurrentNamespc( glob )
 
+	'' The replay is no longer inside the procedure or the block scope the
+	'' instantiation was requested from, but that scope's locals are still live
+	'' and still in the global hash table, so the "search locals first" pass in
+	'' hsymbLookupTypeNS() returns them ahead of this instantiation's type
+	'' parameters -- a variable named 't' at the site shadowed 'T' and broke
+	'' every 'of T' generic.
+	''
+	'' Only for replays that parse DECLARATIONS (a type body, a procedure
+	'' header): those create no locals of their own, so suppressing the pass
+	'' costs nothing.  A member BODY replay must NOT set this -- its own locals
+	'' and parameters are exactly what that pass is for, and hiding them made a
+	'' local shadowing a field resolve to the field instead.
+	gs.hidelocals = hidelocals
+	if( hidelocals ) then
+		symb.hidelocals += 1
+	end if
+
 	'' after the switch: the body is now parsed in the global namespace, and
 	'' this is what lets it still see the namespace it was declared in
 	hDeclNsSearch( gs.declns, TRUE )
@@ -255,6 +274,11 @@ end sub
 
 private sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
 	hDeclNsSearch( gs.declns, FALSE )
+
+	if( gs.hidelocals ) then
+		assert( symb.hidelocals > 0 )
+		symb.hidelocals -= 1
+	end if
 
 	symbSetCurrentSymTb( gs.symtb )
 	symbSetCurrentHashTb( gs.hashtb )
@@ -804,7 +828,7 @@ private sub hReplayProcBody _
 	'' The drain point is already at module level, but it may sit inside a
 	'' user namespace block; the body belongs to the instantiation, not to
 	'' wherever the drain happened to land.
-	genEnterGlobalScope( gs, entry->gensym )
+	genEnterGlobalScope( gs, entry->gensym, FALSE )
 
 	'' Bind the type parameters: they are TYPEDEFs living in this
 	'' instantiation's synthetic namespace, and __FBGENINST resolves there too.
@@ -993,7 +1017,7 @@ function genInstantiateType _
 	'' Everything from here to genLeaveGlobalScope builds the instantiation, and
 	'' it is built at module level in the global namespace regardless of where
 	'' the request came from.
-	genEnterGlobalScope( gs, gensym )
+	genEnterGlobalScope( gs, gensym, TRUE )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )
@@ -1229,7 +1253,7 @@ function genInstantiateProc _
 		return inst
 	end if
 
-	genEnterGlobalScope( gs, gensym )
+	genEnterGlobalScope( gs, gensym, TRUE )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )

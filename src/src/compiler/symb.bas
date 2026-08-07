@@ -95,6 +95,7 @@ sub symbInitSymbols static
 	''
 	symb.hashlist.head = NULL
 	symb.hashlist.tail = NULL
+	symb.hidelocals = 0
 
 	symbHashListAdd( symb.hashtb )
 
@@ -1040,20 +1041,34 @@ private function hsymbLookupTypeNS _
 
 	'' Search locals - if we are in a procedure, and the symbol can be found
 	'' directly, return the first one on the top of the stack
-	hashtb = symb.hashlist.tail
-	do
-		sym = hashLookupEx( @hashtb->tb, id, index )
-		while( sym )
-			if( symbIsLocal( sym ) ) then
-				'' but only if it's not main scoped local
-				if( symbGetScope( sym ) > FB_MAINSCOPE ) then
-					return symbNewChainpool( sym )
+	''
+	'' Skipped entirely while a generic body is being replayed.  The replay runs
+	'' at module level in the global namespace, but the INSTANTIATION SITE's
+	'' block-scope locals are still live, still in the global hash table and
+	'' still flagged LOCAL, so this pass returned them ahead of the generic's own
+	'' type parameters: a local named 't' made every 'of T' generic fail with
+	'' 'error 14: Expected identifier, found T'.
+	''
+	'' Set only around replays that parse DECLARATIONS, which have no locals of
+	'' their own to lose.  A generic member BODY is replayed with it clear, so
+	'' its own locals and parameters still shadow its fields exactly as an
+	'' ordinary method's do.
+	if( symb.hidelocals = 0 ) then
+		hashtb = symb.hashlist.tail
+		do
+			sym = hashLookupEx( @hashtb->tb, id, index )
+			while( sym )
+				if( symbIsLocal( sym ) ) then
+					'' but only if it's not main scoped local
+					if( symbGetScope( sym ) > FB_MAINSCOPE ) then
+						return symbNewChainpool( sym )
+					end if
 				end if
-			end if
-			sym = sym->hash.next
-		wend
-		hashtb = hashtb->prev
-	loop while( hashtb <> NULL )
+				sym = sym->hash.next
+			wend
+			hashtb = hashtb->prev
+		loop while( hashtb <> NULL )
+	end if
 
 	'' Search symbols in the UDT's namespace
 	ns = symbGetCurrentNamespc( )

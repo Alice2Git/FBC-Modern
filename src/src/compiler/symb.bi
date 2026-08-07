@@ -969,6 +969,17 @@ type SYMBCTX
 
 	fwdrefcnt       as integer
 
+	'' Non-zero while a generic body is being replayed at module level.
+	''
+	'' genEnterGlobalScope() moves the parse to module level in the global
+	'' namespace, but the instantiation SITE's still-live block-scope locals
+	'' stay in the global hash table and stay flagged LOCAL, so the
+	'' "search locals first" pass in hsymbLookupTypeNS() kept returning them
+	'' and they shadowed the generic's own type parameters -- a variable named
+	'' 't' anywhere in scope broke every 'of T' generic.  Counted rather than
+	'' boolean, because instantiations nest.
+	hidelocals      as integer
+
 	def             as SYMB_DEF_CTX             '' #define context
 
 	lastlbl         as FBSYMBOL ptr
