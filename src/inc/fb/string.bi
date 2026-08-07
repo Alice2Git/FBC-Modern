@@ -72,6 +72,8 @@
 
 #pragma once
 
+#include once "fb/array.bi"
+
 #if __FB_LANG__ <> "fb"
 	#error "fb/string.bi requires -lang fb (it uses namespaces)"
 #endif
@@ -836,5 +838,261 @@ extern "C"
 		( byref s as const ustring ) as boolean
 
 end extern
+
+	'' The split boundary helpers. Internal: they return a field count and
+	'' write (offset, length) pairs, and the Split bodies below are the only
+	'' callers. Kept in a nested namespace so `using FB` does not put them
+	'' next to the functions people actually call.
+	''
+	'' Its own extern "C", because a nested namespace does NOT inherit the
+	'' enclosing one -- without it `alias` is still mangled and the symbol comes
+	'' out as FB::Detail::fb_StrSplitSpans(...), which does not link.
+	namespace Detail
+	extern "C"
+
+		declare function SplitSpans overload alias "fb_StrSplitSpans" _
+			( byref s as const string, byref delim as const ustring, _
+			  byval ignoreCase as boolean, byval outp as integer ptr, _
+			  byval maxpairs as integer ) as integer
+
+		declare function SplitSpans overload alias "fb_UStrSplitSpans" _
+			( byref s as const ustring, byref delim as const ustring, _
+			  byval ignoreCase as boolean, byval outp as integer ptr, _
+			  byval maxpairs as integer ) as integer
+
+		declare function SplitCharsSpans overload alias "fb_StrSplitCharsSpans" _
+			( byref s as const string, byref chars as const ustring, _
+			  byval ignoreCase as boolean, byval outp as integer ptr, _
+			  byval maxpairs as integer ) as integer
+
+		declare function SplitCharsSpans overload alias "fb_UStrSplitCharsSpans" _
+			( byref s as const ustring, byref chars as const ustring, _
+			  byval ignoreCase as boolean, byval outp as integer ptr, _
+			  byval maxpairs as integer ) as integer
+
+	end extern
+	end namespace
+
+'' =========================================================================
+'' SPLIT and JOIN
+''
+'' The only functions here with FreeBASIC bodies rather than declarations,
+'' because their result is an Array( of T ) -- a language-level construct the
+'' runtime cannot build.
+''
+'' They are PRIVATE, so each module that includes this header gets its own
+'' copy and two modules including it still link. That is the same trade the
+'' generic containers already make (one instantiation per module): a little
+'' size, no linkage problem.
+''
+'' THE FIELD COUNT IS ALWAYS AT LEAST 1. An empty string is one empty field,
+'' and so is a string with no delimiter in it. N delimiters give N+1 fields,
+'' always, so no field is ever silently dropped:
+''
+''     Split( "a,b,c" )   -> 3   "a" "b" "c"
+''     Split( "a,,c" )    -> 3   "a" ""  "c"
+''     Split( ",a" )      -> 2   ""  "a"
+''     Split( "a," )      -> 2   "a" ""
+''     Split( "" )        -> 1   ""
+''
+'' That is AfxStrParseCount's rule, and it is the one that makes a round trip
+'' work: Join( Split( s ) ) is s for every s.
+''
+'' An empty delimiter splits nothing and yields the whole input as one field,
+'' consistent with every other function here treating an empty pattern as
+'' matching nothing.
+''
+'' COMPLEXITY. Two linear passes -- one to count, one to fill -- not the
+'' ParseCount-then-Parse-in-a-loop shape, which rescans from the start for
+'' every field and is O(n^2).
+''
+'' Still inside NAMESPACE FB, which the extern "C" block above sat within --
+'' these are FreeBASIC procedures, so they must not carry C linkage.
+'' =========================================================================
+
+	private function Split overload _
+		( byref s as const string, byref delim as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of string )
+
+		dim res as Array( of string )
+
+		dim as integer n = Detail.SplitSpans( s, delim, ignoreCase, 0, 0 )
+		if n <= 0 then return res
+
+		dim as integer spans( 0 to n * 2 - 1 )
+		Detail.SplitSpans( s, delim, ignoreCase, @spans( 0 ), n )
+
+		res.Reserve( n )
+		for i as integer = 0 to n - 1
+			dim as string piece = mid( s, spans( i * 2 ) + 1, spans( i * 2 + 1 ) )
+			res.Push( piece )
+		next
+
+		return res
+	end function
+
+	private function Split overload _
+		( byref s as const ustring, byref delim as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of ustring )
+
+		dim res as Array( of ustring )
+
+		dim as integer n = Detail.SplitSpans( s, delim, ignoreCase, 0, 0 )
+		if n <= 0 then return res
+
+		dim as integer spans( 0 to n * 2 - 1 )
+		Detail.SplitSpans( s, delim, ignoreCase, @spans( 0 ), n )
+
+		res.Reserve( n )
+		for i as integer = 0 to n - 1
+			dim as ustring piece = mid( s, spans( i * 2 ) + 1, spans( i * 2 + 1 ) )
+			res.Push( piece )
+		next
+
+		return res
+	end function
+
+	'' A WSTRING yields an Array( of ustring ), following the return rule for
+	'' every other function here. Converted once and handed to the ustring
+	'' body rather than given a second boundary path of its own.
+	private function Split overload _
+		( byref s as const wstring, byref delim as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of ustring )
+
+		dim as ustring tmp = s
+		return Split( tmp, delim, ignoreCase )
+	end function
+
+	'' Every character in `chars` is a separator in its own right.
+	''     SplitChars( "a,b;c", ",;" )    -> 3   "a" "b" "c"
+
+	private function SplitChars overload _
+		( byref s as const string, byref chars as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of string )
+
+		dim res as Array( of string )
+
+		dim as integer n = Detail.SplitCharsSpans( s, chars, ignoreCase, 0, 0 )
+		if n <= 0 then return res
+
+		dim as integer spans( 0 to n * 2 - 1 )
+		Detail.SplitCharsSpans( s, chars, ignoreCase, @spans( 0 ), n )
+
+		res.Reserve( n )
+		for i as integer = 0 to n - 1
+			dim as string piece = mid( s, spans( i * 2 ) + 1, spans( i * 2 + 1 ) )
+			res.Push( piece )
+		next
+
+		return res
+	end function
+
+	private function SplitChars overload _
+		( byref s as const ustring, byref chars as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of ustring )
+
+		dim res as Array( of ustring )
+
+		dim as integer n = Detail.SplitCharsSpans( s, chars, ignoreCase, 0, 0 )
+		if n <= 0 then return res
+
+		dim as integer spans( 0 to n * 2 - 1 )
+		Detail.SplitCharsSpans( s, chars, ignoreCase, @spans( 0 ), n )
+
+		res.Reserve( n )
+		for i as integer = 0 to n - 1
+			dim as ustring piece = mid( s, spans( i * 2 ) + 1, spans( i * 2 + 1 ) )
+			res.Push( piece )
+		next
+
+		return res
+	end function
+
+	private function SplitChars overload _
+		( byref s as const wstring, byref chars as const ustring = ",", _
+		  byval ignoreCase as boolean = false ) as Array( of ustring )
+
+		dim as ustring tmp = s
+		return SplitChars( tmp, chars, ignoreCase )
+	end function
+
+	'' -------------------------------------------------------------- Join
+	''
+	'' The inverse of Split. An empty array gives "", one element gives that
+	'' element, and no separator is added before the first or after the last.
+	''
+	''     Join( Split( s, d ), d ) = s     for every s and every non-empty d
+	''
+	'' Sized in one pass and filled with MID, so it is LINEAR. Repeated `&=`
+	'' would be O(n^2): FreeBASIC strings do not over-allocate, so every
+	'' append reallocates and copies everything written so far.
+	''
+	'' `parts` is BYREF and not const because Array's indexer is not const --
+	'' passing it byval would deep-copy the whole array to read it.
+
+	private function Join overload _
+		( byref parts as Array( of string ), byref delim as const ustring = "," ) as string
+
+		dim as integer n = parts.Count( )
+		if n <= 0 then return ""
+
+		dim as string d = delim
+		dim as integer total = ( n - 1 ) * len( d )
+		for i as integer = 0 to n - 1
+			total += len( parts[ i ] )
+		next
+
+		if total <= 0 then return ""
+
+		dim as string res = space( total )
+		dim as integer at = 1
+
+		for i as integer = 0 to n - 1
+			if i > 0 andalso len( d ) > 0 then
+				mid( res, at, len( d ) ) = d
+				at += len( d )
+			end if
+			dim as integer pl = len( parts[ i ] )
+			if pl > 0 then
+				mid( res, at, pl ) = parts[ i ]
+				at += pl
+			end if
+		next
+
+		return res
+	end function
+
+	private function Join overload _
+		( byref parts as Array( of ustring ), byref delim as const ustring = "," ) as ustring
+
+		dim as integer n = parts.Count( )
+		if n <= 0 then return ""
+
+		dim as integer total = ( n - 1 ) * len( delim )
+		for i as integer = 0 to n - 1
+			total += len( parts[ i ] )
+		next
+
+		if total <= 0 then return ""
+
+		'' a ustring of `total` spaces -- SPACE() would give a STRING
+		dim as ustring one = " "
+		dim as ustring res = Repeat( total, one )
+		dim as integer at = 1
+
+		for i as integer = 0 to n - 1
+			if i > 0 andalso len( delim ) > 0 then
+				mid( res, at, len( delim ) ) = delim
+				at += len( delim )
+			end if
+			dim as integer pl = len( parts[ i ] )
+			if pl > 0 then
+				mid( res, at, pl ) = parts[ i ]
+				at += pl
+			end if
+		next
+
+		return res
+	end function
 
 end namespace

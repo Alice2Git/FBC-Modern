@@ -1036,3 +1036,46 @@ FBCALL int fb_StrIsBlank( FBSTRING *s )
 
 	return hb_hIsBlank( sp, sl );
 }
+
+/* --- split boundaries, byte width ---
+**
+** These return field COUNTS and write (offset,length) pairs; the FB side in
+** inc/fb/string.bi turns them into an Array( of string ). Call once with a NULL
+** buffer to size it, once more to fill it -- two linear passes, rather than the
+** O(n^2) rescan a per-field accessor would force. */
+
+FBCALL ssize_t fb_StrSplitSpans
+	(
+		FBSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	const char *sp;
+	ssize_t sl, r;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( delim, &p );
+
+	r = hb_hSplitSpans( sp, sl, p.ptr, p.len, ic, out, maxpairs );
+
+	hPatRel( &p );
+	return r;
+}
+
+FBCALL ssize_t fb_StrSplitCharsSpans
+	(
+		FBSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	const char *sp;
+	ssize_t sl, r;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+
+	r = hb_hSplitCharsSpans( sp, sl, p.ptr, p.len, ic, out, maxpairs );
+
+	hPatRel( &p );
+	return r;
+}

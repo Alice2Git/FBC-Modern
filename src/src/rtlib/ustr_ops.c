@@ -1653,4 +1653,40 @@ FBCALL int fb_WStrIsBlank( const FB_WCHAR *s )
 	return r;
 }
 
+
+/* --- split boundaries, 16-bit width ---
+**
+** Only a USTRING entry point: the WSTRING overload in inc/fb/string.bi converts
+** to a ustring first and reuses this, because its result is an
+** Array( of ustring ) either way and a second C path would only duplicate the
+** boundary logic. */
+
+FBCALL ssize_t fb_UStrSplitSpans
+	(
+		FBUSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( delim, &pp, &pl );
+
+	return hu_hSplitSpans( sp, sl, pp, pl, ic, out, maxpairs );
+}
+
+FBCALL ssize_t fb_UStrSplitCharsSpans
+	(
+		FBUSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+
+	return hu_hSplitCharsSpans( sp, sl, tp, tl, ic, out, maxpairs );
+}
+
 #undef FB_UPOS

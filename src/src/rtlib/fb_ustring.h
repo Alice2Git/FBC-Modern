@@ -492,4 +492,13 @@ FBCALL FBUSTRING   *fb_WStrUnescape  ( const FB_WCHAR *s );
 FBCALL int          fb_WStrIsNumeric ( const FB_WCHAR *s );
 FBCALL int          fb_WStrIsBlank   ( const FB_WCHAR *s );
 
+/* Split boundaries (phase 5). These do not return strings: they return the
+ * field COUNT and write count pairs of (offset, length), 0-based, so the FB
+ * side can build an Array( of T ). Pass out = NULL to count without writing. */
+
+FBCALL ssize_t      fb_StrSplitSpans       ( FBSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_StrSplitCharsSpans  ( FBSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_UStrSplitSpans      ( FBUSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_UStrSplitCharsSpans ( FBUSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs );
+
 #endif /*__FB_USTRING_H__*/

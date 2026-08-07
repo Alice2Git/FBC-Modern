@@ -1191,3 +1191,133 @@ static int FB_SOP(hIsNumeric)( const FB_SOP_UNIT *s, ssize_t slen )
 
 	return (i == slen);
 }
+
+/* ==========================================================================
+** SPLIT
+**
+** Split is the one operation whose result is not a string, so the C side stops
+** at the field BOUNDARIES and the FB side turns them into an Array( of T ).
+** Writing spans rather than strings is what keeps this linear: the alternative
+** shape -- a count function plus an nth-field function -- rescans from the
+** start for every field and is O(n^2), which is exactly the AfxStrParseCount /
+** AfxStrParse pair this replaces.
+**
+** `out` receives COUNT PAIRS of (offset, length), 0-based. Pass NULL to count
+** without writing, which is how the caller sizes its buffer. `maxpairs` bounds
+** the write; a caller that measured first will never hit it, and one that
+** guessed cannot overrun.
+**
+** THE FIELD COUNT IS ALWAYS AT LEAST 1. An empty input is one empty field, and
+** so is an input with no delimiter in it -- the same rule AfxStrParseCount
+** states ("the string is considered to contain exactly one sub-field"). N
+** delimiters therefore produce N+1 fields, always, and no field is ever
+** silently dropped:
+**
+**     "a,b,c"  -> 3   "a" "b" "c"
+**     "a,,c"   -> 3   "a" ""  "c"
+**     ",a"     -> 2   ""  "a"
+**     "a,"     -> 2   "a" ""
+**     ""       -> 1   ""
+**
+** An EMPTY DELIMITER splits nothing and yields the whole input as one field --
+** consistent with hFind, where an empty pattern never matches.
+** ========================================================================== */
+
+static ssize_t FB_SOP(hSplitSpans)
+	(
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *pat, ssize_t patlen,
+		int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	ssize_t i = 0, n = 0, at;
+
+	if( slen < 0 )
+		slen = 0;
+
+	if( patlen <= 0 )
+	{
+		if( out != NULL && maxpairs >= 1 )
+		{
+			out[0] = 0;
+			out[1] = slen;
+		}
+		return 1;
+	}
+
+	for( ;; )
+	{
+		at = FB_SOP(hFind)( s, slen, pat, patlen, i, ic );
+		if( at < 0 )
+			break;
+
+		if( out != NULL && n < maxpairs )
+		{
+			out[n * 2]     = i;
+			out[n * 2 + 1] = at - i;
+		}
+		n++;
+
+		i = at + patlen;
+	}
+
+	/* the tail after the last delimiter -- always a field, even when empty */
+	if( out != NULL && n < maxpairs )
+	{
+		out[n * 2]     = i;
+		out[n * 2 + 1] = slen - i;
+	}
+	n++;
+
+	return n;
+}
+
+/* Same, but every unit in `set` is a separator in its own right. An empty set
+** separates nothing and yields one field. */
+static ssize_t FB_SOP(hSplitCharsSpans)
+	(
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *set, ssize_t setlen,
+		int ic, ssize_t *out, ssize_t maxpairs
+	)
+{
+	ssize_t i = 0, n = 0, at;
+
+	if( slen < 0 )
+		slen = 0;
+
+	if( setlen <= 0 )
+	{
+		if( out != NULL && maxpairs >= 1 )
+		{
+			out[0] = 0;
+			out[1] = slen;
+		}
+		return 1;
+	}
+
+	for( ;; )
+	{
+		at = FB_SOP(hFindAny)( s, slen, set, setlen, i, ic );
+		if( at < 0 )
+			break;
+
+		if( out != NULL && n < maxpairs )
+		{
+			out[n * 2]     = i;
+			out[n * 2 + 1] = at - i;
+		}
+		n++;
+
+		i = at + 1;
+	}
+
+	if( out != NULL && n < maxpairs )
+	{
+		out[n * 2]     = i;
+		out[n * 2 + 1] = slen - i;
+	}
+	n++;
+
+	return n;
+}
