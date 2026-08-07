@@ -1,0 +1,17 @@
+# TEST_MODE : MULTI_MODULE_OK
+
+# Lambdas and closures across SEPARATELY COMPILED modules.
+#
+# Every lambda synthesises a module-level procedure, and every capturing one
+# also synthesises a closure struct with an __FBINVOKE method. Both are named
+# from symbUniqueId( ), which is unique only WITHIN a module -- so two modules
+# that each contained a lambda both emitted 'LT_0003' and the link failed:
+#
+#     multiple definition of `LT_0003'
+#     multiple definition of `LT_0004::__FBINVOKE(int)'
+#
+# Nothing in the single-module suite could catch that, which is why this test
+# is a .bmk rather than another .bas.
+
+MAIN := lambda-mm-main.bas
+SRCS := lambda-mm-a.bas lambda-mm-b.bas

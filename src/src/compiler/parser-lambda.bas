@@ -255,6 +255,38 @@ private function hCaptureLambdaBody( byval lam as FB_LAMBDA ptr ) as integer
 	function = TRUE
 end function
 
+'' A per-MODULE component for synthesised names.
+''
+'' symbUniqueId( ) is unique within one module only, so two modules that each
+'' contain a lambda both produced 'LT_0003' and the link failed:
+''
+''     multiple definition of `LT_0003'
+''     multiple definition of `LT_0004::__FBINVOKE(int)'
+''
+'' 'private' would fix the plain procedure but not the closure, whose
+'' __FBINVOKE is a member of a module-level struct and cannot be given internal
+'' linkage. So the NAME carries the module instead, and both kinds are fixed by
+'' the same rule.
+''
+'' Derived from the source file name, which is stable for a given file and
+'' therefore keeps the name deterministic -- separate compilation requires that
+'' the same source produce the same symbol every time.
+private function hModuleTag( ) as string
+	'' Recomputed per call, NOT cached in a static: fbc compiles every module
+	'' of a multi-module build in ONE process, so a process-lifetime cache
+	'' handed the second module the first module's tag and the link failed
+	'' exactly as before.
+	dim as ulongint h = 1469598103934665603ull      '' FNV-1a
+	dim as string nm = env.inf.name
+
+	for i as integer = 0 to len( nm )-1
+		h xor= nm[i]
+		h *= 1099511628211ull
+	next
+
+	function = hex( culngint( h ) )
+end function
+
 private function hKeyword( byval kindtk as integer ) as string
 	if( kindtk = FB_TK_SUB ) then
 		return "sub"
@@ -615,7 +647,7 @@ function cLambdaExpr( ) as ASTNODE ptr
 	'' for a name that is legal FreeBASIC, which matters because this one is
 	'' pasted into source text and re-parsed rather than only ever being a
 	'' symbol.
-	id = *symbUniqueId( TRUE )
+	id = "L" + hModuleTag( ) + "_" + *symbUniqueId( TRUE )
 	kw = hKeyword( kindtk )
 
 	'' ------------------------------------------------------------ capturing
