@@ -7108,10 +7108,51 @@ private sub hdocall(byval proc as FBSYMBOL ptr,byref pname as string,byref first
 								asm_code("mov "+*regstrq(listreg(cptint))+", "+op1)
 							case FB_DATATYPE_LONG,FB_DATATYPE_ULONG
 								asm_code("mov "+*regstrd(listreg(cptint))+", "+op1)
-							case FB_DATATYPE_SHORT,FB_DATATYPE_USHORT
-								asm_code("mov "+*regstrw(listreg(cptint))+", "+op1)
-							case FB_DATATYPE_BYTE,FB_DATATYPE_UBYTE,FB_DATATYPE_BOOLEAN,FB_DATATYPE_CHAR
-								asm_code("mov "+*regstrb(listreg(cptint))+", "+op1)
+							''  A BYTE- or WORD-sized argument must be EXTENDED into the
+							''  whole register, not moved into its low part.
+							''
+							''  'mov r8d, ...' is safe because writing a 32-bit register
+							''  zeroes the upper half on x86-64. 'mov r8b, ...' and
+							''  'mov r8w, ...' are not: they leave the rest of the
+							''  register holding whatever was there, and an argument
+							''  register very often still holds an earlier argument.
+							''
+							''  A callee that reads a wider type then sees garbage. That
+							''  is exactly how FB.Split broke: 'ignoreCase' went out as
+							''      mov r8b, 40[rbp]
+							''  while r8 still held the 'delim' pointer, so the C side --
+							''  which takes 'int ic' -- read a nonzero value and split
+							''  case-insensitively however the flag was set. A literal
+							''  argument was unaffected, because a constant is emitted
+							''  with a full-width clear.
+							''
+							''  Signedness is honoured: a signed BYTE/SHORT is sign-
+							''  extended, everything else zero-extended, so the value the
+							''  callee reads is the value that was passed.
+							case FB_DATATYPE_SHORT
+								if v2->typ=IR_VREGTYPE_REG then
+									asm_code("movsx "+*regstrd(listreg(cptint))+", "+op1)
+								else
+									asm_code("movsx "+*regstrd(listreg(cptint))+", WORD PTR "+op1)
+								end if
+							case FB_DATATYPE_USHORT
+								if v2->typ=IR_VREGTYPE_REG then
+									asm_code("movzx "+*regstrd(listreg(cptint))+", "+op1)
+								else
+									asm_code("movzx "+*regstrd(listreg(cptint))+", WORD PTR "+op1)
+								end if
+							case FB_DATATYPE_BYTE
+								if v2->typ=IR_VREGTYPE_REG then
+									asm_code("movsx "+*regstrd(listreg(cptint))+", "+op1)
+								else
+									asm_code("movsx "+*regstrd(listreg(cptint))+", BYTE PTR "+op1)
+								end if
+							case FB_DATATYPE_UBYTE,FB_DATATYPE_BOOLEAN,FB_DATATYPE_CHAR
+								if v2->typ=IR_VREGTYPE_REG then
+									asm_code("movzx "+*regstrd(listreg(cptint))+", "+op1)
+								else
+									asm_code("movzx "+*regstrd(listreg(cptint))+", BYTE PTR "+op1)
+								end if
 							case else
 								asm_error("in hdocall datatype not handled 03 ="+typedumpToStr(dtype,0))
 						end select

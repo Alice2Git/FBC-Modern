@@ -142,46 +142,34 @@ rest are never checked.
 
 ## The environmental floor
 
-**THE FLOOR IS PER-BACKEND. It is not the same number under gcc and gas64.**
+**11 `threadcall_` unit-test failures, under BOTH backends, plus 4 `cpp`
+log-test failures.** The 11 are `-DDISABLE_FFI` (above); the 4 are a missing
+`libstdc++` in this mingw64, proven by rebuilding at HEAD with the changes
+stashed. A 12th unit-test failure or a 5th log-test failure is a regression.
 
-| Backend | Unit-test failures | Which |
-|---|---|---|
-| gcc (default) | **11** | `threads.threadcall_` |
-| `GEN=gas64` | **12** | `threads.threadcall_` (11) + `string_.fbstr_split` (1) |
+### It was 12 under gas64, and that was a real compiler bug
 
-Plus **4 `cpp` log-test failures** under both. The 11 are `-DDISABLE_FFI`
-(above); the 4 are a missing `libstdc++` in this mingw64, proven by rebuilding at
-HEAD with the changes stashed.
+Worth keeping, because the way it was recorded hid it for a whole cycle.
 
-So a 12th failure under gcc is a regression; under gas64 a **13th** is, and the
-12th is only a regression if it is not `fbstr_split`.
+The floor used to be quoted as a single number, 11, measured under **gcc** and
+written as though it covered both backends. It did not: `GEN=gas64` reported a
+12th failure, `string_.fbstr_split`, and nobody had run gas64 since the string
+library landed.
 
-### The gas64 `fbstr_split` failure is a REAL BUG, not an environment gap
+That 12th failure was not an environment gap. It was a defect in the gas64
+backend: a byte- or word-sized argument was moved into the LOW PART of the
+argument register (`mov r8b, ...`), leaving the upper bits holding whatever was
+there -- usually a live pointer from an earlier argument. A callee reading a
+wider type, which is every `extern "C"` prototype declaring `int`, then read
+garbage. `FB.Split` was always case-insensitive whatever its flag said.
 
-Unlike the other floor entries, this one is a defect in this tree. It is parked
-rather than fixed only because it is unrelated to the work in flight.
+Fixed in `ir-gas64.bas` by extending into the whole register, `movsx` for signed
+`BYTE`/`SHORT` and `movzx` for `UBYTE`/`USHORT`/`BOOLEAN`/`CHAR`. Both backends
+now report 11. See `docs/rapport-bogue-gas64.pdf`.
 
-`FB.Split`'s third argument -- the `boolean` case-insensitivity flag -- is
-miscompiled by the gas64 backend. The default is ignored AND an explicit `false`
-is ignored, so the function always behaves case-insensitively:
-
-```freebasic
-#include once "fb/string.bi"
-#include once "fb/array.bi"
-using FB
-print Split( "aXbXc", "x" ).Count( )           '' gcc 1   gas64 3
-print Split( "aXbXc", "x", true ).Count( )     '' gcc 3   gas64 3
-print Split( "aXbXc", "x", false ).Count( )    '' gcc 1   gas64 3
-```
-
-It fails `string/fbstr_split.bas(113)`. Wrong code, not a diagnostic, and it is
-the shipped default backend for day-to-day builds -- so anything relying on a
-case-sensitive `Split` is wrong under gas64 today.
-
-**How this was missed:** the floor of 11 was recorded from a **gcc** run, and the
-"both backends" claim in the string-library section below was not separately
-reconciled per backend. Confirmed pre-existing by stashing the generics-lookup
-fix, rebuilding, and reproducing identically -- it is not caused by that change.
+**The lesson is about the measurement, not the bug.** A figure taken under one
+backend and quoted as if it covered both turned a wrong-code defect into a line
+in a table that everyone read past. Quote the backend with the number.
 
 ## Reconcile the log-test count — do not just read "no failures"
 
@@ -262,9 +250,9 @@ Added by the string-library work, on branch `feat/fb-string-library`.
 The 11 are the same `fbc_tests.threads.threadcall_` failures documented above —
 `libffi` absent — and no others. **Any 12th failure is a regression.**
 
-That figure is the **gcc** run. Under `GEN=gas64` the same tree reports **12
-failed**, the extra one being `string_.fbstr_split` — a real gas64 miscompile of
-Split's `boolean` argument, documented under "The environmental floor" above.
+That figure was originally a **gcc**-only run; under `GEN=gas64` the same tree
+reported 12. The extra failure was a real gas64 miscompile, since fixed — see
+"The environmental floor" above. Both backends now report 11.
 
 The delta from the 1,154,420 baseline is 1,501 assertions across five new suites
 in `src/tests/string/`:
@@ -307,7 +295,7 @@ shipped compilers were rebuilt and the string suites were executed under each:
 | Target | How | Result |
 |---|---|---|
 | win64 | full gate, gcc | 1,155,921 / 11 failed (the libffi baseline) |
-| win64 | full gate, gas64 | 1,155,921 / **12** failed — the 11 plus the `fbstr_split` gas64 miscompile; this row originally claimed 11 for both backends and was wrong |
+| win64 | full gate, gas64 | 1,155,921 / 11 failed — was 12 until the gas64 argument-width bug was fixed |
 | win32 | string suites under the rebuilt **shipped** `fbc32.exe` | **1,501 / 1,501** |
 | linux-x86_64 | string suites under the natively-built **shipped** `fbc` (WSL2) | **1,501 / 1,501** |
 
