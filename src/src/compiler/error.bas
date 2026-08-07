@@ -463,6 +463,7 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_FOREACHNEXTVAR                     '/ @"NEXT cannot name the FOR EACH variable, it is scoped to the loop body", _
 		/'FB_ERRMSG_DEFERNEEDSSTATEMENT                '/ @"DEFER requires a statement", _
 		/'FB_ERRMSG_DEFERATMODULELEVEL                 '/ @"DEFER is not allowed at module level", _
+		/'FB_ERRMSG_BRANCHCROSSINGDEFER                '/ @"Branch crossing a DEFER statement", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

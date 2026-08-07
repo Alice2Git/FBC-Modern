@@ -189,8 +189,9 @@ fix, rebuilding, and reproducing identically -- it is not caused by that change.
 of tests added. The count after the generics work was
 **1727 passed / 4 failed / 1731 logs**.
 
-After `Optional` and `Result` (8 new files in `src/tests/generics/`) it is
-**1740 passed / 0 failed / 1740 logs**, measured WITH `-p C:/dev/utils/mingw64/lib`
+After `Optional` and `Result` (8 new files in `src/tests/generics/`) it was
+**1740 passed / 0 failed / 1740 logs**; after `defer` (2 more) it is
+**1742 passed / 0 failed / 1742 logs**, measured WITH `-p C:/dev/utils/mingw64/lib`
 — that flag is what turns the 4 `cpp` failures into passes, so quote the flag
 alongside the number or the two figures look like a regression in either
 direction.

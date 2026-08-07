@@ -304,7 +304,24 @@ private sub hCheckCrossing _
 			stmt = symbGetVarStmt( s )
 			if( stmt > top_stmt ) then
 				if( stmt < bot_stmt ) then
-					if( symbGetVarHasCtor( s ) ) then
+					'' Crossing a DEFER is refused for the same reason as
+					'' crossing a ctor'd local, and it is worth stating why,
+					'' because the failure is not the obvious one.
+					''
+					'' Cleanup here is LEXICAL: it is derived from the symbol
+					'' table, not from anything recorded at run time.  So a
+					'' branch that jumps PAST a 'defer' does not skip it -- the
+					'' statement is still emitted at the scope's exits and still
+					'' runs, which is the opposite of what the jump looks like it
+					'' does.  Diagnosed rather than left to surprise someone.
+					''
+					'' Reported with s = NULL: hBranchError( ) would otherwise
+					'' print the defer's generated symbol name, which means
+					'' nothing to the reader.
+					if( symbIsDefer( s ) ) then
+						hBranchError( FB_ERRMSG_BRANCHCROSSINGDEFER, n )
+
+					elseif( symbGetVarHasCtor( s ) ) then
 						hBranchError( FB_ERRMSG_BRANCHCROSSINGDYNDATADEF, n, s )
 
 					else

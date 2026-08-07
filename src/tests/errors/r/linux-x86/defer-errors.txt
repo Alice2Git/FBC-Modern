@@ -1,0 +1,6 @@
+=== DEFER with no statement ===
+	error 347: DEFER requires a statement
+=== DEFER at module level ===
+	error 348: DEFER is not allowed at module level, found 'defer'
+=== branch crossing a DEFER ===
+	error 349: Branch crossing a DEFER statement, to label: SKIP
