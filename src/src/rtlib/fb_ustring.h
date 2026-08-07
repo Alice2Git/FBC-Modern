@@ -331,4 +331,60 @@ FBCALL int          fb_PrintUsingUStr    ( int fnum, FBUSTRING *src, int mask );
 FBCALL int          fb_FileLineInputUStr ( int fnum, FBUSTRING *dst );
 FBCALL int          fb_InputUStr         ( FBUSTRING *dst );
 
+/**************************************************************************************************
+ * The FB.* string library -- byte width (str_ops.c)
+ *
+ * Reached from FreeBASIC through plain `extern "C" declare ... alias` in
+ * inc/fb/string.bi, NOT through the compiler's intrinsic path, so arguments are
+ * ordinary FBSTRING descriptors and there is no (ptr, size) discriminator.
+ * ZSTRING is served by these same entry points via fbc's implicit conversion.
+ * The PATTERN is an FBUSTRING even here: fbc resolves an overload on all of its
+ * parameters, so every parameter after the first must share one type across the
+ * three overloads or the set is ambiguous. See the header of str_ops.c.
+ *
+ * Positions in and out are 1-BASED, 0 meaning "not found", matching INSTR.
+ * `ic` is the ignoreCase flag; folding is ASCII only, because a STRING has no
+ * declared encoding. See the header comment in str_ops.c.
+ **************************************************************************************************/
+
+FBCALL ssize_t      fb_StrTally         ( FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL ssize_t      fb_StrTallyChars    ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrInstrChars    ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrVerifySet     ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrSpanOf        ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL int          fb_StrStartsWith    ( FBSTRING *s, FBUSTRING *pre, int ic );
+FBCALL int          fb_StrEndsWith      ( FBSTRING *s, FBUSTRING *suf, int ic );
+FBCALL int          fb_StrContains      ( FBSTRING *s, FBUSTRING *pat, int ic );
+
+/* The FB.* string library -- 16-bit width (ustr_ops.c)
+ *
+ * The USTRING half takes FBUSTRING descriptors, which is what a plain
+ * `byref as const ustring` parameter carries for every argument form. The
+ * WSTRING half takes a raw NUL-terminated FB_WCHAR pointer, which is what a
+ * `byref as const wstring` parameter carries instead, and bridges to the same
+ * algorithms. Only the HAYSTACK differs: every later parameter is a USTRING in
+ * all three overloads, which is what makes fbc resolve the set on the first one -- a pointer reinterpret where FB_WCHAR is 16 bits, a re-encode
+ * into a temporary where it is not.
+ *
+ * Positions in and out are 1-BASED in CODE UNITS, 0 meaning "not found".
+ * Folding is the generated simple BMP table, never towupper(). */
+
+FBCALL ssize_t      fb_UStrTally        ( FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL ssize_t      fb_UStrTallyChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrInstrChars   ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrVerifySet    ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrSpanOf       ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL int          fb_UStrStartsWith   ( FBUSTRING *s, FBUSTRING *pre, int ic );
+FBCALL int          fb_UStrEndsWith     ( FBUSTRING *s, FBUSTRING *suf, int ic );
+FBCALL int          fb_UStrContains     ( FBUSTRING *s, FBUSTRING *pat, int ic );
+
+FBCALL ssize_t      fb_WStrTally        ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrTallyChars   ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrInstrChars   ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrVerifySet    ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrSpanOf       ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrStartsWith   ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrEndsWith     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrContains     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+
 #endif /*__FB_USTRING_H__*/
