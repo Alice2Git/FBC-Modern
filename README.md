@@ -1,69 +1,141 @@
-# FBC-Modern — FreeBASIC with a Unicode string, generics, `FOR EACH` and containers
+<div align="center">
 
-A working implementation of four proposed language features against the
-[FreeBASIC](https://www.freebasic.net/) compiler, version 1.20.0 — compiler,
-runtime, tests, documentation and prebuilt binaries for Windows and Linux,
-intended for upstream discussion.
+# FBC-Modern
 
-Every one of them is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, the
-existing `FOR` and the existing `OPERATOR FOR/NEXT/STEP` protocol are unchanged,
-`each` and `in` are not reserved words, and nothing is added to the global
-namespace.
+**A FreeBASIC compiler with a portable Unicode string type, generics, an iterator protocol, `FOR EACH`, and a standard container library — built on fbc 1.20.0, with the existing language left untouched.**
 
-```basic
-dim as ustring u = "héllo wörld"          '' dynamic, UTF-16 on every target
+[![Version](https://img.shields.io/badge/fbc-1.20.0-blue)](#)
+[![Targets](https://img.shields.io/badge/targets-win64%20%7C%20win32%20%7C%20linux--x86__64-green)](#)
+[![Tests](https://img.shields.io/badge/unit--tests-1%2C154%2C420%20assertions-brightgreen)](#tests)
+[![Licence](https://img.shields.io/badge/licence-GPLv2%2B%20%2F%20LGPLv2.1%2B-lightgrey)](#-license)
+[![Status](https://img.shields.io/badge/status-complete%2C%20offered%20upstream-orange)](#-project-goals)
 
-type Box( of T )                          '' generics
-    as T value
-end type
+[Features](#-key-features) · [Why](#-why-this-compiler) · [Examples](#-example-code) · [Quick start](#-quick-start) · [Docs](#-documentation) · [Contributing](#-contributing)
 
-dim names as FB.Array( of string )        '' the standard containers
-names.Push( "ada" )
-
-for each n in names                       '' FOR EACH
-    print n
-next
-```
-
-| | Feature | Docs |
-|---|---|---|
-| **USTRING** | a portable, dynamic Unicode string — an intrinsic type, not a library | [docs/ustring/ustring.txt](docs/ustring/ustring.txt) |
-| **Generics** | types and procedures parameterised by type (RFC-0001) | [docs/generics/generics.txt](docs/generics/generics.txt) |
-| **Iterator protocol** | a structural contract, not a base class (RFC-0002) | [docs/for_each/iterator-protocol.txt](docs/for_each/iterator-protocol.txt) |
-| **`FOR EACH`** | arrays, strings and any type satisfying the protocol (RFC-0003) | [docs/for_each/for-each.txt](docs/for_each/for-each.txt) |
-| **Containers** | `Array`, `Map`, `Set`, `LinkedList` (RFC-0004) | [array](docs/array/array.txt) · [map](docs/map/map.txt) · [set](docs/set/set.txt) · [linkedlist](docs/linkedlist/linkedlist.txt) |
-
-The last three build on the second, and the container library is written in
-**ordinary FreeBASIC with no compiler support at all** — which is the strongest
-evidence that the generics underneath it are good enough for real code.
+</div>
 
 ---
 
-# Generics
+## Hero
+
+FBC-Modern is a modified copy of the [FreeBASIC](https://www.freebasic.net/) compiler that adds four language features, each built on the one before it: **generics**, a **structural iterator protocol**, **`FOR EACH`**, and a **standard container library** — plus **`USTRING`**, a dynamic Unicode string type that is byte-identical on every target.
+
+It exists because FreeBASIC is a fast, direct, genuinely useful systems language with two long-standing gaps: there is no portable Unicode string, and there is no way to write a container that works for more than one element type without macros, `ANY PTR`, or copy-paste. Both gaps push real programs toward workarounds that lose type information — and both are fixable inside the existing language rather than beside it.
+
+It is for **existing FreeBASIC users** who want their code to keep compiling unchanged, **systems programmers** who want typed containers without a runtime, **library authors** who have been writing the same `Vector` five times, and **compiler people** who want to see a template system implemented as parser replay rather than as a separate template language.
+
+Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, and the existing `OPERATOR FOR/NEXT/STEP` protocol are unchanged; `each` and `in` are not reserved words; the containers add nothing to the global namespace. If your program compiles with fbc 1.20.0, it compiles here.
+
+> **Scope, stated plainly.** This is fbc 1.20.0 with four features added and one caveat (see [Tests](#tests)). It is not a rewrite, not a new parser, and not a performance project. Where a capability does not exist, this README says so instead of implying it.
+
+---
+
+## ✨ Key Features
+
+| Feature | What it is |
+|---|---|
+| **Generics** | `type Box( of T )` and `function Max( of T )( … )`. Bodies are captured as token chains and replayed through the real parser once per type-argument list — so code inside a generic is ordinary FreeBASIC and is diagnosed as such. Not a macro, not a separate template language. |
+| **Iterator protocol** | A *structural* contract: a type is iterable if it has `GetIterator( )` returning something with `IsValid( )`, `Value( )` and `MoveNext( )`. No base class, no interface, no registration, nothing to inherit. |
+| **`FOR EACH`** | Walks arrays (any `lbound`), var-len `STRING`, and any type satisfying the protocol. Lowered at compile time — no new AST node, no IR node, no backend change, no runtime call. |
+| **Standard containers** | `Array`, `Map`, `Set`, `LinkedList` in namespace `FB`. Written in ordinary FreeBASIC on top of the three features above, with **zero compiler support** — so a better implementation by anybody else is on exactly equal footing. |
+| **`USTRING`** | A dynamic Unicode string that is UTF-16 on *every* target, unlike `WSTRING` (2 bytes on Windows, 4 on Linux, 1 on DOS). A true intrinsic type in the compiler, not a library — `LEN` is O(1) and every string intrinsic works. |
+| **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite: 1,154,420 assertions and 1,731 log-tests across four dialects. |
+| **Diagnostics** | New, specific messages for the new features — including the **instantiation chain** for an error inside a generic, and near-miss reporting that names the *missing member* rather than saying "not iterable". Diagnostics elsewhere are byte-identical to stock fbc. |
+| **Unicode** | UTF-8 ↔ UTF-16 conversion fixed on every target (not locale-dependent), a generated BMP case-mapping table, and UTF-8 file output everywhere. |
+| **Cross-platform** | Built, tested and shipped prebuilt for **win64**, **win32** and **linux-x86_64**. |
+| **Backends** | All of fbc's backends carry the work: `gcc` (C emission), `gas64`, `gas` (x86 32-bit), and `llvm`. |
+| **Prebuilt compilers** | Ready-to-run Windows and Linux installations are committed to the repository. No bootstrap required to try it. |
+
+<details>
+<summary><b>Not in this project — explicitly</b> (click to expand)</summary>
+
+These appear on many compiler READMEs. They are **not** part of FBC-Modern, and no work toward them exists in this repository. They are listed so nobody has to guess.
+
+| | Status |
+|---|---|
+| LSP / language server | ❌ Not present. *[Placeholder — no implementation, no plan recorded.]* |
+| Package manager | ❌ Not present. *[Placeholder.]* |
+| Incremental compilation | ❌ Not present. fbc's per-module compilation is unchanged. |
+| Module system | ❌ Not present. FreeBASIC's `#include` model is unchanged. |
+| New parser / new front end | ❌ **No.** This is fbc's own recursive-descent parser, extended. |
+| Improved optimizer | ❌ No optimizer work was done. Code generation is stock fbc. |
+| Faster compilation | ❌ Not a goal and not measured as a win. Compile times track stock fbc. |
+| Static analysis / linting | ❌ Not present. |
+| New build system | ❌ No. The project uses fbc's own makefile. |
+| macOS support | ⚠️ Untested here. fbc supports `darwin` upstream; this tree has never been built on it. *[Placeholder — needs a machine.]* |
+| ARM / JS / DOS targets | ⚠️ Untested here. |
+
+</details>
+
+---
+
+## 🤔 Why This Compiler?
+
+Against **stock fbc 1.20.0**. Only rows where something actually changed:
+
+| Stock FreeBASIC 1.20.0 | FBC-Modern |
+|---|---|
+| A container works for one element type, or uses macros / `ANY PTR` | `Array( of T )` — one implementation, fully type-checked per instantiation |
+| Generic code via `#define`, diagnosed at the expansion with no scope | Generic bodies are real FreeBASIC, diagnosed at the body **plus** the instantiation chain that reached it |
+| Every traversal is an index loop; `lbound` vs `0`, `ubound` vs `count-1` | `for each x in c` — over arrays, strings, and any user collection |
+| Growable array means `redim preserve` per append — **O(n²)** over a loop | `Array.Push` is amortised **O(1)**; capacity doubles instead of reallocating on every append |
+| No portable Unicode string: `WSTRING` is 2/4/1 bytes by platform, and fixed-length | `USTRING` — dynamic, UTF-16 everywhere, `LEN` O(1) |
+| `WSTRING` append walks to the terminator: **O(n²)** | `USTRING` keeps its length in the descriptor: **O(1) amortised** — 400–900× faster at n=40,000 ([numbers](#performance-appending)) |
+| `STRING` ↔ `WSTRING` conversion goes through the C locale — codepage- and machine-dependent | `STRING` ↔ `USTRING` is UTF-8 on every target, identical everywhere |
+| A ustring-shaped file written on Windows is not what Linux writes | Files, pipes and non-Windows consoles get **UTF-8** on every platform |
+
+Everything not in this table is deliberately identical, including diagnostics, code generation and compile times.
+
+---
+
+## 💻 Example Code
+
+### Generics
 
 ```basic
 type Box( of T )
     as T value
 end type
 
+type Pair( of K, V )
+    as K k
+    as V v
+end type
+
 dim b as Box( of long )
-dim s as Box( of string )        '' a distinct, unrelated type
+dim s as Box( of string )          '' a distinct, unrelated type
+dim n as Box( of Box( of long ) )  '' nesting is fine
 
 function Max( of T )( byval a as T, byval b as T ) as T
     if a > b then return a
     return b
 end function
 
-print Max( 3, 9 )                '' T inferred
-print Max( of double )( 1.5, 2.5 )
+print Max( 3, 9 )                  '' T inferred from the arguments
+print Max( of double )( 1.5, 2.5 ) '' or given explicitly
 ```
 
-**Not a macro, and not a separate template language.** A generic's body is
-captured as a *token chain* at declaration and replayed through the real parser
-once per distinct type-argument list, with the type parameters bound as TYPEDEFs
-in a synthetic namespace. So the code inside a generic is ordinary FreeBASIC and
-is diagnosed as such — an error inside a body reports at the body, then prints
-the instantiation chain that reached it:
+Out-of-line member bodies, constructors, operators and inheritance all work, and **declaration order does not matter**:
+
+```basic
+type Stack( of T )
+    as T items( 0 to 15 )
+    as integer count
+    declare sub Push( byval x as T )
+    declare operator [] ( byval i as integer ) byref as T
+end type
+
+sub Stack( of T ).Push( byval x as T )
+    this.items( this.count ) = x
+    this.count += 1
+end sub
+
+operator Stack( of T ).[] ( byval i as integer ) byref as T
+    return this.items( i )
+end operator
+```
+
+### Errors point at the instantiation that caused them
 
 ```
 box.bas(13) error 14: Expected identifier, found 'Wdiget'
@@ -71,437 +143,331 @@ box.bas(13) error 14: Expected identifier, found 'Wdiget'
   required from box.bas(18)
 ```
 
-What is supported: out-of-line member bodies (`sub Stack( of T ).Push`),
-constructors, destructors and copy, member operators and properties including
-`FOR`/`STEP`/`NEXT`, generic procedures with inference, generic *global*
-operators (inferred through the nested operand type), all three inheritance
-directions — generic extends concrete, concrete extends instantiation, generic
-extends generic — plus `VIRTUAL`, `ABSTRACT` and RTTI, self-reference through a
-pointer, nesting, and a depth limit (`-maxinstdepth`, default 64).
-
-Declaration order does not matter, because member bodies are deferred to the
-next module-level statement boundary. Instantiations are Itanium-mangled, so
-`$3BoxIiE` demangles to `Box<int>` and two modules that both say
-`Box( of long )` link.
-
-The main gap is **no constraints on type parameters** — a member that needs `=`
-on `T` makes the whole type unusable for a `T` without one. That, and the rest,
-are in [docs/generics/generics.txt](docs/generics/generics.txt) under
-*Known limits*.
-
----
-
-# `FOR EACH` and the iterator protocol
+### `FOR EACH`
 
 ```basic
-for each n as string in names            '' a copy of each element
-for each byref v as long in values       '' a reference — v *= 2 modifies it
+dim names(0 to 2) as string = { "ada", "grace", "edsger" }
+
+for each n as string in names       '' a copy of each element
+    print n
+next
+
+dim values(0 to 3) as long = { 1, 2, 3, 4 }
+
+for each byref v as long in values  '' a reference — this modifies the array
+    v *= 2
+next
 ```
 
-Walks a fixed or dynamic array (any `lbound`), a var-len `STRING` (one byte per
-iteration), and any type satisfying the RFC-0002 protocol:
+Any type with three members becomes iterable — no inheritance, no interface:
 
 ```basic
-declare function GetIterator( ) as <iterator>
-    '' with IsValid( ) as boolean, Value( ) [byref] as E, MoveNext( )
+type MyIter
+    declare function IsValid( ) as boolean
+    declare function Value( ) byref as long
+    declare sub MoveNext( )
+end type
+
+type MyList
+    declare function GetIterator( ) as MyIter
+end type
+
+for each v in myList                '' just works
+    print v
+next
 ```
 
-A **structural** contract — no base class, no interface, no registration, and
-nothing to inherit from. A user collection lowers to an iterator walk; an array
-or string lowers to an ordinary counter `FOR`, so `for each` over an array emits
-what the hand-written index loop emits and costs exactly the same. There is no
-new AST node, no IR node, no backend change and no runtime call.
-
-The collection expression is evaluated **exactly once**. `EXIT FOR` and
-`CONTINUE FOR` work, including the multi-level forms, and an iterator with a
-destructor is destroyed on every exit path.
-
-Because the failure mode of a structural protocol is a near-miss, the
-diagnostics name the missing member rather than saying "not iterable":
-
-```
-error 343: Not an iterator type, an iterator needs IsValid( ) as boolean,
-           Value( ) [byref] as E and MoveNext( ), missing, MoveNext( )
-```
-
----
-
-# The standard containers
+### Containers
 
 ```basic
 #include once "containers.bi"
 using FB
 
 dim names as Array( of string )
-dim ages  as Map( of string, long )
-dim seen  as Set( of long )
-dim queue as LinkedList( of string )
+names.Push( "ada" )
+names.Push( "grace" )
+names.Insert( 0, "hopper" )
+
+dim ages as Map( of string, long )
+ages[ "ada" ] = 36
+
+dim seen as Set( of long )
+seen.Add( 3 )
+
+for each n in names
+    print n, ages.Contains( n )
+next
 ```
 
-| | | |
-|---|---|---|
-| `Array( of T )` | growable array | amortised O(1) append |
-| `Map( of K, V )` | open-addressed hash map | O(1) average lookup |
-| `Set( of T )` | hash set | plus union / intersect / except |
-| `LinkedList( of T )` | doubly-linked list | O(1) insert and remove at a known node |
+> **Three things to know.** `Array` indices are **zero-based**. `Map`'s indexer `m[ k ]` **inserts on a miss** — use `TryGet` or `Contains` to read. Copy and assignment are **deep** for all four containers; the language has no move constructor, so pass them `byref` where it matters.
 
-**No compiler code at all** — `inc/fb/*.bi`, written in FreeBASIC on top of
-generics, the iterator protocol and `for each`. They get no special treatment,
-so a better one written by anybody else is on exactly equal footing. They live
-in `NAMESPACE FB` and add nothing to the global namespace, so a program with its
-own `Array` or `List` is unaffected until it says `using FB`.
+### `USTRING`
 
-`Array`, `Map` and `Set` store elements in ordinary FreeBASIC dynamic array
-fields, `redim preserve`d only when the capacity doubles — never per push. The
-language therefore does element construction, copying and destruction, so deep
-copy, assignment and the destructor fall out for free with no manual memory to
-get wrong. (`LinkedList` holds raw nodes, so those three are hand-written.)
+```basic
+dim as ustring u = "héllo"          '' dynamic, grows on demand
+u += " wörld"                       '' no fixed capacity to overflow
 
-Three things to read before using them:
+print len(u)                        '' 11 code units, O(1)
+print ucase(u)                      '' HÉLLO WÖRLD
+print mid(u, 7, 5)                  '' wörld
 
-- **`Array` indices are zero-based** — a deliberate break with `dim arr(1 to 10)`.
-- **`Map`'s indexer `m[ k ]` INSERTS on a miss.** Use `TryGet` or `Contains` to read.
-- **Copy and assignment are deep for all four.** The language has no move
-  constructor, so pass them `byref` where it matters.
-
-A user type becomes a `Map` key or `Set` element by overloading `HashOf` —
-see `inc/fb/hash.bi`. It is an overload rather than a compile-time dispatch
-because `typeof( T )` cannot see through a type parameter; that limitation is
-recorded in the generics doc.
+'' On Windows a ustring already IS UTF-16 — passing it to a wide API
+'' is a pointer reinterpret with no conversion and no copy.
+MessageBoxW( null, u, u, 0 )
+```
 
 ---
 
-# USTRING — a portable, dynamic Unicode string
+## 🚀 Quick Start
 
-A proposed fourth string type: **dynamic, Unicode, and byte-identical on every
-target**.
+Prebuilt compilers are committed to the repository. Clone it and run one.
 
-```basic
-dim as ustring u = "héllo"      '' dynamic, grows on demand
-u += " wörld"                   '' no fixed capacity to overflow
-print len(u)                    '' 11 code units, O(1)
-```
+> **Run `fbc` where it lives.** It derives its installation prefix from its own path, so the binary must stay beside its `bin/`, `include/` and `lib/` directories. Copying just the executable elsewhere gives `cannot open linker script file`.
 
-## Why
-
-FreeBASIC has three string types, and none of them is a portable Unicode string.
-
-| Type | Dynamic? | Encoding | Element width |
-|---|---|---|---|
-| `STRING` | yes | none — it is a byte buffer | 1 byte |
-| `ZSTRING * N` | no | none — NUL-terminated bytes, for C interop | 1 byte |
-| `WSTRING * N` | **no** | `wchar_t`, whatever the platform says | **2 on Windows, 4 on Linux, 1 on DOS** |
-| **`USTRING`** | **yes** | **UTF-16, always** | **2 bytes, every target** |
-
-The problem is the last column. The same source builds a UTF-16 string on one
-target and a UTF-32 string on another — silently — and whichever you get, you
-cannot resize it. That width leaks into every byte offset, every pointer walk,
-and every file written.
-
-USTRING fixes both halves at once: one type that is dynamic *and* has a fixed,
-known representation everywhere.
-
-## A true intrinsic type, not a library
-
-This is the part worth being precise about. USTRING is **not** a UDT, a class,
-a macro, or a header you `#include`. It is a data type inside the compiler,
-registered exactly the way `ZSTRING` and `WSTRING` are.
-
-**It is a keyword**, sitting on the line below its siblings in the keyword table
-with the identical token class and dialect gating:
-
-```basic
-( @"ZSTRING"    , FB_TK_ZSTRING     , FB_TKCLASS_KEYWORD , KWD_OPTION_NO_QB ), _
-( @"WSTRING"    , FB_TK_WSTRING     , FB_TKCLASS_KEYWORD , KWD_OPTION_NO_QB ), _
-( @"USTRING"    , FB_TK_USTRING     , FB_TKCLASS_KEYWORD , KWD_OPTION_NO_QB ), _
-```
-
-**It is in the datatype enum.** `FB_DATATYPE_USTRING` (the var-len descriptor)
-and `FB_DATATYPE_FIXUSTR` (`USTRING * N`), mirroring the `STRING`/`FIXSTR` pair.
-`FB_DT_TYPEMASK` is 5 bits — a hard ceiling of 32 datatypes, of which fbc used
-26. These are two of the remaining six.
-
-**It is in all six positional datatype tables** that fbc keeps in lockstep —
-`symb-data.bas`, `ir-hlc.bas`, `ir-llvm.bas`, `edbg_stab.bas`,
-`symb-mangling.bas`, `emit_x86.bas`. A type that is missing from any one of
-these is not a real type.
-
-**Every backend emits it natively**: gcc, gas64, gas x86 (32-bit), and LLVM.
-Literals are compile-time constants in their own pool (`{fbuc}`), with a
-dedicated `littextu` storage slot holding raw UTF-16 units — so there is no
-runtime construction cost and no host-width dependency.
-
-**It participates in the language**, not just in expressions: overload
-resolution ranks it, `VAR` infers it, `BYREF`/`BYVAL` parameters and copy-back
-work, function results work, UDT fields and arrays are constructed and destroyed
-by the generated ctors/dtors, and it has a temp-descriptor pool with the same
-descriptor-stealing optimisation `STRING` uses, so `a = b + c + d` stays linear.
-
-What that buys you concretely: **there is no seam.** Every intrinsic works, and
-`LEN` is O(1) rather than a scan.
-
-```basic
-dim as ustring a = "hello", b = "world"
-dim as ustring c = a + ", " + b        '' one assign + N concat-assigns, zero temps
-
-print ucase(c)                         '' HELLO, WORLD
-print mid(c, 8, 5)                     '' world
-print instr(c, "wor")                  '' 8
-print len(c), c[0]                     '' 12   104
-```
-
-## How it relates to the existing types
-
-USTRING is accepted anywhere `STRING` or `WSTRING` is, converting on the way.
-
-```basic
-dim as string  s = "from a byte string"
-dim as wstring * 32 w = "from a wide string"
-dim as ustring u
-
-u = s                     '' UTF-8 decoded
-u = w                     '' re-encoded if wchar_t is not 16-bit
-s = u                     '' UTF-8 encoded
-w = u
-
-print u & " and " & s     '' mixed concatenation, either order
-if( u = s ) then ...      '' cross-type comparison
-```
-
-| Conversion | How |
-|---|---|
-| `STRING` / `ZSTRING` ↔ `USTRING` | **UTF-8, on every target** |
-| `WSTRING` ↔ `USTRING` | re-encoded only where `wchar_t` ≠ 16 bits |
-
-Note the deliberate difference from `STRING` ↔ `WSTRING`, which goes through the
-C locale and is therefore codepage- and machine-dependent. A portable type
-cannot afford that, so USTRING's conversions are fixed and identical everywhere.
-
-Malformed UTF-8 becomes **U+FFFD** rather than raising an error — a text editor
-must be able to open a damaged file, not refuse it.
-
-### The one boundary
-
-**Arbitrary binary does not round-trip through a USTRING.** Bytes that are not
-valid UTF-8 become U+FFFD and the originals are gone. Binary data belongs in
-`STRING`, which is unchanged and still there. This is a design decision, not an
-oversight: a type that guarantees an encoding cannot also be a byte bucket.
-
-### Win32 `...W` APIs are free
-
-Where `wchar_t` is 16 bits — i.e. Windows — a ustring already *is* UTF-16, so
-passing one to a `WSTRING PTR` parameter is a pointer reinterpret with no
-conversion and no copy:
-
-```basic
-declare function MessageBoxW( byval hWnd as any ptr, byval txt as wstring ptr, _
-                              byval cap as wstring ptr, byval flags as ulong ) as long
-
-dim as ustring msg = "hello"
-MessageBoxW( null, msg, msg, 0 )      '' no conversion, no copy
-```
-
-Where `wchar_t` is wider the text is re-encoded into a temporary and **the
-compiler emits a warning**, so that cost is never invisible to someone
-developing on Windows.
-
-## Code units, not characters
-
-`LEN`, `[]`, `ASC`, and every position and length in `LEFT`/`RIGHT`/`MID`/
-`INSTR` count **UTF-16 code units**. A character outside the Basic Multilingual
-Plane is a surrogate pair, so it counts as 2:
-
-```basic
-dim as ustring e = wchr(&h20AC)      '' €  — 1 unit
-dim as ustring m = wchr(&h1D11E)     '' 𝄞  — 2 units, one character
-
-print len(e), e[0]                   '' 1   8364
-print len(m)                         '' 2
-```
-
-This is the same answer `WSTRING` already gives on Windows, and it keeps `LEN`
-and `[]` O(1). It does mean `MID` can split a surrogate pair — exactly as it can
-on a `WSTRING`. That is a property of UTF-16, not something this type
-introduces.
-
-`UCASE`/`LCASE` use a **generated** simple case-mapping table over the BMP, not
-`towupper()`/`towlower()` — those are locale-dependent and would fold the same
-string differently depending on the user's locale and which libc the program
-linked against.
-
-## Fixed-length form
-
-```basic
-dim as ustring * 16 f = "fixed"      '' 16 CODE UNITS (32 bytes)
-print len(f)                         '' 5 — the text length
-```
-
-`USTRING * N` is NUL-terminated and `LEN` returns the text length, following
-`WSTRING * N`. It does **not** space-pad the way `STRING * N` does.
-
-The `N` **includes the terminator**, so `USTRING * 8` holds 7 characters of
-text — again identical to `WSTRING * 8`, and unlike `STRING * 8`, which is not
-terminated and holds a full 8.
-
-A fixed-length string cannot be a `BYREF` parameter or a function result:
-
-```basic
-sub s( byref f as ustring * 8 )      '' error 324 — and the same for
-                                     '' STRING * N and WSTRING * N
-function f( ) as ustring * 8         '' error 55 — likewise
-```
-
-Both are general FB rules, not USTRING restrictions. Take a dynamic parameter
-(a fixed-length argument binds to it, and writes are copied back) and return
-the dynamic form.
-
-## I/O
-
-Where the output goes decides the encoding:
-
-| Destination | Encoding |
-|---|---|
-| A real Windows console | the wide path — the OS renders UTF-16 directly |
-| Files, redirected output, non-Windows consoles | **UTF-8** |
-
-That second row is the point: a ustring written to a file produces a portable
-UTF-8 file on every platform. (The existing wstring path writes raw UTF-16
-*bytes* when redirected, which no other tool reads as text.)
-
-```basic
-dim as integer f = freefile
-open "out.txt" for output as #f
-print #f, u                          '' UTF-8 on every platform
-close #f
-
-open "out.txt" for input encoding "utf16" as #f
-line input #f, u                     '' OPEN ... ENCODING is honoured too
-close #f
-```
-
-`PRINT USING` counts code units in its field widths, so a format field lines up
-with what the rest of the type says the length is — and gives the same answer
-whether the output is a console or a file.
-
-```basic
-print using "[\   \]"; u             '' a 5-unit field
-```
-
-## What is supported
-
-Everything below is implemented and covered by tests.
-
-**Operators and intrinsics** — assignment, concatenation (`+`, `&`, `+=`),
-comparison, `LEN`, `[]` indexing, `ASC`, `WCHR`, `LEFT`, `RIGHT`, `MID`
-(function *and* statement), `INSTR`, `INSTRREV`, `TRIM`/`LTRIM`/`RTRIM`
-(including the `ANY` and `EX` forms), `UCASE`, `LCASE`, `SPACE`, `STRING`,
-`LSET`, `RSET`, `SWAP`, `VAL`, `STR`, `WSTR`, `HEX`, `FORMAT`.
-
-**Language** — `VAR` inference, `SELECT CASE`, `IIF`, `BYREF`/`BYVAL` parameters
-with copy-back, function results (including `BYREF` returns and fixed-length
-results), overload resolution, UDT fields, `CAST`/`LET`/property/operator
-overloads, arrays (multi-dimensional, `SHARED`, UDT-nested, `REDIM PRESERVE`,
-`ERASE`), unions, `COMMON`, `WITH`, type aliases, static locals, `STRPTR`,
-`VARPTR`, `SIZEOF`, `ustring ptr`, variadics.
-
-**I/O** — `PRINT`, `WRITE`, `PRINT #`, `WRITE #`, `LINE INPUT`, `LINE INPUT #`,
-`INPUT`, `INPUT #`, `PRINT USING`, `PUT`/`GET`, `OPEN ... ENCODING`, `READ`/`DATA`,
-`DRAW STRING`.
-
-**Dialects** — available in `-lang fb`, `fblite` and `deprecated`; correctly not
-a keyword in `-lang qb`, matching how `ZSTRING` and `WSTRING` are gated.
-
-### Known gap
-
-`CONST u AS USTRING = "abc"` is **not** supported. fbc's `CONST` accepts exactly
-one string type, `FB_DATATYPE_STRING` — `WSTRING` is rejected too, so USTRING is
-no worse than the type it replaces, but it *is* worse than `STRING`. Supporting
-it means threading a literal symbol through `symbReuseOrAddConst`, the const
-value union and the expression path, all shared by every string type. That is a
-feature addition rather than part of this one, and it is recorded rather than
-bolted on. `dim as ustring u = "abc"` works, and the literal is already a
-compile-time pool constant, so nothing is lost at runtime.
-
----
-
-# Prebuilt compilers
-
-You do not have to build anything to try this. Two ready-to-run installations
-are in the repository, produced from this tree and verified before being
-committed.
-
-### `toolchains/fbc-modern-windows/` — Windows, 32-bit and 64-bit
-
-```
-fbc32.exe          32-bit compiler
-fbc64.exe          64-bit compiler
-bin/win32          i686 assembler + linker      shared by both
-bin/win64          x86-64 assembler + linker    shared by both
-inc/               FreeBASIC headers
-lib/win32          32-bit runtime
-lib/win64          64-bit runtime
-```
-
-The standard FreeBASIC *standalone* layout: both compilers sit at the top level
-and share one `bin/` and one `inc/`, each picking the toolchain and runtime that
-matches its target.
+### Windows
 
 ```bat
+git clone https://github.com/PaulSquires/FBC-Modern.git
+cd FBC-Modern
+
 toolchains\fbc-modern-windows\fbc64.exe hello.bas
 toolchains\fbc-modern-windows\fbc32.exe hello.bas
 toolchains\fbc-modern-windows\fbc64.exe -target win32 hello.bas
 ```
 
-### `toolchains/fbc-modern-linux/` — Linux x86-64
+The Windows tree is the standard FreeBASIC **standalone** layout: both compilers sit at the top level and share one `bin/` and one `inc/`, each picking the toolchain and runtime matching its target. Nothing to install and nothing to add to `PATH`.
 
-```
-bin/fbc
-include/freebasic/          FreeBASIC headers, including fb/*.bi
-lib/freebasic/linux-x86_64
-```
-
-The standard FreeBASIC *normal* (non-standalone) layout, which is what this
-compiler is built as — a normal-layout `fbc` looks for its headers in
-`include/freebasic/`, not `inc/`.
+### Linux (x86-64)
 
 ```bash
+git clone https://github.com/PaulSquires/FBC-Modern.git
+cd FBC-Modern
+
 toolchains/fbc-modern-linux/bin/fbc hello.bas
+./hello
 ```
 
-This is a **native** Linux build, not a cross-compile. It came from fbc's own
-bootstrap path: the win64 compiler emits C for `linux-x86_64`, and gcc compiles
-those 146 files into a Linux `fbc` — so no pre-existing Linux FreeBASIC is
-needed to reproduce it.
+A **native** Linux build, not a cross-compile — produced through fbc's own bootstrap path. The binary is committed with its executable bit set; if you extract the tree some other way, `chmod +x toolchains/fbc-modern-linux/bin/fbc`.
 
-### Things worth knowing
+### macOS
 
-- **Run `fbc` where it lives.** It derives its installation prefix from its own
-  path, so `bin/fbc` must stay beside `inc/` and `lib/`. Copying just the binary
-  elsewhere gives `cannot open linker script file`.
-- **The Linux binary is committed with its executable bit set** (mode `100755`),
-  and `.gitattributes` keeps that tree from being CRLF-converted by a Windows
-  clone. If you extract it some other way, `chmod +x bin/fbc`.
-- **The Windows `bin`'s gcc has no C headers**, exactly as FreeBASIC's own
-  distribution ships it. It assembles and links, which is all fbc asks of it,
-  but it cannot rebuild the runtime — that needs a full toolchain.
-- **The Linux `gfxlib2` is built `-DDISABLE_X11 -DDISABLE_GPM`**, because
-  `X11/xpm.h` and `gpm.h` were unavailable on the build machine. Console, fbdev
-  and everything else are present. `ffi.h` *was* available there, so `ThreadCall`
-  works on the Linux build — unlike the Windows ones here.
+> ⚠️ **[Placeholder — not available.]** No macOS build exists and this tree has never been built on darwin. Upstream FreeBASIC supports it, so the path is likely short, but nothing here is verified. See [Building From Source](#-building-from-source) if you want to try.
 
 ---
 
-# Performance: appending
+## 👋 Hello World
 
-`tests/ustring_append_bench.bas`, best of three runs on each platform.
+`hello.bas`:
 
-**Read the units first.** A `STRING` moves 1 byte per character and a `USTRING`
-moves 2 (a UTF-16 code unit, on every target). So USTRING taking ~2× the time of
-STRING is *parity*, not a loss — the throughput column is the honest comparison.
+```basic
+#include once "containers.bi"
+using FB
 
-### Against STRING — same class
+type Greeter( of T )
+    as T name
+    declare function Greet( ) as string
+end type
 
-2,000,000 single-character appends:
+function Greeter( of T ).Greet( ) as string
+    return "hello, " & this.name
+end function
+
+dim people as Array( of string )
+people.Push( "ada" )
+people.Push( "grace" )
+
+for each who in people
+    dim g as Greeter( of string )
+    g.name = who
+    print g.Greet( )
+next
+
+dim as ustring u = "héllo, wörld"
+print u, len( u )
+```
+
+Compile and run:
+
+```bash
+# Windows
+toolchains\fbc-modern-windows\fbc64.exe hello.bas
+hello.exe
+
+# Linux
+toolchains/fbc-modern-linux/bin/fbc hello.bas
+./hello
+```
+
+Expected output:
+
+```
+hello, ada
+hello, grace
+héllo, wörld           12
+```
+
+That one file uses a generic type, an out-of-line generic member body, a container, `for each`, and a Unicode string — with no compiler flags and no build system.
+
+---
+
+## 🎯 Project Goals
+
+1. **Close two real gaps in FreeBASIC** — no portable Unicode string, and no way to write a typed container once. Both are now closed.
+2. **Preserve compatibility absolutely.** Existing programs compile unchanged; existing diagnostics are byte-identical; `each` and `in` stay usable as identifiers.
+3. **Add to the language, not beside it.** Generics are parsed by the real parser. `FOR EACH` is a desugaring with no new AST or IR node. The containers are a library with no compiler privileges.
+4. **Diagnostics that name the actual problem** — the missing iterator member, the instantiation that failed, the type argument that caused it.
+5. **Be honest about limits.** Every known limitation is written down, measured, and shipped in the documentation rather than discovered by users.
+6. **Offer the work upstream.** This exists to be reviewed and, if the FreeBASIC team wants it, merged — not to become a fork with its own ecosystem.
+
+> **What this project is not aiming at:** a package manager, a language server, an optimizer, or faster builds. Those are worth having; they are not what this is.
+
+---
+
+## 🏗 Compiler Architecture
+
+FBC-Modern uses fbc's existing pipeline. Only two stages gained anything.
+
+| Stage | What happens | Changed? |
+|---|---|---|
+| **Lexer** | Tokens, dialect-gated keywords | `USTRING` added to the keyword table alongside `ZSTRING`/`WSTRING` |
+| **Parser** | Single-pass recursive descent, building the AST directly | **Yes** — generic capture and replay, `FOR EACH` lowering |
+| **Symbol / semantic** | `symb*` — types, overload resolution, mangling | **Yes** — instantiation cache, type-parameter binding, Itanium `I…E` mangling |
+| **AST** | Expression and statement trees, constant folding | Unchanged — an instantiation is an ordinary UDT by the time the AST sees it |
+| **IR / backends** | `gcc` (C), `gas64`, `gas` (x86), `llvm` | Unchanged for generics; `USTRING` emission added to all four |
+| **Runtime** | libfb / libfbmt / libfbgfx | `USTRING` descriptors, codecs and I/O added; nothing for generics |
+
+<details>
+<summary><b>How generics actually work</b> — four sentences, because nothing else in fbc looks like this</summary>
+
+1. A generic's body is captured as a **token chain** at declaration and replayed through the **real parser** once per distinct type-argument list, with the type parameters bound as TYPEDEFs in a synthetic namespace. There is no textual substitution and no separate template AST.
+2. Member bodies and generic-procedure bodies are **deferred** to the next module-level statement boundary, because an instantiation happens mid-statement and a procedure cannot be opened there. This is also what makes declaration order irrelevant.
+3. Every instantiation is built **at module level**, whatever the parser was doing, because a UDT with member procedures is illegal below module level.
+4. `for each` is a **desugaring** with two lowerings — an iterator walk for a user collection, an ordinary counter `FOR` for an array or string — so `for each` over an array emits exactly what the hand-written index loop emits.
+
+Instantiations are Itanium-mangled: `$3BoxIiE` demangles to `Box<int>`. Two modules that both write `Box( of long )` mean the same type and link; each keeps a module-private copy, because PE/COFF offers no working COMDAT here (measured — `__attribute__((weak))` produces a weak *external* that silently breaks virtual dispatch).
+
+Full detail: **[docs/generics/generics.txt](docs/generics/generics.txt)**.
+
+</details>
+
+---
+
+## 🧩 Ecosystem
+
+> ⚠️ **[Placeholder — no editor or tooling integration ships in this repository.]**
+
+**Tiko Editor.** [Tiko](https://github.com/PaulSquires/tiko) is a Scintilla-based FreeBASIC editor by the same author. It is a natural home for FBC-Modern support — pointing its toolchain at these compilers, and teaching its lexer the `( of T )` form and the new keywords. **No such integration exists today**, and nothing in either repository references the other. This section is a marker for work not yet done, not a description of shipped behaviour.
+
+Anything else — syntax files, formatters, language servers, package tooling — does not exist for this project. Contributions are the fastest way for that to change.
+
+---
+
+## 🤝 Contributing
+
+The most useful contribution right now is **review**. This work is offered upstream, and a careful reading of the generics implementation is worth more than a feature.
+
+> ⚠️ **[Placeholder]** — there is no `CONTRIBUTING.md`, no issue templates and no code of conduct in this repository yet. The conventions below are what the project follows in practice.
+
+**Pull requests.** One logical change per PR, with a commit message that says *why*, not just *what*. If a change touches the compiler, the [gate](#tests) must be green and the PR should say so with numbers.
+
+**Issues.** A bug report needs the compiler version (`fbc -version`), the target, the backend (`-gen gcc` / `-gen gas64`), and the smallest source file that reproduces it. Before filing a generics bug, **check the plain-FreeBASIC control** — this project has hit twelve false alarms that turned out to be ordinary FB rules (reserved words, case-insensitive identifiers, integer promotion).
+
+**Coding standards.** Follow the surrounding code — fbc's own style, lowercase keywords, tabs as they already are. Do not reformat neighbouring lines.
+
+**Testing.** Every behaviour change needs a test in `src/tests/generics/`, and every new diagnostic needs a golden file in `src/tests/errors/` — **one case per file**, because the compiler stops at the first error. Run behaviour tests under **both** backends; three separate defects in this work were visible to only one of them.
+
+**Discussions.** For language design — constraints on type parameters, `typeof` through a type parameter, the container API — open an issue for discussion before writing code. The design decisions and their reasoning are recorded in `docs/`.
+
+---
+
+## 🔨 Building From Source
+
+You do **not** need to build anything to use the compiler — see [Quick Start](#-quick-start). Build only if you are changing it.
+
+**Dependencies**
+
+| | |
+|---|---|
+| A FreeBASIC compiler to bootstrap with | fbc 1.10+ or the prebuilt compiler in this repository |
+| GNU make | any recent version |
+| A C toolchain | gcc/binutils — MinGW-w64 on Windows, the system toolchain on Linux |
+| Optional | `libffi` (for `ThreadCall`), `libstdc++` (for the four `cpp` log-tests) |
+
+**The makefile lives in `src/`, not at the repository root.** `make` from the root reports `No rule to make target 'compiler'`.
+
+```bash
+cd src
+make compiler -j8 FBC="/path/to/fbc -i /path/to/FBC-Modern/src/inc"
+```
+
+The `-i` is required here: `fbc` does not auto-resolve `inc/` from `bin/` in this tree.
+
+A full compiler rebuild is roughly **6 seconds at `-j8`** (146 modules). Touching any `.bi` rebuilds everything.
+
+<details>
+<summary><b>Full build, runtime included, and the test gate</b></summary>
+
+```bash
+cd src
+make rtlib gfxlib2 compiler
+```
+
+The gate, in order — a phase is not done until all of it is green:
+
+```bash
+# unit tests, both backends
+cd src/tests && make unit-tests            FBC="…/fbc.exe -i …/src/inc"
+cd src/tests && make unit-tests GEN=gas64  FBC="…/fbc.exe -i …/src/inc"
+
+# per-dialect compile-and-run tests
+cd src/tests && make log-tests             FBC="…/fbc.exe -i …/src/inc -p /path/to/libstdc++"
+
+# golden diagnostics, five targets each — regenerate, then git diff
+cd src/tests/warnings && FBC="…/fbc.exe" bash ./test.sh
+cd src/tests/errors   && FBC="…/fbc.exe" bash ./test.sh
+```
+
+Traps that have cost this project real time, all documented in [`tests/BASELINE.md`](tests/BASELINE.md):
+
+- make tracks `.bas` → `.o` only, so a changed **compiler** leaves stale objects and the suite silently re-runs the previous binary. Force a rebuild.
+- A new test **file** needs `make clean-tests` from `src/`; a new test **directory** needs `tests/dirlist.mk` *and* `make clean`.
+- Never run two `make log-tests` concurrently — they race and invent failures.
+- Reconcile `passed + failed = total logs`. "No failures" on its own proves nothing.
+
+</details>
+
+---
+
+## Tests
+
+fbc has four test targets. All four are run.
+
+| Target | Scale | Result |
+|---|---|---|
+| `unit-tests` (win64, gcc) | 2,308 test modules | **1,154,420 assertions — 11 failed** |
+| `unit-tests` (win64, gas64) | 2,308 test modules | **identical** |
+| `log-tests` | 1,731 tests across `fb`, `fblite`, `qb`, `deprecated` | **1,731 passed, 0 failed** |
+| `warning-tests` | 68 files × 5 targets | **0 diagnostic changes** |
+| `error-tests` | golden diagnostics × 5 targets | **0 diagnostic changes** |
+
+The 11 failures are all `fbc_tests.threads.threadcall_`, caused by `libffi` being absent in this build environment — **present in the baseline before any of this work**, and reproduced at `main` with the changes stashed.
+
+`warning-tests` compiles for **dos, linux-x86, linux-x86_64, win32 and win64** and compares against committed reference output, so every diagnostic on every target is byte-identical to stock fbc except the ones deliberately added.
+
+**This project's own suites**
+
+| Suite | Covers |
+|---|---|
+| `src/tests/generics/` | 42 files — instantiation and identity, out-of-line members, operators and properties, generic procedures and inference, global operators, all three inheritance directions with `VIRTUAL`/`ABSTRACT`/RTTI, self-reference, mangling, deferral, multi-module linking, every container member and complexity claim, and 25 one-case diagnostic files |
+| `tests/ustring_*.bas`, `tests/ustr_*.c` | 464 checks — the language surface, every declaration form, I/O and encodings, `DRAW STRING` compared pixel by pixel, the codecs against malformed input, and the wchar helpers at **all three wchar widths** |
+
+Behaviour tests are additionally run under **both** backends by hand, and against the **prebuilt** compilers rather than the build tree — 17/17 on win64, win32 and linux-x86_64.
+
+> **One caveat, stated plainly.** fbc's suite as shipped does not pass untouched. `tests/udt-wstring` and `tests/udt-zstring` each contain `#define ustring …` in 18 files, which becomes `error 4: Duplicated definition` once `USTRING` is a keyword. They are renamed to `uwstr_t` / `uzstr_t`; any upstream patch has to carry that 36-file rename.
+
+### Performance: appending
+
+`USTRING` moves 2 bytes per character where `STRING` moves 1, so equal *throughput* is parity. Best of three runs:
 
 | Platform | STRING | USTRING | USTRING throughput |
 |---|---|---|---|
@@ -509,247 +475,70 @@ STRING is *parity*, not a loss — the throughput column is the honest compariso
 | win32 | 69.50 ms (27 MB/s) | 21.10 ms | **181 MB/s** |
 | linux-x86_64 | 8.37 ms (228 MB/s) | 8.51 ms | **449 MB/s** |
 
-USTRING moves twice the bytes at equal or better throughput everywhere. On
-Linux it does twice the work in the same wall-clock time. (The win32 STRING
-figure is an outlier I have not chased down — it is STRING's number, not
-USTRING's, and the other two platforms bracket it.)
-
-### Against WSTRING — a different complexity class
-
-This is the one that matters, and it is structural rather than a tuning detail.
-A `WSTRING` has **no length field**, so every append walks to the terminator to
-find the end. Appending *n* times costs **O(n²)**. A `USTRING` keeps its length
-in the descriptor, so an append is O(1) amortised.
-
-Appending at *n* = 40,000 and again at 2*n*:
+Against `WSTRING` it is a different complexity class, not a tuning difference — a wstring has no length field, so every append walks to the terminator:
 
 | Platform | WSTRING *n* → 2*n* | ratio | USTRING *n* → 2*n* | ratio |
 |---|---|---|---|---|
 | win64 | 82.45 → 339.56 ms | **4.12** | 0.21 → 0.31 ms | 1.43 |
-| win32 | 106.93 → 402.41 ms | **3.76** | 0.40 → 0.50 ms | 1.25 |
 | linux-x86_64 | 133.37 → 539.68 ms | **4.05** | 0.15 → 0.35 ms | 2.28 |
 
-A ratio near 4 for doubled work is quadratic; near 2 is linear. At just 40,000
-appends USTRING is already **400–900× faster**, and the gap widens with length.
-
-The first version of this benchmark used 2,000,000 appends for all three types
-and had to be killed — the WSTRING loop does not finish in any useful time.
-That is why its counts are small here.
-
-### Growth is amortised linear
-
-The same append loop at 1× and 4× the count. Linear growth gives ≈4;
-realloc-on-every-append would give ≈16.
-
-| Platform | USTRING | STRING |
-|---|---|---|
-| win64 | 5.38 | 5.37 |
-| win32 | 4.18 | 4.10 |
-| linux-x86_64 | 4.47 | 4.43 |
-
-USTRING tracks STRING to within a couple of percent on every platform. Both sit
-slightly above 4 on win64 — since *both* types show it equally, that is the
-memory system at these sizes, not the growth strategy.
+A ratio near 4 for doubled work is quadratic; near 2 is linear. At 40,000 appends `USTRING` is already **400–900× faster**, and the gap widens.
 
 ---
 
-# Tests
+## 📚 Documentation
 
-## fbc's own test suite
+Everything below is in this repository. There is no documentation website.
 
-fbc has three test targets. **All three are run**; `unit-tests` alone is only
-part of the suite.
-
-| Target | Scale | Result |
-|---|---|---|
-| `unit-tests` (win64, gcc) | 2,308 test modules | **1,154,420 assertions, 11 failed** |
-| `unit-tests` (win64, gas64) | 2,308 test modules | **identical** |
-| `log-tests` | 1,731 tests across `fb`, `fblite`, `qb`, `deprecated` | **1,727 passed, 4 failed** |
-| `warning-tests` | 68 files × 5 targets | **0 diagnostic changes** |
-| `error-tests` | golden diagnostics × 5 targets | **0 diagnostic changes** |
-
-The failures are environmental and present in the baseline before any of this
-work: 11 × `fbc_tests.threads.threadcall_` (`libffi` absent, so `-DDISABLE_FFI`
-compiles `fb_ThreadCall` to `return NULL`) and 4 `cpp` log-tests (no `libstdc++`
-in this mingw64). Both were reproduced at `main` with the changes stashed.
-
-`warning-tests` compiles for **dos, linux-x86, linux-x86_64, win32 and win64**
-and compares against committed reference output; every diagnostic on every
-target is byte-identical to stock fbc except the ones deliberately added.
-
-Behaviour tests are additionally run by hand under **both** backends, because
-three separate defects in this work were visible to only one of them — including
-one that compiled, linked and silently returned the wrong function under gcc.
-
-> **One caveat, stated plainly.** The suite as shipped does not pass untouched.
-> `tests/udt-wstring` and `tests/udt-zstring` each contain `#define ustring ...`
-> in 18 files, which becomes `error 4: Duplicated definition` once `USTRING` is a
-> keyword — fbc's own tests would not compile. They are renamed to `uwstr_t` /
-> `uzstr_t`. Any upstream patch has to carry that 36-file rename.
-
-## This project's own tests
-
-### Generics, `FOR EACH` and containers — `src/tests/generics/`
-
-42 files. Every one of the 25 `fail-*` files holds **exactly one** case, because
-the compiler stops at the first error and a multi-case file would report only
-the first.
-
-| File | Covers |
+| Document | What it covers |
 |---|---|
-| `instantiate-type.bas` | instantiation, cache identity, nesting, UDT arguments |
-| `member-procs.bas` | out-of-line bodies, both parameter orders, both declaration orders |
-| `member-operators.bas` | operators, properties, `FOR`/`STEP`/`NEXT` |
-| `global-operators.bas` | generic global operators and inference through them |
-| `generic-procs.bas` | explicit and inferred type arguments |
-| `ctor-dtor.bas` | construction, destruction, copy |
-| `inheritance.bas` | 44 assertions — all three `EXTENDS` directions, `VIRTUAL`, `ABSTRACT`, RTTI positives **and negatives** |
-| `recursive-generic.bas` | self-reference through a pointer |
-| `iterator-protocol.bas` | ~60 assertions over the RFC-0002 contract |
-| `for-each.bas` | ~45 assertions — both lowerings, backward compatibility, nesting, destructor balance, single evaluation |
-| `container-{array,map,set,linkedlist}.bas` | every member, edge case and complexity claim |
-| `member-mangling.bas`, `sizeof-instantiation.bas`, `capture-boundary.bas` | names, layout, deferral |
-| `multimodule/` | two modules instantiating the same generics, linked |
+| **[Generics reference](docs/generics/generics.txt)** | Declaration, instantiation, members, operators, generic procedures and inference, inheritance and RTTI, diagnostics, known limits |
+| **[`FOR EACH`](docs/for_each/for-each.txt)** | Forms, what can be walked, how it lowers, backward compatibility, diagnostics |
+| **[Iterator protocol](docs/for_each/iterator-protocol.txt)** | The RFC-0002 contract, and why the existing `OPERATOR FOR` protocol does not cover collections |
+| **Standard library** — [Array](docs/array/array.txt) · [Map](docs/map/map.txt) · [Set](docs/set/set.txt) · [LinkedList](docs/linkedlist/linkedlist.txt) | Every member, its complexity, and the traps |
+| **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
+| **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
+| **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
+| **Language reference (general FreeBASIC)** | *[Placeholder]* — see the [FreeBASIC manual](https://www.freebasic.net/wiki/DocToc). `src/doc/manual/` is a mirror of that wiki and is not edited here. |
+| **API reference / tutorials** | *[Placeholder — none written.]* The container docs are the closest thing today. |
+| **Compiler internals** | *[Placeholder]* — [the architecture section](#-compiler-architecture) above and the generics doc are what exists. |
 
-The multimodule test was shown to have teeth by forcing `symbIsWeak` to FALSE —
-it then fails with 8 duplicate-definition errors on each backend.
+### Known limitations
 
-### USTRING
+Carried deliberately, all measured, none blocking. The full list with reasoning is in [docs/generics/generics.txt](docs/generics/generics.txt); the headline four:
 
-| Suite | Checks | What it covers |
-|---|---|---|
-| `tests/ustring_lang_test.bas` | 140 | the language surface end to end |
-| `tests/ustring_usage_test.bas` | 142 | **every form the language allows** — declarations, arrays, UDTs, inheritance, parameters, returns, `[]` indexing, pointers |
-| `tests/ustring_io_test.bas` | 36 | files, encodings, `PRINT USING`, round trips |
-| `tests/ustring_gfx_test.bas` | 13 | `DRAW STRING`, compared **pixel by pixel** against the narrow path |
-| `tests/ustr_codec_test.c` | 70 | UTF-8/16/32 codecs, including malformed input |
-| `tests/ustr_core_test.c` | 38 | allocator, growth, temp-descriptor pool |
-| `tests/ustr_wchar_test.c` | 25 | the conversion helpers at **all three wchar widths** |
-| `tests/ustring_llvm_test.bas` | — | LLVM output byte-identical to `-gen gcc` |
-
-`ustr_wchar_test.c` deserves a note: the wchar conversion branches fold away at
-compile time, so on Windows the UTF-32 (Linux) and 8-bit (DOS) branches are dead
-code that had never executed anywhere. The test includes the real source three
-times, once per width, so all three run — and the harness was checked against a
-deliberately injected bug to confirm it can actually fail.
-
-### Platforms built and run
-
-| Target | Built | Suites run |
-|---|---|---|
-| win64 | ✅ | generics 17/0, lang 140/0, io 36/0, gfx 13/0 |
-| win32 | ✅ | generics 17/0, lang 140/0, io 36/0 |
-| linux-x86_64 | ✅ | generics 17/0, lang 140/0, io 36/0 |
-
-"generics 17/0" is every behaviour file in `src/tests/generics/` (the 25
-`fail-*` diagnostic files are gated separately, on win64), run against the
-**prebuilt compiler in `toolchains/`** rather than the build tree — so the
-number describes what a user of this repository actually gets.
-
-Linux matters most for USTRING, because `sizeof(wstring)` is 4 there — so the
-UTF-32 path is exercised for real, not just by a unit test. Building for 32-bit
-is what uncovered the last real USTRING bug: literal emission in the gas x86
-backend, reachable *only* on 32-bit targets — and, this time round, a
-32-bit-only type error in the generics parser that the win64 build could not
-see.
-
-**Not verified**: the LLVM backend for generics (no LLVM toolchain here, and it
-is not in the gate); ARM, JS and DOS targets.
+- **No constraints on type parameters.** A member needing `=` on `T` makes the whole type unusable for a `T` without one — which is why `Array`'s `Sort`/`IndexOf`/`Contains` are free procedures.
+- **`typeof( T )` does not see through a type parameter**, so a generic body cannot branch on what `T` is bound to. This is why the hash contract is an overloaded `HashOf`.
+- **One copy of each instantiation per module.** Costs size, not correctness.
+- **`CONST u AS USTRING`** is not supported — fbc's `CONST` accepts exactly one string type. `WSTRING` is rejected too.
 
 ---
 
-# Layout
+## 📄 License
 
-```
-src/                    the fbc tree, with everything this project adds
-    src/compiler/       the compiler — parser-generic*.bas,
-                        parser-compound-for.bas
-    src/rtlib/          the runtime
-    src/gfxlib2/        the graphics library
-    inc/fb/             the standard containers (array, map, set,
-                        linkedlist, hash)
-    inc/containers.bi   the single include for all four
-    tests/generics/     the generics, for-each and container suites
-    makefile            'make compiler' and the test targets run from HERE
-
-toolchains/
-    fbc-modern-windows/ prebuilt: fbc32.exe + fbc64.exe, inc, libs
-    fbc-modern-linux/   prebuilt: bin/fbc, include/freebasic,
-                        lib/freebasic/linux-x86_64
-
-docs/
-    generics/           RFC-0001
-    for_each/           FOR EACH and the iterator protocol (RFC-0002/0003)
-    array/  map/        the standard containers, one folder each (RFC-0004)
-    set/    linkedlist/
-    ustring/            USTRING reference and implementation notes
-
-tests/                  USTRING's own suites and the append benchmark
-tools/                  generators for the Unicode case table and the CP437
-                        table, plus the LLVM verification harness
-LICENSE                 licensing, inherited from FreeBASIC (see below)
-```
-
-Note that the makefile lives in `src/`, not at the top level: builds and test
-runs are `cd src && make compiler`, not `make` from the repository root.
-
-[docs/ustring/implementation-notes.md](docs/ustring/implementation-notes.md) is
-worth reading if you are reviewing this. It records the design decisions *and*
-the mistakes — several bugs in this work compiled cleanly, ran, and produced
-plausible output (an empty generated destructor, a silently disabled copy-back,
-a no-op `LSET`, a `READ` that assigned nothing). They were found by reading
-generated code and by stress testing, not by normal test output, and the notes
-say so.
-
-# Building
-
-```
-cd src && make rtlib gfxlib2 compiler
-```
-
-See `tests/BASELINE.md` for the exact invocations, the three test targets, and
-the environment workarounds this particular machine needed (none of them related
-to this work).
-
-`src/doc/manual/` is **not** updated. It is a mirror of the online FreeBASIC
-wiki, refreshed by `make refresh` in that directory and regenerated from the
-wiki rather than edited — a page written into it by hand is overwritten on the
-next refresh. Manual pages belong on the wiki once any of this is accepted
-upstream. The reference documentation for this work lives in `docs/`.
-
-`src/bootstrap/` — fbc's self-hosting C snapshot — is **not** regenerated here.
-It is `.gitignore`d in this tree, it is produced by fbc's own release process
-rather than by hand, and nothing in this work changes the language the *compiler
-itself* is written in. A merge upstream would regenerate it there.
-
-# Licence
-
-This is a modified copy of the FreeBASIC compiler, so it carries FreeBASIC's
-licensing **unchanged**. Nothing is relicensed and no licence was chosen — it is
-inherited, and it is a split, because this work touches both halves:
+This is a modified copy of the FreeBASIC compiler, so it carries FreeBASIC's licensing **unchanged**. Nothing is relicensed and no licence was chosen — it is inherited, and it is a split, because the work touches both halves.
 
 | Part | Licence |
 |---|---|
-| The compiler — `src/src/compiler/`, and the `fbc32.exe` / `fbc64.exe` / `bin/fbc` binaries built from it | **GNU GPL v2 or later** ([COPYING.GPL-2.0](COPYING.GPL-2.0)) |
-| The runtime and graphics libraries — `src/src/rtlib/`, `src/src/gfxlib2/`, i.e. libfb, libfbmt, libfbgfx, libfbgfxmt | **GNU LGPL v2.1 or later, with a static-linking exception** ([COPYING.LGPL-2.1](COPYING.LGPL-2.1)) |
-| The container headers — `src/inc/fb/*.bi`, `src/inc/containers.bi` | **LGPL v2.1 or later, with the same exception** — they compile into the user's program, so they are runtime rather than compiler. Upstream's own `inc/` headers carry no per-file notice, so this is stated here rather than inherited |
+| The compiler — `src/src/compiler/`, and the binaries built from it | **GNU GPL v2 or later** ([COPYING.GPL-2.0](COPYING.GPL-2.0)) |
+| The runtime and graphics libraries — `src/src/rtlib/`, `src/src/gfxlib2/` | **GNU LGPL v2.1 or later, with a static-linking exception** ([COPYING.LGPL-2.1](COPYING.LGPL-2.1)) |
+| The container headers — `src/inc/fb/*.bi`, `src/inc/containers.bi` | **LGPL v2.1 or later, same exception** — they compile into your program, so they are runtime, not compiler |
 | Documentation under `docs/` | **GNU FDL** |
 
-The linking exception is what lets a program link the runtime statically without
-taking on the LGPL — it is quoted in full in [LICENSE](LICENSE).
+The linking exception is what lets a program link the runtime statically without taking on the LGPL; it is quoted in full in [LICENSE](LICENSE).
 
-So the work follows the file, exactly as the rest of fbc does: the compiler-side
-changes are GPLv2+, and `ustr_*.c`, `fb_ustring.h`, the `DRAW STRING` support
-and the container headers are LGPLv2.1+ with the exception.
-
-**The prebuilt trees carry third-party components.** `toolchains/` redistributes
-the toolchain fbc invokes — GNU binutils and gcc under **GPLv3**, plus the
-MinGW-w64 runtime and import libraries under their own terms. They are
-unmodified redistributions; see [LICENSE](LICENSE) for the breakdown.
+**The prebuilt trees carry third-party components.** `toolchains/` redistributes the toolchain fbc invokes — GNU binutils and gcc under **GPLv3**, plus the MinGW-w64 runtime and import libraries under their own terms. They are unmodified redistributions.
 
 ---
 
-# Status
+<div align="center">
 
-All four features are implemented, tested and gated. The one USTRING gap is
-`CONST`. Offered for upstream discussion.
+### FreeBASIC did not need replacing. It needed two gaps closed.
+
+The containers in this repository are written in ordinary FreeBASIC, with no compiler privileges of any kind — which means **anything you write is on exactly equal footing**. Better containers, an editor integration, a macOS build, constraints on type parameters, or a bug report with a five-line repro: all of it moves this forward.
+
+**[Open an issue](https://github.com/PaulSquires/FBC-Modern/issues) · [Read the generics doc](docs/generics/generics.txt) · [Run the gate](tests/BASELINE.md)**
+
+*Offered for upstream discussion with the FreeBASIC team.*
+
+</div>
