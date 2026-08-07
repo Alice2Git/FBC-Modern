@@ -1905,6 +1905,16 @@ declare function symbNamespaceImportEx _
 		byval to_ns as FBSYMBOL ptr _
 	) as integer
 
+declare sub symbNamespaceSearchPush _
+	( _
+		byval ns as FBSYMBOL ptr _
+	)
+
+declare sub symbNamespaceSearchPop _
+	( _
+		byval ns as FBSYMBOL ptr _
+	)
+
 declare sub symbNamespaceRemove _
 	( _
 		byval sym as FBSYMBOL ptr, _

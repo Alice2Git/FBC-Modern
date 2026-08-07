@@ -239,6 +239,25 @@ private function hWStrLiteralCompare _
 
 end function
 
+'' The '&' operator's coercion step: anything that is not already text becomes
+'' text before the concatenation is built.
+''
+'' USTRING AND FIXUSTR BELONG IN BOTH LISTS. They are text and must be left
+'' alone here, so that the ustring handling further down astNewBOP() sees the
+'' operands as they were written and converts the *narrow* side instead.
+''
+'' Leaving them out made '&' silently lossy in a way '+' never was, because '+'
+'' does not come through here at all:
+''
+''     dim as wstring * 8 w = "ab"
+''     dim as ustring     u = "<astral char>"
+''     dim as ustring     r = w & u        '' the astral character was destroyed
+''
+'' A ustring right operand fell to 'case else', and with a WSTRING on the left
+'' that meant rtlToWstr() -- ustring to UTF-8 to wchar THROUGH THE C LOCALE, so
+'' the four UTF-8 bytes came back as four separate CP-1252 characters. Locale-
+'' dependent conversion is the single thing USTRING exists to remove, and it was
+'' reachable from an ordinary '&'.
 private sub hToStr(byref l as ASTNODE ptr, byref r as ASTNODE ptr)
 	dim as integer ldtype = any, rdtype = any
 
@@ -248,7 +267,8 @@ private sub hToStr(byref l as ASTNODE ptr, byref r as ASTNODE ptr)
 	'' convert left operand to string if needed
 	select case as const ldtype
 	case FB_DATATYPE_STRING, FB_DATATYPE_FIXSTR, _
-		 FB_DATATYPE_CHAR, FB_DATATYPE_WCHAR
+		 FB_DATATYPE_CHAR, FB_DATATYPE_WCHAR, _
+		 FB_DATATYPE_USTRING, FB_DATATYPE_FIXUSTR
 
 	'' not a string..
 	case else
@@ -264,7 +284,8 @@ private sub hToStr(byref l as ASTNODE ptr, byref r as ASTNODE ptr)
 	'' convert the right operand to string if needed
 	select case as const rdtype
 	case FB_DATATYPE_STRING, FB_DATATYPE_FIXSTR, _
-		 FB_DATATYPE_CHAR, FB_DATATYPE_WCHAR
+		 FB_DATATYPE_CHAR, FB_DATATYPE_WCHAR, _
+		 FB_DATATYPE_USTRING, FB_DATATYPE_FIXUSTR
 
 	'' not a string..
 	case else

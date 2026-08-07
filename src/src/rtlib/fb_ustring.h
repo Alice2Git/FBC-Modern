@@ -331,4 +331,174 @@ FBCALL int          fb_PrintUsingUStr    ( int fnum, FBUSTRING *src, int mask );
 FBCALL int          fb_FileLineInputUStr ( int fnum, FBUSTRING *dst );
 FBCALL int          fb_InputUStr         ( FBUSTRING *dst );
 
+/**************************************************************************************************
+ * The FB.* string library -- byte width (str_ops.c)
+ *
+ * Reached from FreeBASIC through plain `extern "C" declare ... alias` in
+ * inc/fb/string.bi, NOT through the compiler's intrinsic path, so arguments are
+ * ordinary FBSTRING descriptors and there is no (ptr, size) discriminator.
+ * ZSTRING is served by these same entry points via fbc's implicit conversion.
+ * The PATTERN is an FBUSTRING even here: fbc resolves an overload on all of its
+ * parameters, so every parameter after the first must share one type across the
+ * three overloads or the set is ambiguous. See the header of str_ops.c.
+ *
+ * Positions in and out are 1-BASED, 0 meaning "not found", matching INSTR.
+ * `ic` is the ignoreCase flag; folding is ASCII only, because a STRING has no
+ * declared encoding. See the header comment in str_ops.c.
+ **************************************************************************************************/
+
+FBCALL ssize_t      fb_StrTally         ( FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL ssize_t      fb_StrTallyChars    ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrInstrChars    ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrVerifySet     ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_StrSpanOf        ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL int          fb_StrStartsWith    ( FBSTRING *s, FBUSTRING *pre, int ic );
+FBCALL int          fb_StrEndsWith      ( FBSTRING *s, FBUSTRING *suf, int ic );
+FBCALL int          fb_StrContains      ( FBSTRING *s, FBUSTRING *pat, int ic );
+
+/* The FB.* string library -- 16-bit width (ustr_ops.c)
+ *
+ * The USTRING half takes FBUSTRING descriptors, which is what a plain
+ * `byref as const ustring` parameter carries for every argument form. The
+ * WSTRING half takes a raw NUL-terminated FB_WCHAR pointer, which is what a
+ * `byref as const wstring` parameter carries instead, and bridges to the same
+ * algorithms. Only the HAYSTACK differs: every later parameter is a USTRING in
+ * all three overloads, which is what makes fbc resolve the set on the first one -- a pointer reinterpret where FB_WCHAR is 16 bits, a re-encode
+ * into a temporary where it is not.
+ *
+ * Positions in and out are 1-BASED in CODE UNITS, 0 meaning "not found".
+ * Folding is the generated simple BMP table, never towupper(). */
+
+FBCALL ssize_t      fb_UStrTally        ( FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL ssize_t      fb_UStrTallyChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrInstrChars   ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrVerifySet    ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL ssize_t      fb_UStrSpanOf       ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL int          fb_UStrStartsWith   ( FBUSTRING *s, FBUSTRING *pre, int ic );
+FBCALL int          fb_UStrEndsWith     ( FBUSTRING *s, FBUSTRING *suf, int ic );
+FBCALL int          fb_UStrContains     ( FBUSTRING *s, FBUSTRING *pat, int ic );
+
+FBCALL ssize_t      fb_WStrTally        ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrTallyChars   ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrInstrChars   ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrVerifySet    ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL ssize_t      fb_WStrSpanOf       ( ssize_t start, const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrStartsWith   ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrEndsWith     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+FBCALL int          fb_WStrContains     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
+
+/* The extract family (phase 2). These RETURN TEXT, so each hands back a temp
+ * descriptor the CALLER frees -- ordinary fbc handling for a string result
+ * reached through a plain declare, the same contract fb_StrFormat has.
+ *
+ * A STRING argument yields a STRING; a WSTRING or USTRING argument yields a
+ * USTRING. There is no dynamic ZSTRING or WSTRING to return. */
+
+FBCALL FBSTRING    *fb_StrExtract      ( ssize_t start, FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBSTRING    *fb_StrExtractChars ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrRemain       ( FBSTRING *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrRemainChars  ( FBSTRING *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrBetween      ( FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrClipLeft     ( FBSTRING *s, ssize_t n );
+FBCALL FBSTRING    *fb_StrClipRight    ( FBSTRING *s, ssize_t n );
+FBCALL FBSTRING    *fb_StrDeleteAt     ( FBSTRING *s, ssize_t start, ssize_t count );
+FBCALL FBSTRING    *fb_StrInsertAt     ( FBSTRING *s, FBUSTRING *ins, ssize_t pos );
+
+FBCALL FBUSTRING   *fb_UStrExtract      ( ssize_t start, FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_UStrExtractChars ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrRemain       ( FBUSTRING *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrRemainChars  ( FBUSTRING *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrBetween      ( FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrClipLeft     ( FBUSTRING *s, ssize_t n );
+FBCALL FBUSTRING   *fb_UStrClipRight    ( FBUSTRING *s, ssize_t n );
+FBCALL FBUSTRING   *fb_UStrDeleteAt     ( FBUSTRING *s, ssize_t start, ssize_t count );
+FBCALL FBUSTRING   *fb_UStrInsertAt     ( FBUSTRING *s, FBUSTRING *ins, ssize_t pos );
+
+FBCALL FBUSTRING   *fb_WStrExtract      ( ssize_t start, const FB_WCHAR *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_WStrExtractChars ( ssize_t start, const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrRemain       ( const FB_WCHAR *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrRemainChars  ( const FB_WCHAR *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrBetween      ( const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrClipLeft     ( const FB_WCHAR *s, ssize_t n );
+FBCALL FBUSTRING   *fb_WStrClipRight    ( const FB_WCHAR *s, ssize_t n );
+FBCALL FBUSTRING   *fb_WStrDeleteAt     ( const FB_WCHAR *s, ssize_t start, ssize_t count );
+FBCALL FBUSTRING   *fb_WStrInsertAt     ( const FB_WCHAR *s, FBUSTRING *ins, ssize_t pos );
+
+/* The transform family (phase 3). Same return rule: STRING in, STRING out;
+ * WSTRING or USTRING in, USTRING out. */
+
+FBCALL FBSTRING    *fb_StrReplace       ( FBSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBSTRING    *fb_StrRemove        ( FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBSTRING    *fb_StrRemoveChars   ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrRetainChars   ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrReplaceChars  ( FBSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBSTRING    *fb_StrReverse       ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrRepeat        ( ssize_t count, FBSTRING *s );
+FBCALL FBSTRING    *fb_StrShrink        ( FBSTRING *s, FBUSTRING *mask );
+FBCALL FBSTRING    *fb_StrMCase         ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrRemoveBetween ( FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
+FBCALL FBUSTRING   *fb_UStrReplace       ( FBUSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBUSTRING   *fb_UStrRemove        ( FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_UStrRemoveChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrRetainChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrReplaceChars  ( FBUSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBUSTRING   *fb_UStrReverse       ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrRepeat        ( ssize_t count, FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrShrink        ( FBUSTRING *s, FBUSTRING *mask );
+FBCALL FBUSTRING   *fb_UStrMCase         ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrRemoveBetween ( FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
+FBCALL FBUSTRING   *fb_WStrReplace       ( const FB_WCHAR *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBUSTRING   *fb_WStrRemove        ( const FB_WCHAR *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_WStrRemoveChars   ( const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrRetainChars   ( const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrReplaceChars  ( const FB_WCHAR *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBUSTRING   *fb_WStrReverse       ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrRepeat        ( ssize_t count, const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrShrink        ( const FB_WCHAR *s, FBUSTRING *mask );
+FBCALL FBUSTRING   *fb_WStrMCase         ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrRemoveBetween ( const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
+/* Pad, wrap, escape and predicates (phase 4). Same return rule. */
+
+FBCALL FBSTRING    *fb_StrPadRight   ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrPadLeft    ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrPadCenter  ( FBSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBSTRING    *fb_StrWrap       ( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBSTRING    *fb_StrUnwrap     ( FBSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBSTRING    *fb_StrEscape     ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrUnescape   ( FBSTRING *s );
+FBCALL int          fb_StrIsNumeric  ( FBSTRING *s );
+FBCALL int          fb_StrIsBlank    ( FBSTRING *s );
+
+FBCALL FBUSTRING   *fb_UStrPadRight  ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrPadLeft   ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrPadCenter ( FBUSTRING *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_UStrWrap      ( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBUSTRING   *fb_UStrUnwrap    ( FBUSTRING *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBUSTRING   *fb_UStrEscape    ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrUnescape  ( FBUSTRING *s );
+FBCALL int          fb_UStrIsNumeric ( FBUSTRING *s );
+FBCALL int          fb_UStrIsBlank   ( FBUSTRING *s );
+
+FBCALL FBUSTRING   *fb_WStrPadRight  ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrPadLeft   ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrPadCenter ( const FB_WCHAR *s, ssize_t width, FBUSTRING *pad );
+FBCALL FBUSTRING   *fb_WStrWrap      ( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl );
+FBCALL FBUSTRING   *fb_WStrUnwrap    ( const FB_WCHAR *s, FBUSTRING *op, FBUSTRING *cl, int ic );
+FBCALL FBUSTRING   *fb_WStrEscape    ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrUnescape  ( const FB_WCHAR *s );
+FBCALL int          fb_WStrIsNumeric ( const FB_WCHAR *s );
+FBCALL int          fb_WStrIsBlank   ( const FB_WCHAR *s );
+
+/* Split boundaries (phase 5). These do not return strings: they return the
+ * field COUNT and write count pairs of (offset, length), 0-based, so the FB
+ * side can build an Array( of T ). Pass out = NULL to count without writing. */
+
+FBCALL ssize_t      fb_StrSplitSpans       ( FBSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_StrSplitCharsSpans  ( FBSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_UStrSplitSpans      ( FBUSTRING *s, FBUSTRING *delim, int ic, ssize_t *out, ssize_t maxpairs );
+FBCALL ssize_t      fb_UStrSplitCharsSpans ( FBUSTRING *s, FBUSTRING *set, int ic, ssize_t *out, ssize_t maxpairs );
+
 #endif /*__FB_USTRING_H__*/

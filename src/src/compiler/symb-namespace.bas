@@ -260,6 +260,66 @@ function symbNamespaceImport _
 
 end function
 
+'' Make NS's symbols visible to plain (unqualified) lookup for a bounded stretch,
+'' then take that visibility away again -- the search-chain half of USING, with
+'' none of its permanence.
+''
+'' USING records an import on both namespaces' lists, so it outlives the
+'' statement and is inherited by anything that later imports the importer.  A
+'' generic instantiation needs the opposite: its body must see the namespace it
+'' was DECLARED in while it is being replayed, and the program must be exactly as
+'' it was afterwards.  Only hAddToHashTbList/hDelFromHashTbList are wanted here,
+'' not hAddImport/symbCompAddToImportList.
+''
+'' The pair is REFCOUNTED (ext->cnt), so it composes: nesting these, or using one
+'' on a namespace the program already said USING on, moves the count and leaves
+'' the chain alone.  Every Push must be matched by a Pop.
+''
+'' The global namespace is rejected rather than counted.  It is always in scope,
+'' and symbHashListInsertNamespace() on a hash table already in the list threads
+'' that list -- which lives inside the hash table -- through itself, so the node
+'' points at itself and the next lookup miss spins forever.  Same hazard the
+'' generic scope switch documents for symbNestBegin().
+sub symbNamespaceSearchPush _
+	( _
+		byval ns as FBSYMBOL ptr _
+	)
+
+	if( ns = NULL ) then
+		exit sub
+	end if
+	if( ns = @symbGetGlobalNamespc( ) ) then
+		exit sub
+	end if
+
+	if( symbGetCompExt( ns ) = NULL ) then
+		symbGetCompExt( ns ) = symbCompAllocExt( )
+	end if
+
+	hAddToHashTbList( ns )
+
+end sub
+
+'':::::
+sub symbNamespaceSearchPop _
+	( _
+		byval ns as FBSYMBOL ptr _
+	)
+
+	if( ns = NULL ) then
+		exit sub
+	end if
+	if( ns = @symbGetGlobalNamespc( ) ) then
+		exit sub
+	end if
+
+	'' Push allocates it, so a missing ext means an unmatched Pop
+	assert( symbGetCompExt( ns ) <> NULL )
+
+	hDelFromHashTbList( ns )
+
+end sub
+
 '':::::
 sub symbNamespaceRemove _
 	( _

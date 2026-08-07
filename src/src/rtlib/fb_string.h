@@ -397,3 +397,8 @@ FBCALL int          fb_VALINT           ( FBSTRING *str );
 FBCALL long long    fb_VALLNG           ( FBSTRING *str );
 FBCALL unsigned int fb_VALUINT          ( FBSTRING *str );
 FBCALL unsigned long long fb_VALULNG    ( FBSTRING *str );
+
+/* The FB.* string library's byte-width entry points are declared in
+ * fb_ustring.h, not here: every one of them takes its pattern as an FBUSTRING,
+ * and this header is included first. See str_ops.c for why the pattern is a
+ * ustring even on the byte side. */

@@ -37,6 +37,7 @@ Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, a
 | **Generics** | `type Box( of T )` and `function Max( of T )( … )`. Bodies are captured as token chains and replayed through the real parser once per type-argument list — so code inside a generic is ordinary FreeBASIC and is diagnosed as such. Not a macro, not a separate template language. |
 | **Iterator protocol** | A *structural* contract: a type is iterable if it has `GetIterator( )` returning something with `IsValid( )`, `Value( )` and `MoveNext( )`. No base class, no interface, no registration, nothing to inherit. |
 | **`FOR EACH`** | Walks arrays (any `lbound`), var-len `STRING`, and any type satisfying the protocol. Lowered at compile time — no new AST node, no IR node, no backend change, no runtime call. |
+| **String library** | 37 algorithms FreeBASIC does not ship — `Replace`, `Split`, `Join`, `Between`, the pad family, the character-set family — in namespace `FB`, working on **all four string types** from one call. Implemented in the runtime, but **nothing becomes a keyword**. |
 | **Standard containers** | `Array`, `Map`, `Set`, `LinkedList` in namespace `FB`. Written in ordinary FreeBASIC on top of the three features above, with **zero compiler support** — so a better implementation by anybody else is on exactly equal footing. |
 | **`USTRING`** | A dynamic Unicode string that is UTF-16 on *every* target, unlike `WSTRING` (2 bytes on Windows, 4 on Linux, 1 on DOS). A true intrinsic type in the compiler, not a library — `LEN` is O(1) and every string intrinsic works. |
 | **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite: 1,154,420 assertions and 1,731 log-tests across four dialects. |
@@ -179,6 +180,30 @@ next
 ```
 
 > **Three things to know.** `Array` indices are **zero-based**. `Map`'s indexer `m[ k ]` **inserts on a miss** — use `TryGet` or `Contains` to read. Copy and assignment are **deep** for all four containers; the language has no move constructor, so pass them `byref` where it matters.
+
+### String library
+
+```basic
+#include once "fb/string.bi"
+using FB
+
+print Replace( "Hello World", "World", "Earth" )   '' Hello Earth
+print Between( "log(42) end", "(", ")" )           '' 42
+print PadLeft( "42", 6, "0" )                      '' 000042
+
+dim parts as Array( of string ) = Split( "a,b,c" )
+print parts.Count( ), Join( parts, " | " )         '' 3    a | b | c
+
+'' the same calls take a ustring, a wstring or a zstring — the first
+'' argument picks the family, and you never name it
+dim as ustring u = "café noir"
+print Replace( u, "noir", "au lait" )
+```
+
+`Join( Split( s, d ), d )` is `s` for every `s`. Positions are 1-based like
+`INSTR`; `Split` never drops a field. Eleven deliberate differences from the
+AfxNova originals, plus two AfxNova bugs found by the differential harness, are
+listed in [docs/string/string.txt](docs/string/string.txt).
 
 ### `USTRING`
 
@@ -470,6 +495,7 @@ Everything below is in this repository. There is no documentation website.
 | **[`FOR EACH`](docs/for_each/for-each.txt)** | Forms, what can be walked, how it lowers, backward compatibility, diagnostics |
 | **[Iterator protocol](docs/for_each/iterator-protocol.txt)** | The RFC-0002 contract, and why the existing `OPERATOR FOR` protocol does not cover collections |
 | **Standard library** — [Array](docs/array/array.txt) · [Map](docs/map/map.txt) · [Set](docs/set/set.txt) · [LinkedList](docs/linkedlist/linkedlist.txt) | Every member, its complexity, and the traps |
+| **[String library](docs/string/string.txt)** | All 37 functions, their complexity, the rules that are easy to get wrong, and every divergence from AfxNova |
 | **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
 | **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
 | **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
