@@ -1,0 +1,204 @@
+Lambdas -- procedures written where they are used
+==================================================
+
+    ' non-capturing: an ordinary procedure pointer
+    dim double_ as function( byval x as long ) as long = _
+        function( byval x as long ) as long : return x * 2 : end function
+
+    ' capturing: '[ ]' lists what is captured, and how
+    dim as long total = 0
+    ForEach( nums, sub[ byref total ]( byref v as long )
+        total += v
+    end sub )
+
+
+WHY THEY EXIST
+--------------
+
+FreeBASIC's function pointers capture nothing, so every callback API passes a
+handle for the callback to look its own state back up, and the caller keeps a
+side table keyed by that handle. The Ps* control family shows it exactly:
+
+    type TooltipCallbackFunc as function( byval hListControl as HWND, ... )
+
+That HWND is not information the callback wants. It is a MANUAL CLOSURE
+ENVIRONMENT -- the only way to reach state that was already in scope where the
+callback was written.
+
+
+TWO KINDS, AND THE DIFFERENCE MATTERS
+-------------------------------------
+
+    sub( args ) ... end sub                 non-capturing -> a procptr
+    sub[ byref x ]( args ) ... end sub      capturing     -> a closure object
+
+A NON-CAPTURING lambda lowers to a plain module-level procedure plus its
+address. It is type-identical to '@myproc', converts to any matching procptr,
+and is what every Win32-style callback wants.
+
+A CAPTURING lambda cannot be a procptr -- it has state and a procptr has
+nowhere to put it:
+
+    dim f as Fn = function[ byval bias ]( byval x as long ) as long ...
+    ' error 355: A capturing lambda cannot convert to a procedure pointer
+
+It reaches an API through a GENERIC parameter instead. That is what FB.ForEach
+is for, and why it takes 'of F' rather than a procedure pointer.
+
+BOTH kinds are called the same way: 'f( 3 )'.
+
+
+GRAMMAR
+-------
+
+    LambdaExpr  =  (SUB|FUNCTION) CaptureList? CallConv? '(' Params? ')'
+                   (AS Type)? Body (END SUB|END FUNCTION) .
+    CaptureList =  '[' ( (BYVAL|BYREF) Id (',' ...)* )? ']' .
+
+  - The capture list sits between the keyword and the parameter list, where
+    nothing may legally appear today.
+  - A calling convention is allowed: 'function cdecl( ... )'. Not a nicety --
+    qsort's comparator is CDECL and most Win32 callbacks are STDCALL.
+  - AN EMPTY LIST '[ ]' is the NON-capturing form. It means what 'sub( ... )'
+    means, so a capture can be deleted without re-punctuating.
+  - The body is ordinary statements; the one-line ': ... :' form works because
+    ':' is already the statement separator.
+
+No compatibility risk: 'sub' and 'function' in expression position are a syntax
+error today (verified: "error 9: Expected expression, found 'function'").
+
+
+EVERY CAPTURE STATES ITS MODE
+-----------------------------
+
+There is no default, no bare '[ total ]', and no C++-style '[&]' / '[=]'.
+
+In a language with manual lifetimes the mode IS the lifetime question, and
+inferring it is how a closure ends up holding a reference to a destroyed frame.
+Writing it costs one word and puts the answer where it has to be read.
+
+    byref x     the closure holds a POINTER to the caller's variable
+    byval x     the closure holds a COPY, taken when the lambda is EVALUATED
+
+The BYVAL snapshot is the one that surprises people:
+
+    dim as long bias = 10
+    var a = function[ byval bias ]( byval x as long ) as long
+        return x + bias
+    end function
+    bias = 999
+    print a( 5 )                 ' 15, not 1004
+
+
+WHAT A CLOSURE IS
+-----------------
+
+A struct with one field per capture and the body as its __FBINVOKE method. The
+value of the expression is an object living in the ENCLOSING SCOPE -- no heap,
+no allocation, destroyed with the frame.
+
+Two closures over different variables have independent state, which is the case
+a single static thunk would get wrong.
+
+
+LIFETIME -- THE HAZARD THAT IS NOT DIAGNOSED
+--------------------------------------------
+
+A BYREF capture is '@local' with better ergonomics, and nothing checks it:
+
+    function MakeCounter( ) as ???
+        dim n as long = 0
+        return sub[ byref n ]( ) : n += 1 : end sub    ' n dies with the frame
+    end function
+
+A closure holding a BYREF capture must not outlive the frame that owns the
+captured variable. BYVAL capture is always safe. The explicit capture list is
+what makes the question visible; it does not answer it.
+
+The closure TYPE is hoisted to module level, so it outlives the scope that
+named it -- deviation D1, already carried by the generics work.
+
+
+KNOWN LIMIT: A CAPTURE'S TYPE MUST BE NAMEABLE
+----------------------------------------------
+
+The closure struct is synthesised as replayed source, so each field is declared
+with its type's printed name. A generic instantiation prints as its mangled
+internal name, which is not an identifier:
+
+    dim a as Array( of long )
+    var c = sub[ byref a ]( ) : ... : end sub
+    ' error 14: Expected identifier, found '$'
+
+So CONTAINERS CANNOT BE CAPTURED yet. Scalars, strings and plain UDTs all can,
+which covers the callback cases the feature exists for. The fix is to build the
+closure struct programmatically instead of by text.
+
+
+HOW THE BODY SEES ITS CAPTURES
+------------------------------
+
+__FBINVOKE opens with one byref alias per capture:
+
+    dim byref as typeof( *this.__cap_total ) total = *this.__cap_total
+
+so the body is replayed UNCHANGED. The alternative -- rewriting every 'total'
+in the body to '*this.__cap_total' -- would also rewrite a LOCAL named 'total'
+declared inside the lambda, silently redirecting it. With a real declaration,
+FreeBASIC's own scoping decides, and a colliding local is a duplicate-definition
+error the author can see.
+
+
+DIAGNOSTICS
+-----------
+
+    error 352: Too many captures in a lambda capture list
+    error 353: Every capture needs an explicit BYVAL or BYREF
+    error 354: Captured variable not declared
+    error 355: A capturing lambda cannot convert to a procedure pointer
+
+and two that need EOF to arrive inside the lambda, so they are reachable only
+from genuinely truncated source:
+
+    error 350: Malformed lambda header, expected ')' or a result type
+    error 351: Unterminated lambda body, expected END SUB or END FUNCTION
+
+An 'end sub' that is merely the WRONG one is consumed as the lambda's own
+terminator, so it surfaces as the ENCLOSING procedure being unterminated rather
+than as a lambda diagnostic.
+
+
+IMPLEMENTATION
+--------------
+
+A body cannot be parsed where the expression sits -- astProcBegin/astProcEnd are
+not a stack, so one body cannot be opened while another is open. The generics
+work already solved this, and lambdas reuse it: capture the tokens, replay the
+HEADER immediately at module level so the expression has a real symbol, and
+queue the BODY until the parser reaches a module-level statement boundary.
+
+Header capture is structural rather than line-terminated, because a lambda sits
+mid-expression and its body can start on the same line: the parameter list is
+taken by paren balance, the result type up to the first ':' or EOL AT DEPTH
+ZERO -- which is what lets the result type be a procptr with parentheses of its
+own. Body capture counts depth rather than stopping at the first END, because
+lambdas nest even though procedures cannot.
+
+Source: src/src/compiler/parser-lambda.bas
+
+
+TESTS
+-----
+
+src/tests/generics/lambda.bas -- non-capturing: both forms, one-line and
+multi-line bodies, VAR inference, byref params and a byref return proven to be a
+reference, inline as an argument, returned from a function, at module level,
+nested lambdas, a procptr result type, EXIT inside a body, two lambdas staying
+distinct, interchangeability with @proc, and a real qsort comparator.
+
+src/tests/generics/lambda-capture.bas -- capturing: byref and byval, the byval
+snapshot, several captures of mixed mode, independent state, every call
+position including zero-argument and nested calls, the empty capture list, a
+capturing AND a non-capturing lambda through the same generic parameter,
+FB.ForEach, capturing a UDT both ways, and destructor balance showing that byval
+copies once and byref copies not at all.

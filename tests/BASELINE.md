@@ -191,7 +191,8 @@ of tests added. The count after the generics work was
 
 After `Optional` and `Result` (8 new files in `src/tests/generics/`) it was
 **1740 passed / 0 failed / 1740 logs**; after `defer` (2 more) it is
-**1742 passed / 0 failed / 1742 logs**, measured WITH `-p C:/dev/utils/mingw64/lib`
+**1742 passed / 0 failed / 1742 logs**; after the lambdas
+**1745 passed / 0 failed / 1745 logs**, measured WITH `-p C:/dev/utils/mingw64/lib`
 — that flag is what turns the 4 `cpp` failures into passes, so quote the flag
 alongside the number or the two figures look like a regression in either
 direction.

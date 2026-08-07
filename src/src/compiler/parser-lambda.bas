@@ -28,6 +28,16 @@
 #include once "parser.bi"
 #include once "ast.bi"
 
+const LAMBDA_MAXCAPTURES = 32
+
+'' One entry of a capture list.
+type FB_LAMBDACAP
+	id              as zstring * FB_MAXNAMELEN+1   '' the name as written
+	sym             as FBSYMBOL ptr                '' the captured local
+	isref           as integer                     '' BYREF, rather than BYVAL
+	fld             as zstring * FB_MAXNAMELEN+1   '' the closure field's name
+end type
+
 '' One lambda owing a body replay.
 type FB_LAMBDA
 	sym             as FBSYMBOL ptr             '' the synthesised procedure
@@ -39,6 +49,11 @@ type FB_LAMBDA
 	srcline         as integer
 	srcfile         as zstring ptr
 	done            as integer
+
+	'' capturing lambdas only
+	clo             as FBSYMBOL ptr             '' the synthesised closure struct
+	capcount        as integer
+	caps( 0 to LAMBDA_MAXCAPTURES-1 ) as FB_LAMBDACAP
 end type
 
 type FB_LAMBDACTX
@@ -260,10 +275,43 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 	'' but does not lead with one, so without it a calling convention would be
 	'' pasted onto the name -- 'Lt_0003cdecl( ... )'. Harmless when the header
 	'' starts with '(', which is why it went unnoticed until a cdecl lambda.
-	text = kw + " " + *symbGetName( lam->sym ) + " " + _
-	       genFlattenTokens( lam->hdrhead, firstline ) + LFCHAR + _
-	       genFlattenTokens( lam->tokhead, firstline ) + LFCHAR + _
-	       "end " + kw
+	if( lam->clo ) then
+		'' capturing: a MEMBER of the closure struct, opened with one BYREF
+		'' alias per capture so the captured names resolve inside the body with
+		'' no rewriting of the body itself.
+		''
+		'' The aliases are what make this safe. The alternative -- substituting
+		'' '*this.__cap_x' for every 'x' in the captured tokens -- would also
+		'' rewrite a LOCAL named x declared inside the lambda, silently
+		'' redirecting it to the capture. With a real declaration, FreeBASIC's
+		'' own scoping decides, and a colliding local is a duplicate-definition
+		'' error the author can see.
+		''
+		'' typeof( ) avoids needing the captured type as text a second time, and
+		'' works for UDTs, strings and containers alike -- measured.
+		text = kw + " " + *symbGetName( lam->clo ) + "." + FB_INVOKE_NAME + " " + _
+		       genFlattenTokens( lam->hdrhead, firstline ) + LFCHAR
+
+		for i as integer = 0 to lam->capcount-1
+			with lam->caps( i )
+				if( .isref ) then
+					text += "dim byref as typeof( *this." + .fld + " ) " + _
+					        .id + " = *this." + .fld + LFCHAR
+				else
+					text += "dim byref as typeof( this." + .fld + " ) " + _
+					        .id + " = this." + .fld + LFCHAR
+				end if
+			end with
+		next
+
+		text += genFlattenTokens( lam->tokhead, firstline ) + LFCHAR + "end " + kw
+	else
+		text = kw + " " + *symbGetName( lam->sym ) + " " + _
+		       genFlattenTokens( lam->hdrhead, firstline ) + LFCHAR + _
+		       genFlattenTokens( lam->tokhead, firstline ) + LFCHAR + _
+		       "end " + kw
+	end if
+
 
 	'' hidelocals = FALSE: this replay parses a BODY, and its own locals and
 	'' parameters must shadow normally. See genEnterGlobalScope( ).
@@ -326,6 +374,182 @@ sub lambdaDrainBodies( )
 	lambdactx.draining = FALSE
 end sub
 
+'' CaptureList  =  '[' ( (BYVAL|BYREF) Identifier (',' ...)* )? ']' .
+''
+'' Sits between the keyword and the parameter list, where nothing may legally
+'' appear today, so there is no ambiguity with array indexing.
+''
+'' EVERY CAPTURE CARRIES AN EXPLICIT MODE. No default, no bare '[ total ]', no
+'' C++-style '[&]' / '[=]' wildcards. In a language with manual lifetimes the
+'' mode is the lifetime question, and inferring it is how a closure ends up
+'' holding a reference to a destroyed frame. An EMPTY list is allowed and means
+'' the same as no list, so a capture can be deleted without re-punctuating.
+private function hCaptureList( byval lam as FB_LAMBDA ptr ) as integer
+	dim as FB_TOKEN tk = any
+	dim as FB_TKCLASS tc = any
+	dim as FBSYMCHAIN ptr chain_ = any
+
+	'' '['
+	lexSkipToken( LAMTOK_FLAGS )
+
+	if( lexGetToken( LAMTOK_FLAGS ) = CHAR_RBRACKET ) then
+		lexSkipToken( LAMTOK_FLAGS )
+		return TRUE
+	end if
+
+	do
+		if( lam->capcount >= LAMBDA_MAXCAPTURES ) then
+			errReport( FB_ERRMSG_TOOMANYCAPTURES )
+			return FALSE
+		end if
+
+		dim as integer isref = any
+
+		select case lexGetToken( LAMTOK_FLAGS )
+		case FB_TK_BYVAL
+			isref = FALSE
+		case FB_TK_BYREF
+			isref = TRUE
+		case else
+			errReport( FB_ERRMSG_CAPTURENEEDSMODE )
+			return FALSE
+		end select
+		lexSkipToken( LAMTOK_FLAGS )
+
+		if( lexGetClass( ) <> FB_TKCLASS_IDENTIFIER ) then
+			errReport( FB_ERRMSG_EXPECTEDIDENTIFIER )
+			return FALSE
+		end if
+
+		with lam->caps( lam->capcount )
+			.id = *lexGetText( )
+			.isref = isref
+
+			'' Resolved HERE, at the expression, which is the only place the
+			'' captured variable is in scope: the closure struct and its
+			'' __FBINVOKE are built at module level, where it is not.
+			chain_ = symbLookup( lexGetText( ), tk, tc )
+			if( chain_ = NULL ) then
+				errReportEx( FB_ERRMSG_CAPTUREUNDECLARED, .id )
+				return FALSE
+			end if
+			.sym = chain_->sym
+			if( .sym = NULL ) then
+				errReportEx( FB_ERRMSG_CAPTUREUNDECLARED, .id )
+				return FALSE
+			end if
+			if( symbIsVar( .sym ) = FALSE ) then
+				errReportEx( FB_ERRMSG_CAPTUREUNDECLARED, .id )
+				return FALSE
+			end if
+
+			.fld = "__cap_" & .id
+		end with
+
+		lam->capcount += 1
+		lexSkipToken( LAMTOK_FLAGS )
+
+		if( lexGetToken( LAMTOK_FLAGS ) <> CHAR_COMMA ) then
+			exit do
+		end if
+		lexSkipToken( LAMTOK_FLAGS )
+	loop
+
+	if( lexGetToken( LAMTOK_FLAGS ) <> CHAR_RBRACKET ) then
+		errReport( FB_ERRMSG_EXPECTEDRBRACKET )
+		return FALSE
+	end if
+	lexSkipToken( LAMTOK_FLAGS )
+
+	function = TRUE
+end function
+
+'' Build the closure struct, at module level, as replayed source.
+''
+''     type <Clo>
+''         as <T> ptr __cap_total      '' BYREF -- a pointer to the caller's local
+''         as <T>     __cap_base       '' BYVAL -- a copy taken at evaluation
+''         declare <kind> __FBINVOKE <header>
+''     end type
+''
+'' Hoisted to module level because a UDT declared inside a scope may not have
+'' member procedures (hDisallowNestedClasses), and __FBINVOKE is one. That is
+'' deviation D1, already carried by the generics work: the closure TYPE outlives
+'' the scope that named it.
+''
+'' The field types come from symbTypeToStr( ) on the captured symbol, because the
+'' hoisted declaration cannot name the types of locals that are not in scope
+'' there -- 'typeof( total )' would not resolve at module level.
+private function hBuildClosure _
+	( _
+		byval lam as FB_LAMBDA ptr, _
+		byref cloid as zstring, _
+		byref hdr as string _
+	) as integer
+
+	dim as FB_PARSERSTATE st
+	dim as FB_GENSCOPE gs
+	dim as string text
+	dim as string kw = hKeyword( lam->kindtk )
+
+	text = "type " + cloid + LFCHAR
+
+	for i as integer = 0 to lam->capcount-1
+		with lam->caps( i )
+			dim as string ty = symbTypeToStr( symbGetFullType( .sym ), symbGetSubtype( .sym ) )
+			if( .isref ) then
+				text += "as " + ty + " ptr " + .fld + LFCHAR
+			else
+				text += "as " + ty + " " + .fld + LFCHAR
+			end if
+		end with
+	next
+
+	text += "declare " + kw + " " + FB_INVOKE_NAME + " " + hdr + LFCHAR
+	text += "end type"
+
+	genEnterGlobalScope( gs, NULL, TRUE )
+
+	'' see the note in cLambdaExpr: widen the top entry, never empty the stack
+	dim as FB_CMPSTMTSTK ptr stk = stackGetTOS( @parser.stmt.stk )
+	dim as integer savedmask = 0
+	if( stk ) then
+		savedmask = stk->allowmask
+		stk->allowmask = -1
+	end if
+
+	'' env.includerec is bumped for the duration too. cProgram( ) ends with
+	''     if( env.includerec = 0 ) then cCompStmtCheck( )
+	'' and at the replay text's EOF that check sees the CALL SITE's still-open
+	'' SUB and reports 'error 125: Expected END SUB'. A replay is not the end of
+	'' the module, so it must not run the end-of-module check.
+	''
+	'' This is what emptying stk.tos used to hide, before that was replaced --
+	'' one hack was covering for the other.
+	env.includerec += 1
+	lambdactx.inreplay += 1
+	if( genReplayBegin( st, text, lam->srcline, lam->srcfile ) ) then
+		cProgram( )
+		genReplayEnd( st )
+	end if
+	lambdactx.inreplay -= 1
+	env.includerec -= 1
+
+	if( stk ) then
+		stk->allowmask = savedmask
+	end if
+	genLeaveGlobalScope( gs )
+
+	lam->clo = symbLookupByNameAndClass( @symbGetGlobalNamespc( ), cloid, _
+	                                     FB_SYMBCLASS_STRUCT, FALSE )
+	if( lam->clo = NULL ) then
+		return FALSE
+	end if
+
+	lam->clo->attrib or= FB_SYMBATTRIB_CLOSURE
+	function = TRUE
+end function
+
 '' LambdaExpr  =  SUB|FUNCTION '(' ParamList? ')' (AS SymbolType)? Body
 ''                END SUB|FUNCTION .
 ''
@@ -358,11 +582,27 @@ function cLambdaExpr( ) as ASTNODE ptr
 	lam->toktail = NULL
 	lam->srcline = startline
 	lam->done    = TRUE
+	lam->clo     = NULL
+	lam->capcount = 0
 	lam->srcfile = ZstrAllocate( len( env.inf.name ) )
 	*lam->srcfile = env.inf.name
 
 	'' SUB|FUNCTION
 	lexSkipToken( LAMTOK_FLAGS )
+
+	'' CaptureList?
+	dim as integer iscapturing = FALSE
+	if( lexGetToken( LAMTOK_FLAGS ) = CHAR_LBRACKET ) then
+		if( hCaptureList( lam ) = FALSE ) then
+			return NULL
+		end if
+
+		'' An EMPTY list is the non-capturing form, not a closure with no
+		'' captures: a closure struct with no fields is refused outright by
+		'' FreeBASIC ('error 256: An ENUM, TYPE or UNION cannot be empty'), and
+		'' 'sub[ ]( ... )' should mean exactly what 'sub( ... )' means anyway.
+		iscapturing = (lam->capcount > 0)
+	end if
 
 	if( hCaptureLambdaHeader( lam ) = FALSE ) then
 		return NULL
@@ -378,6 +618,73 @@ function cLambdaExpr( ) as ASTNODE ptr
 	id = *symbUniqueId( TRUE )
 	kw = hKeyword( kindtk )
 
+	'' ------------------------------------------------------------ capturing
+	if( iscapturing ) then
+		'' A closure has state and a procedure pointer has nowhere to put it, so
+		'' the conversion does not exist. Reported HERE, against the expected
+		'' type, because the fallback is 'error 24: Invalid data types', which is
+		'' true but never mentions the capture that caused it.
+		''
+		'' parser.ctx_dtype is the target's type during an initializer or an
+		'' assignment, which is where this is written in practice:
+		''     dim f as Fn = function[ byval bias ]( ... )
+		if( typeGetDtAndPtrOnly( parser.ctx_dtype ) = typeAddrOf( FB_DATATYPE_FUNCTION ) ) then
+			errReport( FB_ERRMSG_CLOSURETOPROCPTR )
+		end if
+
+		dim as string hdr = genFlattenTokens( lam->hdrhead, firstline )
+
+		if( hBuildClosure( lam, id, hdr ) = FALSE ) then
+			return NULL
+		end if
+
+		lam->done = FALSE
+		lambdactx.pending += 1
+
+		'' The value of the expression is a closure OBJECT living in the
+		'' enclosing scope -- no allocation, destroyed with the frame.
+		''
+		'' symbAddImplicitVar, not a temp: a temp dies at the end of the
+		'' statement, and 'var f = sub[ ... ]' has to outlive that.
+		dim as FBSYMBOL ptr tmp = symbAddImplicitVar( FB_DATATYPE_STRUCT, lam->clo, 0 )
+		if( tmp = NULL ) then
+			return NULL
+		end if
+
+		'' The symbol alone is not enough. Under the C backend a local is
+		'' emitted from its DECL node, so without this the generated C used the
+		'' temp without declaring it:
+		''     error: 'TMP$3$1' undeclared (first use in this function)
+		astAdd( astNewDECL( tmp, TRUE ) )
+
+		'' Fill the captures. These are emitted BEFORE the statement being
+		'' parsed, which is where they belong: a BYVAL capture is a snapshot
+		'' taken when the lambda expression is evaluated.
+		for i as integer = 0 to lam->capcount-1
+			with lam->caps( i )
+				dim as FBSYMBOL ptr fld = symbLookupByNameAndClass( lam->clo, _
+				                          .fld, FB_SYMBCLASS_FIELD, FALSE )
+				if( fld = NULL ) then
+					return NULL
+				end if
+
+				dim as ASTNODE ptr dst = astBuildVarField( tmp, fld )
+				dim as ASTNODE ptr src = any
+				if( .isref ) then
+					src = astNewADDROF( astNewVAR( .sym ) )
+				else
+					src = astNewVAR( .sym )
+				end if
+
+				astAdd( astNewASSIGN( dst, src ) )
+			end with
+		next
+
+		return astNewVAR( tmp )
+	end if
+
+	'' -------------------------------------------------------- non-capturing
+
 	'' Replay the HEADER now, as a declaration, so this expression has a real
 	'' FBSYMBOL to take the address of. The body cannot be parsed here -- there
 	'' is already a procedure open -- so only the prototype is created.
@@ -390,24 +697,35 @@ function cLambdaExpr( ) as ASTNODE ptr
 	'' genEnterGlobalScope( ) moves the PARSE to module level, but the
 	'' compound-statement stack still holds whatever is open at the call site --
 	'' the enclosing SUB, an IF, a FOR. cProcDecl( ) gates on that stack through
-	'' cCompStmtIsAllowed( ), so the replayed 'declare' was refused with
+	'' cCompStmtIsAllowed( ), so a replayed declaration is refused with
 	'' 'error 96: Illegal inside a compound statement or scoped block'.
 	''
-	'' The stack is emptied for the duration. Done BEFORE genReplayBegin( ), so
-	'' the balance assert in genRestoreState( ) compares NULL against the NULL it
-	'' saved, and restored after genReplayEnd( ) so the caller's own nesting is
-	'' untouched.
-	dim as any ptr savedtos = parser.stmt.stk.tos
-	parser.stmt.stk.tos = NULL
+	'' Widening the TOP entry's allowmask, NOT setting stk.tos to NULL.
+	'' cCompStmtIsAllowed( ) only ever inspects the top, so this is enough -- and
+	'' emptying the stack is actively wrong: with tos = NULL the next push reuses
+	'' the first node and OVERWRITES the enclosing SUB's entry. A bare 'declare'
+	'' pushes nothing so it never showed, but the closure replay's
+	'' 'type ... end type' does, and every statement after the lambda then failed
+	'' with 'error 61: Illegal inside functions'.
+	dim as FB_CMPSTMTSTK ptr stk = stackGetTOS( @parser.stmt.stk )
+	dim as integer savedmask = 0
+	if( stk ) then
+		savedmask = stk->allowmask
+		stk->allowmask = -1
+	end if
 
+	env.includerec += 1
 	lambdactx.inreplay += 1
 	if( genReplayBegin( st, text, startline, lam->srcfile ) ) then
 		cProgram( )
 		genReplayEnd( st )
 	end if
 	lambdactx.inreplay -= 1
+	env.includerec -= 1
 
-	parser.stmt.stk.tos = savedtos
+	if( stk ) then
+		stk->allowmask = savedmask
+	end if
 
 	genLeaveGlobalScope( gs )
 

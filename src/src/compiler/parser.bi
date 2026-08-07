@@ -1240,6 +1240,10 @@ declare function genReplayBegin _
 
 declare sub genReplayEnd( byref st as FB_PARSERSTATE )
 
+'' The name of a closure struct's call operator. Shared so the call site in
+'' parser-expr-unary.bas can find it.
+#define FB_INVOKE_NAME "__FBINVOKE"
+
 declare function cLambdaExpr( ) as ASTNODE ptr
 declare sub lambdaDrainBodies( )
 

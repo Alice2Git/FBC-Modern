@@ -166,6 +166,26 @@ function cStrIdxOrMemberDeref _
 		'' ('->' | '[')? (possible on non-pointer UDT types due to operator overloading)
 		case FB_TK_FIELDDEREF, CHAR_LBRACKET
 			expr = cMemberDeref( dtype, subtype, expr, TRUE )
+
+		'' closure '(' ?
+		''
+		'' A capturing lambda's value is a synthesised struct, so calling it
+		'' means calling its __FBINVOKE. Rewritten here so that BOTH lambda
+		'' kinds are called the same way from source: a non-capturing lambda is
+		'' a plain procptr and already worked.
+		case CHAR_LPRNT
+			if( symbIsClosure( subtype ) ) then
+				dim as FBSYMBOL ptr inv = symbLookupByNameAndClass( subtype, _
+				                          FB_INVOKE_NAME, FB_SYMBCLASS_PROC, FALSE )
+				if( inv <> NULL ) then
+					'' cProcCall( ) handles a SUB as well as a FUNCTION;
+					'' ISFUNC only when there is a result to keep
+					if( symbGetType( inv ) = FB_DATATYPE_VOID ) then
+						return cProcCall( NULL, inv, NULL, expr, TRUE, 0 )
+					end if
+					return cFunctionCall( NULL, inv, NULL, expr, 0 )
+				end if
+			end if
 		end select
 
 	end select

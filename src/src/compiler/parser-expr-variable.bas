@@ -1056,6 +1056,7 @@ function cVariableEx overload _
 
 	dim as ASTNODE ptr varexpr = any, idxexpr = any, descexpr = any
 	dim as integer is_byref = any, is_funcptr = any, is_array = any
+	dim as integer isclosurecall = FALSE
 
 	function = NULL
 
@@ -1123,8 +1124,19 @@ function cVariableEx overload _
 				'' check if calling functions through pointers
 				is_funcptr = (symbGetType( sym ) = typeAddrOf( FB_DATATYPE_FUNCTION ))
 
+				'' A capturing lambda's value is a closure STRUCT, and calling it
+				'' means calling its __FBINVOKE. Leave the '(' alone so
+				'' cStrIdxOrMemberDeref( ) can rewrite it -- reporting
+				'' 'Array not dimensioned' here would be the last word, since
+				'' this branch also eats the argument list.
+				if( symbGetType( sym ) = FB_DATATYPE_STRUCT ) then
+					if( symbGetSubtype( sym ) <> NULL ) then
+						isclosurecall = symbIsClosure( symbGetSubtype( sym ) )
+					end if
+				end if
+
 				'' using (...) with scalars?
-				if( (is_array = FALSE) and (is_funcptr = FALSE) ) then
+				if( (is_array = FALSE) and (is_funcptr = FALSE) and (isclosurecall = FALSE) ) then
 					errReport( FB_ERRMSG_ARRAYNOTALLOCATED, TRUE )
 					'' error recovery: skip the index
 					lexSkipToken( )
@@ -1132,6 +1144,16 @@ function cVariableEx overload _
 				end if
 			end if
 		else
+			'' '( )' with nothing between. A zero-argument closure call lands
+			'' here rather than in the branch above, which only runs when the
+			'' look-ahead is NOT ')'. Missing this made 'f( )' report
+			'' 'error 10: Expected =' while 'f( 1 )' already worked.
+			if( symbGetType( sym ) = FB_DATATYPE_STRUCT ) then
+				if( symbGetSubtype( sym ) <> NULL ) then
+					isclosurecall = symbIsClosure( symbGetSubtype( sym ) )
+				end if
+			end if
+
 			'' array? could be a func ptr call too..
 			if( is_array ) then
 				check_fields = FALSE
@@ -1172,6 +1194,37 @@ function cVariableEx overload _
 
 	assert( varexpr->dtype = sym->typ )
 	assert( varexpr->subtype = sym->subtype )
+
+	'' Calling a capturing lambda: 'f( 3 )' is a call to the closure's
+	'' __FBINVOKE, so both lambda kinds are called the same way from source.
+	''
+	'' Placed HERE, after the BYREF deref above, not next to astNewVAR( ). A
+	'' BYREF parameter's VAR node is a POINTER until that deref, so passing it
+	'' as the instance gave
+	''     error 58: Type mismatch, at parameter 1 of __FBINVOKE()
+	'' which is exactly the case that matters: a capturing lambda reaches a
+	'' generic through 'byref f as F'.
+	''
+	'' Built here rather than in cStrIdxOrMemberDeref( ) as the spec suggests:
+	'' an identifier goes through cAtom( ), and cHighestPrecExpr( ) RETURNS that
+	'' directly without ever calling cStrIdxOrMemberDeref( ), so a hook there is
+	'' unreachable for the one spelling that matters.
+	if( isclosurecall ) then
+		dim as FBSYMBOL ptr inv = symbLookupByNameAndClass( symbGetSubtype( sym ), _
+		                          FB_INVOKE_NAME, FB_SYMBCLASS_PROC, FALSE )
+		if( inv <> NULL ) then
+			'' Dispatched on the invoke's KIND. cFunctionCall( ) returns NULL
+			'' for a SUB, so a bare 'f( 3 )' statement fell through to
+			'' 'error 17: Syntax error'; cProcCall( ) yields no value for a
+			'' FUNCTION even with FB_PARSEROPT_ISFUNC, so 'print f( 5 )' printed
+			'' nothing. Each kind needs its own entry point.
+			if( symbGetType( inv ) = FB_DATATYPE_VOID ) then
+				return cProcCall( NULL, inv, NULL, varexpr, TRUE, 0 )
+			end if
+			return cFunctionCall( NULL, inv, NULL, varexpr, 0 )
+		end if
+	end if
+
 
 	if( is_funcptr = FALSE ) then
 		if( check_fields ) then

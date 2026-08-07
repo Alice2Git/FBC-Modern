@@ -466,6 +466,10 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_BRANCHCROSSINGDEFER                '/ @"Branch crossing a DEFER statement", _
 		/'FB_ERRMSG_UNBALANCEDLAMBDAHEADER             '/ @"Malformed lambda header, expected ')' or a result type", _
 		/'FB_ERRMSG_UNBALANCEDLAMBDABODY               '/ @"Unterminated lambda body, expected END SUB or END FUNCTION", _
+		/'FB_ERRMSG_TOOMANYCAPTURES                    '/ @"Too many captures in a lambda capture list", _
+		/'FB_ERRMSG_CAPTURENEEDSMODE                   '/ @"Every capture needs an explicit BYVAL or BYREF", _
+		/'FB_ERRMSG_CAPTUREUNDECLARED                  '/ @"Captured variable not declared", _
+		/'FB_ERRMSG_CLOSURETOPROCPTR                   '/ @"A capturing lambda cannot convert to a procedure pointer", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

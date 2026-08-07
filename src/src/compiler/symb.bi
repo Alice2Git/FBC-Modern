@@ -204,6 +204,7 @@ enum FB_SYMBATTRIB
 	FB_SYMBATTRIB_GENERICINST      = &h04000000  '' an instantiation of a generic - affects name mangling
 	FB_SYMBATTRIB_WEAK             = &h08000000  '' emit weak: one copy survives if several modules define it
 	FB_SYMBATTRIB_DEFER            = &h10000000  '' VARs: not a variable at all -- a registered DEFER statement
+	FB_SYMBATTRIB_CLOSURE          = &h20000000  '' STRUCTs: a synthesised capturing-lambda closure
 end enum
 
 '' proc symbol attributes mask
@@ -2666,6 +2667,10 @@ declare sub symbProcRecalcRealType( byval proc as FBSYMBOL ptr )
 '' walks find it with no change, but it names no storage and must be skipped
 '' wherever variables are ALLOCATED or EMITTED.
 #define symbIsDefer(s) ((s->attrib and FB_SYMBATTRIB_DEFER) <> 0)
+
+'' A synthesised closure struct. Calling one with '(' means calling its
+'' __FBINVOKE, so both lambda kinds are called the same way from source.
+#define symbIsClosure(s) ((s->attrib and FB_SYMBATTRIB_CLOSURE) <> 0)
 #define symbGetDeferTree(s) s->var_.defertree
 
 #define symbIsParamVarByDesc(s) ((s->attrib and FB_SYMBATTRIB_PARAMVARBYDESC) <> 0)
