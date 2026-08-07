@@ -987,10 +987,22 @@ end function
 '' Flatten a captured chain back into source text.
 ''
 '' Tokens are separated by a single space, which is always safe because they
-'' were produced by the lexer in the first place.  Line structure is rebuilt
-'' from the recorded line numbers rather than from captured EOL tokens, so a
-'' body using '_' line continuations still reports the right lines: the lexer
-'' hides the continuation, but the line number still advances across it.
+'' were produced by the lexer in the first place.
+''
+'' Line structure comes from two sources that must be reconciled, or the replayed
+'' text drifts out of step with the source it is blamed on:
+''
+''   - a real end of line is already in the chain, as a captured EOL token whose
+''     text IS the newline, so emitting that token advances the line by itself
+''   - a token whose line number is further on than the emitted text has reached
+''     means lines were consumed without producing tokens -- a '_' continuation
+''     (the lexer hides it) or a multi-line /' '/ comment (skipped, not recorded)
+''
+'' Padding must therefore track what has actually been emitted, and must NOT
+'' close a logical line that the source kept open.  A gap not preceded by an EOL
+'' token is a continuation, and is padded with '_' so it stays one statement --
+'' padding it with a bare newline is what used to split a parameter list written
+'' in the house style across lines, and the error surfaced only at instantiation.
 function genFlattenTokens _
 	( _
 		byval tokhead as FB_GENTOK ptr, _
@@ -1000,6 +1012,7 @@ function genFlattenTokens _
 	dim as FB_GENTOK ptr n = tokhead
 	dim as string res
 	dim as integer curline = any
+	dim as integer preveol = TRUE
 
 	if( n = NULL ) then
 		firstline = 0
@@ -1011,12 +1024,23 @@ function genFlattenTokens _
 
 	while( n )
 		while( curline < n->linenum )
+			if( preveol = FALSE ) then
+				res += "_"
+			end if
 			res += LFCHAR
 			curline += 1
 		wend
 
 		res += *n->text
 		res += " "
+
+		'' only an EOL token carries a bare newline as its text
+		if( *n->text = LFCHAR ) then
+			curline += 1
+			preveol = TRUE
+		else
+			preveol = FALSE
+		end if
 
 		n = n->next
 	wend
