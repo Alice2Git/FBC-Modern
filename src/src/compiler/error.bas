@@ -461,6 +461,15 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_FOREACHMULTIDIM                    '/ @"Cannot FOR EACH over a multi-dimensional array, iterate one dimension explicitly", _
 		/'FB_ERRMSG_FOREACHNOBYREF                     '/ @"Cannot bind BYREF in FOR EACH", _
 		/'FB_ERRMSG_FOREACHNEXTVAR                     '/ @"NEXT cannot name the FOR EACH variable, it is scoped to the loop body", _
+		/'FB_ERRMSG_DEFERNEEDSSTATEMENT                '/ @"DEFER requires a statement", _
+		/'FB_ERRMSG_DEFERATMODULELEVEL                 '/ @"DEFER is not allowed at module level", _
+		/'FB_ERRMSG_BRANCHCROSSINGDEFER                '/ @"Branch crossing a DEFER statement", _
+		/'FB_ERRMSG_UNBALANCEDLAMBDAHEADER             '/ @"Malformed lambda header, expected ')' or a result type", _
+		/'FB_ERRMSG_UNBALANCEDLAMBDABODY               '/ @"Unterminated lambda body, expected END SUB or END FUNCTION", _
+		/'FB_ERRMSG_TOOMANYCAPTURES                    '/ @"Too many captures in a lambda capture list", _
+		/'FB_ERRMSG_CAPTURENEEDSMODE                   '/ @"Every capture needs an explicit BYVAL or BYREF", _
+		/'FB_ERRMSG_CAPTUREUNDECLARED                  '/ @"Captured variable not declared", _
+		/'FB_ERRMSG_CLOSURETOPROCPTR                   '/ @"A capturing lambda cannot convert to a procedure pointer", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

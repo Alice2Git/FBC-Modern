@@ -1,6 +1,55 @@
 Version 1.20.0
 
 [added]
+- DEFER: 'defer <statement>' runs the statement on the way out of the enclosing
+  SCOPE, in reverse registration order, on every path -- falling off the end,
+  EXIT SUB/FUNCTION, RETURN, EXIT FOR/WHILE/DO including the multi-level forms,
+  and GOTO out of any number of nested scopes. In a loop body it runs every
+  iteration. It is for the one-off CloseHandle/DeleteObject/free that does not
+  justify declaring a type, which is the most common resource-leak shape in
+  Win32 code. Defers and local destructors interleave in one reverse pass
+  rather than running as two. 'defer' is a CONTEXTUAL keyword: it is read as
+  one only when the next token begins a statement, so existing code using
+  'defer' as a variable, array, field or shared name is unaffected. The one
+  incompatibility is a paren-less call in statement position to a sub named
+  'defer'.
+- DEFER: the statement is evaluated AT EXIT, not at registration, so it sees
+  the current value of anything it reads. Registration is LEXICAL -- cleanup is
+  derived from the scope's symbol table at compile time -- so a branch that
+  jumps PAST a defer does not skip it, and crossing one is refused (error 349)
+  for the same reason crossing a ctor'd local is.
+- Lambdas: 'sub'/'function' in EXPRESSION position, with the body written where
+  it is used. A NON-CAPTURING lambda lowers to a plain module-level procedure
+  plus its address, so it is type-identical to '@myproc' and works with every
+  existing procedure-pointer API; a calling convention may be given, which
+  qsort and the Win32 callbacks need. Both keywords are a syntax error in
+  expression position in stock fbc, so nothing that compiles today changes
+  meaning.
+- Lambdas: a CAPTURING lambda, 'sub[ byref total ]( ... )', synthesises a
+  closure struct holding one field per capture, living in the enclosing scope --
+  no heap, no allocation, destroyed with the frame. Every capture states BYVAL
+  or BYREF explicitly; there is no default and no '[&]'/'[=]' wildcard, because
+  in a language with manual lifetimes the mode is the lifetime question. A
+  BYVAL capture is a snapshot taken when the lambda is evaluated. Both kinds are
+  called the same way, 'f( 3 )'. A capturing lambda cannot convert to a
+  procedure pointer (error 355) -- it has state and a procptr has nowhere to put
+  it -- so it is passed to a generic parameter instead, which is what the new
+  FB.ForEach takes. KNOWN LIMIT: a capture's type must be nameable in source, so
+  containers cannot yet be captured.
+- FB.Optional( of T ): a value that might not be there, replacing the
+  encode-absence-in-the-value idiom that is spelled differently in every library
+  and indistinguishable from a real result whenever the sentinel is legal. Zero
+  is a value. HasValue/Value/ValueOr/Clear, built by the free Some( x ) and
+  None( of T )( ). Library only -- no compiler change.
+- FB.Result( of T, E ): a value, or the reason there isn't one, putting the
+  error in the return type instead of a global status code. IsOk/Value/Failure/
+  ValueOr, built by Ok( ) and Fail( ). A default-constructed Result is a
+  FAILURE, so a forgotten assignment cannot read as success. Reading the wrong
+  side raises, symmetrically. Library only. Ignoring a Result remains a
+  convention, not an error.
+- FB.ForEach( of T, F ) on FB.Array: applies f to every element byref. Generic
+  rather than procptr-taking, so it accepts a capturing lambda as well as a
+  non-capturing one or a plain '@proc'.
 - USTRING: a portable, dynamic Unicode string type. A code unit is uint16 on
   EVERY target, so unlike WSTRING (wchar_t: 2 bytes on Windows, 4 on Linux,
   1 on DOS) the representation does not change between platforms. Both a
@@ -119,6 +168,17 @@ Version 1.20.0
   (use TryGet or Contains to read); copy and assignment are DEEP for all four.
   A user type becomes a Map key or Set element by overloading HashOf, see
   'inc/fb/hash.bi'.
+
+[fixed]
+- Generics: a variable named after a type parameter at the INSTANTIATION SITE
+  shadowed it, so a local named 't' broke every 'of T' generic --
+  'error 14: Expected identifier, found T' -- and fbc then HUNG rather than
+  exiting. 'e' did the same to any 'of E'. hsymbLookupTypeNS( ) searches locals
+  before the type's namespace, which is right inside an ordinary method, but a
+  generic body is replayed at module level while the site's block-scope locals
+  are still live and still flagged LOCAL. That pass is now suppressed for the
+  replays that parse DECLARATIONS; a member BODY replay still runs it, so the
+  generic's own locals and parameters shadow its fields as before.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

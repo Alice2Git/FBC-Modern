@@ -142,16 +142,61 @@ rest are never checked.
 
 ## The environmental floor
 
-**11 `threadcall_` unit-test failures + 4 `cpp` log-test failures.** The 11 are
-`-DDISABLE_FFI` (above); the 4 are a missing `libstdc++` in this mingw64, proven
-by rebuilding at HEAD with the changes stashed. A 12th unit-test failure or a
-5th log-test failure is a regression.
+**THE FLOOR IS PER-BACKEND. It is not the same number under gcc and gas64.**
+
+| Backend | Unit-test failures | Which |
+|---|---|---|
+| gcc (default) | **11** | `threads.threadcall_` |
+| `GEN=gas64` | **12** | `threads.threadcall_` (11) + `string_.fbstr_split` (1) |
+
+Plus **4 `cpp` log-test failures** under both. The 11 are `-DDISABLE_FFI`
+(above); the 4 are a missing `libstdc++` in this mingw64, proven by rebuilding at
+HEAD with the changes stashed.
+
+So a 12th failure under gcc is a regression; under gas64 a **13th** is, and the
+12th is only a regression if it is not `fbstr_split`.
+
+### The gas64 `fbstr_split` failure is a REAL BUG, not an environment gap
+
+Unlike the other floor entries, this one is a defect in this tree. It is parked
+rather than fixed only because it is unrelated to the work in flight.
+
+`FB.Split`'s third argument -- the `boolean` case-insensitivity flag -- is
+miscompiled by the gas64 backend. The default is ignored AND an explicit `false`
+is ignored, so the function always behaves case-insensitively:
+
+```freebasic
+#include once "fb/string.bi"
+#include once "fb/array.bi"
+using FB
+print Split( "aXbXc", "x" ).Count( )           '' gcc 1   gas64 3
+print Split( "aXbXc", "x", true ).Count( )     '' gcc 3   gas64 3
+print Split( "aXbXc", "x", false ).Count( )    '' gcc 1   gas64 3
+```
+
+It fails `string/fbstr_split.bas(113)`. Wrong code, not a diagnostic, and it is
+the shipped default backend for day-to-day builds -- so anything relying on a
+case-sensitive `Split` is wrong under gas64 today.
+
+**How this was missed:** the floor of 11 was recorded from a **gcc** run, and the
+"both backends" claim in the string-library section below was not separately
+reconciled per backend. Confirmed pre-existing by stashing the generics-lookup
+fix, rebuilding, and reproducing identically -- it is not caused by that change.
 
 ## Reconcile the log-test count — do not just read "no failures"
 
 `passed + failed = total logs`, and `passed` should move by exactly the number
-of tests added. The count after the generics work is
+of tests added. The count after the generics work was
 **1727 passed / 4 failed / 1731 logs**.
+
+After `Optional` and `Result` (8 new files in `src/tests/generics/`) it was
+**1740 passed / 0 failed / 1740 logs**; after `defer` (2 more) it is
+**1742 passed / 0 failed / 1742 logs**; after the lambdas
+**1745**; and with the multi-module lambda test
+**1746 passed / 0 failed / 1746 logs**, measured WITH `-p C:/dev/utils/mingw64/lib`
+— that flag is what turns the 4 `cpp` failures into passes, so quote the flag
+alongside the number or the two figures look like a regression in either
+direction.
 
 Count the logs with:
 
@@ -217,6 +262,10 @@ Added by the string-library work, on branch `feat/fb-string-library`.
 The 11 are the same `fbc_tests.threads.threadcall_` failures documented above —
 `libffi` absent — and no others. **Any 12th failure is a regression.**
 
+That figure is the **gcc** run. Under `GEN=gas64` the same tree reports **12
+failed**, the extra one being `string_.fbstr_split` — a real gas64 miscompile of
+Split's `boolean` argument, documented under "The environmental floor" above.
+
 The delta from the 1,154,420 baseline is 1,501 assertions across five new suites
 in `src/tests/string/`:
 
@@ -257,7 +306,8 @@ shipped compilers were rebuilt and the string suites were executed under each:
 
 | Target | How | Result |
 |---|---|---|
-| win64 | full gate, both backends | 1,155,921 / 11 failed (the libffi baseline) |
+| win64 | full gate, gcc | 1,155,921 / 11 failed (the libffi baseline) |
+| win64 | full gate, gas64 | 1,155,921 / **12** failed — the 11 plus the `fbstr_split` gas64 miscompile; this row originally claimed 11 for both backends and was wrong |
 | win32 | string suites under the rebuilt **shipped** `fbc32.exe` | **1,501 / 1,501** |
 | linux-x86_64 | string suites under the natively-built **shipped** `fbc` (WSL2) | **1,501 / 1,501** |
 

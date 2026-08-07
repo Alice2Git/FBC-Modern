@@ -37,46 +37,8 @@
 '' parser.stmt.cnt is a different thing despite living next door: a running
 '' count of statement separators, not a depth.  It IS copied, because replaying
 '' a procedure body runs cProgram(), which bumps it once per line.
-type FB_PARSERSTATE
-	'' parser
-	options         as FB_PARSEROPT
-	prntcnt         as integer
-	nsprefix        as FBSYMCHAIN ptr
-	mangling        as FB_MANGLING
-	stage           as uinteger
-	scope           as uinteger
-	currproc        as FBSYMBOL ptr
-	currblock       as FBSYMBOL ptr
-	ctx_dtype       as integer
-	ctxsym          as FBSYMBOL ptr
-	have_eq         as integer
-	stmtcnt         as integer
-	stmttos         as any ptr                  '' compound-stmt stack top, for the balance assert
-
-	'' cProcHeader's pending procedure name.
-	''
-	'' A replay is triggered from the MIDDLE of cProcHeader whenever a parameter
-	'' or return type names a generic, and the instantiated type's own member
-	'' prototypes run through cProcHeader again.  Without this,
-	''     declare function GetIterator( ) as ArrayIterator( of T )
-	'' was added under the name of ArrayIterator's LAST member, and GetIterator
-	'' itself never existed -- the body then failed with 'error 158: Declaration
-	'' outside the original namespace or class'.
-	procheaderid    as zstring * FB_MAXNAMELEN+1
-
-	'' ast
-	astproc         as ASTNODE ptr
-	astblock        as ASTNODE ptr
-	doemit          as integer
-	typeinicount    as integer
-
-	'' input file
-	inf             as FBFILE
-
-	'' error context: the one-error-per-statement filter keys off this, and a
-	'' replay must not make the caller's next real error disappear
-	laststmt        as integer
-end type
+'' FB_PARSERSTATE and FB_GENSCOPE moved to parser.bi -- parser-lambda.bas
+'' reuses this same replay/scope machinery.
 
 sub genSaveState( byref st as FB_PARSERSTATE )
 	st.options      = parser.options
@@ -187,17 +149,7 @@ end sub
 '' because a namespace nested in another can reference the outer one's names the
 '' same way.  symbNamespaceSearchPush is refcounted, so this composes with a real
 '' USING on the same namespace and with nested instantiations.
-type FB_GENSCOPE
-	scope           as uinteger
-	currproc        as FBSYMBOL ptr
-	currblock       as FBSYMBOL ptr
-	astproc         as ASTNODE ptr
-	astblock        as ASTNODE ptr
-	symtb           as FBSYMBOLTB ptr
-	hashtb          as FBHASHTB ptr
-	ns              as FBSYMBOL ptr
-	declns          as FBSYMBOL ptr             '' generic's declaring ns, or NULL
-end type
+
 
 '' Push/pop every namespace from the generic's declaring namespace up to global.
 private sub hDeclNsSearch( byval declns as FBSYMBOL ptr, byval ispush as integer )
@@ -214,10 +166,11 @@ private sub hDeclNsSearch( byval declns as FBSYMBOL ptr, byval ispush as integer
 	loop
 end sub
 
-private sub genEnterGlobalScope _
+sub genEnterGlobalScope _
 	( _
 		byref gs as FB_GENSCOPE, _
-		byval gensym as FBSYMBOL ptr _
+		byval gensym as FBSYMBOL ptr, _
+		byval hidelocals as integer _
 	)
 
 	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
@@ -248,13 +201,35 @@ private sub genEnterGlobalScope _
 	symbSetCurrentHashTb( @symbGetCompHashTb( glob ) )
 	symbSetCurrentNamespc( glob )
 
+	'' The replay is no longer inside the procedure or the block scope the
+	'' instantiation was requested from, but that scope's locals are still live
+	'' and still in the global hash table, so the "search locals first" pass in
+	'' hsymbLookupTypeNS() returns them ahead of this instantiation's type
+	'' parameters -- a variable named 't' at the site shadowed 'T' and broke
+	'' every 'of T' generic.
+	''
+	'' Only for replays that parse DECLARATIONS (a type body, a procedure
+	'' header): those create no locals of their own, so suppressing the pass
+	'' costs nothing.  A member BODY replay must NOT set this -- its own locals
+	'' and parameters are exactly what that pass is for, and hiding them made a
+	'' local shadowing a field resolve to the field instead.
+	gs.hidelocals = hidelocals
+	if( hidelocals ) then
+		symb.hidelocals += 1
+	end if
+
 	'' after the switch: the body is now parsed in the global namespace, and
 	'' this is what lets it still see the namespace it was declared in
 	hDeclNsSearch( gs.declns, TRUE )
 end sub
 
-private sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
+sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
 	hDeclNsSearch( gs.declns, FALSE )
+
+	if( gs.hidelocals ) then
+		assert( symb.hidelocals > 0 )
+		symb.hidelocals -= 1
+	end if
 
 	symbSetCurrentSymTb( gs.symtb )
 	symbSetCurrentHashTb( gs.hashtb )
@@ -804,7 +779,7 @@ private sub hReplayProcBody _
 	'' The drain point is already at module level, but it may sit inside a
 	'' user namespace block; the body belongs to the instantiation, not to
 	'' wherever the drain happened to land.
-	genEnterGlobalScope( gs, entry->gensym )
+	genEnterGlobalScope( gs, entry->gensym, FALSE )
 
 	'' Bind the type parameters: they are TYPEDEFs living in this
 	'' instantiation's synthetic namespace, and __FBGENINST resolves there too.
@@ -993,7 +968,7 @@ function genInstantiateType _
 	'' Everything from here to genLeaveGlobalScope builds the instantiation, and
 	'' it is built at module level in the global namespace regardless of where
 	'' the request came from.
-	genEnterGlobalScope( gs, gensym )
+	genEnterGlobalScope( gs, gensym, TRUE )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )
@@ -1229,7 +1204,7 @@ function genInstantiateProc _
 		return inst
 	end if
 
-	genEnterGlobalScope( gs, gensym )
+	genEnterGlobalScope( gs, gensym, TRUE )
 
 	nspid = "$gen$"
 	for i as integer = 1 to len( id )

@@ -283,6 +283,24 @@ sub Sort( of T )( byref a as Array( of T ) )
 	next
 end sub
 
+'' Apply f to every element, in order, passing each BYREF so it can be modified
+'' in place.
+''
+'' The reason this exists as a generic rather than taking a procedure pointer:
+'' a CAPTURING lambda is a closure object, not a procptr, so a procptr parameter
+'' could not accept one. 'of F' accepts either kind --
+''
+''     dim as longint total = 0
+''     ForEach( nums, sub[ byref total ]( byref v as long ) : total += v : end sub )
+''
+'' -- and a non-capturing lambda or a plain '@proc' still work, because calling
+'' through a generic parameter is just 'f( x )' either way.
+sub ForEach( of T, F )( byref a as Array( of T ), byref f as F )
+	for i as long = 0 to a.num-1
+		f( a.items( i ) )
+	next
+end sub
+
 function Array( of T ).GetIterator( ) as ArrayIterator( of T )
 	dim it as ArrayIterator( of T )
 	it.src = @this

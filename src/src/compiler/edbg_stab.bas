@@ -491,7 +491,7 @@ end sub
 private sub hDeclArgs(byval proc as FBSYMBOL ptr)
 	dim as FBSYMBOL ptr s = symbGetProcSymbTbHead( proc )
 	while (s)
-		if (symbIsVar(s)) then
+		if (symbIsVar(s) andalso (symbIsDefer(s) = FALSE)) then
 			'' Parameter?
 			if (symbIsParamVar(s)) then
 				edbgEmitProcArg(s)

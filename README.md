@@ -2,7 +2,7 @@
 
 # FBC-Modern
 
-**A FreeBASIC compiler with a portable Unicode string type, generics, an iterator protocol, `FOR EACH`, and a standard container library — built on fbc 1.20.0, with the existing language left untouched.**
+**A FreeBASIC compiler with a portable Unicode string type, generics, an iterator protocol, `FOR EACH`, a standard container library, `defer`, and lambdas — built on fbc 1.20.0, with the existing language left untouched.**
 
 [![Version](https://img.shields.io/badge/fbc-1.20.0-blue)](#)
 [![Targets](https://img.shields.io/badge/targets-win64%20%7C%20win32%20%7C%20linux--x86__64-green)](#)
@@ -18,13 +18,13 @@
 
 ## Hero
 
-FBC-Modern is a modified copy of the [FreeBASIC](https://www.freebasic.net/) compiler that adds four language features, each built on the one before it: **generics**, a **structural iterator protocol**, **`FOR EACH`**, and a **standard container library** — plus **`USTRING`**, a dynamic Unicode string type that is byte-identical on every target.
+FBC-Modern is a modified copy of the [FreeBASIC](https://www.freebasic.net/) compiler that adds language features, each built on the one before it: **generics**, a **structural iterator protocol**, **`FOR EACH`**, a **standard container library**, **`defer`** for scope-exit cleanup, and **lambdas** with optional capture — plus **`USTRING`**, a dynamic Unicode string type that is byte-identical on every target.
 
 It exists because FreeBASIC is a fast, direct, genuinely useful systems language with two long-standing gaps: there is no portable Unicode string, and there is no way to write a container that works for more than one element type without macros, `ANY PTR`, or copy-paste. Both gaps push real programs toward workarounds that lose type information — and both are fixable inside the existing language rather than beside it.
 
 It is for **existing FreeBASIC users** who want their code to keep compiling unchanged, **systems programmers** who want typed containers without a runtime, **library authors** who have been writing the same `Vector` five times, and **compiler people** who want to see a template system implemented as parser replay rather than as a separate template language.
 
-Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, and the existing `OPERATOR FOR/NEXT/STEP` protocol are unchanged; `each` and `in` are not reserved words; the containers add nothing to the global namespace. If your program compiles with fbc 1.20.0, it compiles here.
+Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, and the existing `OPERATOR FOR/NEXT/STEP` protocol are unchanged; `each`, `in` and `defer` are not reserved words; the containers add nothing to the global namespace. If your program compiles with fbc 1.20.0, it compiles here — with one stated exception, a paren-less call in statement position to a sub named `defer`.
 
 > **Scope, stated plainly.** This is fbc 1.20.0 with four features added and one caveat (see [Tests](#tests)). It is not a rewrite, not a new parser, and not a performance project. Where a capability does not exist, this README says so instead of implying it.
 
@@ -38,9 +38,12 @@ Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, a
 | **Iterator protocol** | A *structural* contract: a type is iterable if it has `GetIterator( )` returning something with `IsValid( )`, `Value( )` and `MoveNext( )`. No base class, no interface, no registration, nothing to inherit. |
 | **`FOR EACH`** | Walks arrays (any `lbound`), var-len `STRING`, and any type satisfying the protocol. Lowered at compile time — no new AST node, no IR node, no backend change, no runtime call. |
 | **String library** | 37 algorithms FreeBASIC does not ship — `Replace`, `Split`, `Join`, `Between`, the pad family, the character-set family — in namespace `FB`, working on **all four string types** from one call. Implemented in the runtime, but **nothing becomes a keyword**. |
+| **`defer`** | `defer <statement>` runs on the way out of the enclosing **scope**, in reverse order, on **every** path — fallthrough, `exit`, `return`, `goto` out of nested scopes — and every iteration of a loop body. For the one-off `CloseHandle` that does not justify declaring a type. A **contextual keyword**: existing code using `defer` as a name keeps working. |
+| **Lambdas** | `function( byval x as long ) as long … end function` in expression position. Non-capturing ones are **plain procedure pointers**, so every existing callback API — including `cdecl`/`stdcall` ones like `qsort` and Win32 — works unchanged. Capturing ones, `sub[ byref total ]( … )`, build a stack closure; every capture states `byval` or `byref` explicitly. |
+| **`Optional` / `Result`** | `Optional( of T )` for a value that might not be there, `Result( of T, E )` for a value or the reason there isn't one. Pure library, no compiler support. Zero is a value; a default-constructed `Result` is a **failure**, so a forgotten assignment cannot read as success. |
 | **Standard containers** | `Array`, `Map`, `Set`, `LinkedList` in namespace `FB`. Written in ordinary FreeBASIC on top of the three features above, with **zero compiler support** — so a better implementation by anybody else is on exactly equal footing. |
 | **`USTRING`** | A dynamic Unicode string that is UTF-16 on *every* target, unlike `WSTRING` (2 bytes on Windows, 4 on Linux, 1 on DOS). A true intrinsic type in the compiler, not a library — `LEN` is O(1) and every string intrinsic works. |
-| **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite: 1,154,420 assertions and 1,731 log-tests across four dialects. |
+| **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite: 1,155,921 assertions and 1,745 log-tests across four dialects, under **both** backends. |
 | **Diagnostics** | New, specific messages for the new features — including the **instantiation chain** for an error inside a generic, and near-miss reporting that names the *missing member* rather than saying "not iterable". Diagnostics elsewhere are byte-identical to stock fbc. |
 | **Unicode** | UTF-8 ↔ UTF-16 conversion fixed on every target (not locale-dependent), a generated BMP case-mapping table, and UTF-8 file output everywhere. |
 | **Cross-platform** | Built, tested and shipped prebuilt for **win64**, **win32** and **linux-x86_64**. |

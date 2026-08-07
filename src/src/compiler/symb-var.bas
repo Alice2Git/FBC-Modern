@@ -501,6 +501,7 @@ end sub
 
 sub symbVarInitFields( byval sym as FBSYMBOL ptr )
 	sym->var_.initree = NULL
+	sym->var_.defertree = NULL
 	sym->var_.array.dimensions = 0
 	sym->var_.array.dimtb = NULL
 	sym->var_.array.diff = 0
@@ -672,6 +673,37 @@ function symbAddTempVar _
 	var sym = symbAddVar( symbUniqueId( ), NULL, dtype, subtype, 0, 0, _
 	                      dTB(), FB_SYMBATTRIB_TEMP, options )
 	symbSetIsImplicit( sym )
+
+	function = sym
+end function
+
+'' Register a DEFER in the current scope.
+''
+'' Not a variable: it names no storage, has no type and is never read.  It is a
+'' VAR symbol purely so that the cleanup walks -- astScopeDestroyVars(),
+'' astProcEnd()'s call and hDestroyBlockLocals() -- find it with no change to
+'' any of them.  They walk the scope's symbol table tail-to-head and act on
+'' every entry symbGetVarHasDtor() approves, which gives reverse order and the
+'' correct statement-number window for free.
+''
+'' Deliberately NOT marked TEMP: a temp is destroyed at the end of the
+'' statement, which is the opposite of what DEFER means.  symbAddImplicitVar()
+'' next door makes the same choice for the same reason.
+''
+'' The caller owns the tree until this returns; afterwards the symbol does.
+function symbAddDefer( byval tree as ASTNODE_ ptr ) as FBSYMBOL ptr
+	static as FBARRAYDIM dTB(0)
+
+	'' VOID and length 0: nothing may ever allocate or emit this.  Everything
+	'' that would is taught to skip symbIsDefer( ) -- see astScopeAllocLocals().
+	var sym = symbAddVar( symbUniqueId( ), NULL, FB_DATATYPE_VOID, NULL, 0, 0, _
+	                      dTB(), FB_SYMBATTRIB_DEFER, FB_SYMBOPT_NONE )
+	if( sym = NULL ) then
+		return NULL
+	end if
+
+	symbSetIsImplicit( sym )
+	sym->var_.defertree = tree
 
 	function = sym
 end function
@@ -867,6 +899,13 @@ function symbGetVarHasCtor( byval s as FBSYMBOL ptr ) as integer
 end function
 
 function symbGetVarHasDtor( byval s as FBSYMBOL ptr ) as integer
+	'' A registered DEFER always has cleanup -- that is the whole of what it
+	'' is.  Checked FIRST: the mask below would not reject it, but the type
+	'' checks after it would, since a defer symbol is VOID.
+	if( symbIsDefer( s ) ) then
+		return TRUE
+	end if
+
 	'' shared, static, ref, param or temporary?
 	if( (s->attrib and (FB_SYMBATTRIB_SHARED or _
 	                    FB_SYMBATTRIB_STATIC or _

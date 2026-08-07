@@ -24,6 +24,12 @@ sub cStatement()
 	end if
 
 	do
+		'' DEFER first: it is a contextual keyword, so it must be recognised
+		'' before cProcCallOrAssign() reads 'defer' as an ordinary identifier.
+		'' hIsDeferStmt() claims the token only when the next one begins a
+		'' statement, so a variable, field or procedure named 'defer' still
+		'' parses as it always did.
+		if( cDeferStmt( ) = FALSE ) then
 		if( cDeclaration( ) = FALSE ) then
 			if( cCompoundStmt( ) = FALSE ) then
 				if( cProcCallOrAssign( ) = FALSE ) then
@@ -34,6 +40,7 @@ sub cStatement()
 					end if
 				end if
 			end if
+		end if
 		end if
 
 		'' ':'?
