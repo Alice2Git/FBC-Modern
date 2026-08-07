@@ -293,3 +293,248 @@ FBCALL int fb_StrContains( FBSTRING *s, FBUSTRING *pat, int ic )
 	hPatRel( &p );
 	return r;
 }
+
+/* --- extract family, byte width ---
+**
+** These RETURN TEXT, so each hands back a temp FBSTRING that the CALLER frees.
+** That is fbc's ordinary handling for a `as string` result reached through a
+** plain declare -- the same contract fb_StrFormat has -- and it is why nothing
+** here releases its own arguments: they are the caller's, not ours.
+**
+** A ZSTRING argument therefore also comes back as a STRING. There is no dynamic
+** ZSTRING to return. */
+
+/* Allocate a temp and fill it from src[0..n-1]. n <= 0 yields the null desc,
+** which is the empty string and must NOT be freed by anyone. */
+static FBSTRING *hStrTempFrom( const char *src, ssize_t n )
+{
+	FBSTRING *dst;
+
+	if( n <= 0 )
+		return &__fb_ctx.null_desc;
+
+	dst = fb_hStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.null_desc;
+
+	if( dst->data != NULL )
+	{
+		fb_hStrCopy( dst->data, src, n );
+		dst->data[n] = 0;
+	}
+
+	return dst;
+}
+
+/* Two runs of the source joined, for DeleteAt. */
+static FBSTRING *hStrTempFrom2
+	(
+		const char *a, ssize_t alen, const char *b, ssize_t blen
+	)
+{
+	FBSTRING *dst;
+	ssize_t n = alen + blen;
+
+	if( n <= 0 )
+		return &__fb_ctx.null_desc;
+
+	dst = fb_hStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.null_desc;
+
+	if( dst->data != NULL )
+	{
+		if( alen > 0 )
+			fb_hStrCopy( dst->data, a, alen );
+		if( blen > 0 )
+			fb_hStrCopy( dst->data + alen, b, blen );
+		dst->data[n] = 0;
+	}
+
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrExtract( ssize_t start, FBSTRING *s, FBUSTRING *pat, int ic )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT p;
+
+	if( start < 1 )
+		return &__fb_ctx.null_desc;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( pat, &p );
+
+	hb_hExtractSpan( sp, sl, p.ptr, p.len, start - 1, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &p );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrExtractChars( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT p;
+
+	if( start < 1 )
+		return &__fb_ctx.null_desc;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+
+	hb_hExtractCharsSpan( sp, sl, p.ptr, p.len, start - 1, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &p );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrRemain( FBSTRING *s, FBUSTRING *pat, ssize_t start, int ic )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT p;
+
+	if( start < 1 )
+		return &__fb_ctx.null_desc;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( pat, &p );
+
+	hb_hRemainSpan( sp, sl, p.ptr, p.len, start - 1, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &p );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrRemainChars( FBSTRING *s, FBUSTRING *set, ssize_t start, int ic )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT p;
+
+	if( start < 1 )
+		return &__fb_ctx.null_desc;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+
+	hb_hRemainCharsSpan( sp, sl, p.ptr, p.len, start - 1, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &p );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrBetween
+	(
+		FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic
+	)
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+	FBSTRING *r;
+	HPAT p1, p2;
+
+	if( start < 1 )
+		return &__fb_ctx.null_desc;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( d1, &p1 );
+	hPatArg( d2, &p2 );
+
+	hb_hBetweenSpan( sp, sl, p1.ptr, p1.len, p2.ptr, p2.len, start - 1, ic, &off, &cnt );
+	r = hStrTempFrom( sp + off, cnt );
+
+	hPatRel( &p1 );
+	hPatRel( &p2 );
+	return r;
+}
+
+FBCALL FBSTRING *fb_StrClipLeft( FBSTRING *s, ssize_t n )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+
+	hStrArg( s, &sp, &sl );
+	hb_hClipLeftSpan( sl, n, &off, &cnt );
+
+	return hStrTempFrom( sp + off, cnt );
+}
+
+FBCALL FBSTRING *fb_StrClipRight( FBSTRING *s, ssize_t n )
+{
+	const char *sp;
+	ssize_t sl, off, cnt;
+
+	hStrArg( s, &sp, &sl );
+	hb_hClipRightSpan( sl, n, &off, &cnt );
+
+	return hStrTempFrom( sp + off, cnt );
+}
+
+FBCALL FBSTRING *fb_StrDeleteAt( FBSTRING *s, ssize_t start, ssize_t count )
+{
+	const char *sp;
+	ssize_t sl, coff, clen;
+
+	hStrArg( s, &sp, &sl );
+	hb_hDeleteCut( sl, start, count, &coff, &clen );
+
+	if( clen <= 0 )
+		return hStrTempFrom( sp, sl );          /* nothing removed */
+
+	return hStrTempFrom2( sp, coff, sp + coff + clen, sl - coff - clen );
+}
+
+FBCALL FBSTRING *fb_StrInsertAt( FBSTRING *s, FBUSTRING *ins, ssize_t pos )
+{
+	const char *sp;
+	ssize_t sl, at, n;
+	FBSTRING *dst;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+
+	at = hb_hInsertSplit( sl, pos );
+	if( at < 0 )
+		return hStrTempFrom( sp, sl );          /* position below 1: untouched */
+
+	hPatArg( ins, &p );
+
+	n = sl + p.len;
+	if( n <= 0 )
+	{
+		hPatRel( &p );
+		return &__fb_ctx.null_desc;
+	}
+
+	dst = fb_hStrAllocTemp( NULL, n );
+	if( dst == NULL )
+	{
+		hPatRel( &p );
+		return &__fb_ctx.null_desc;
+	}
+
+	if( dst->data != NULL )
+	{
+		if( at > 0 )
+			fb_hStrCopy( dst->data, sp, at );
+		if( p.len > 0 )
+			fb_hStrCopy( dst->data + at, p.ptr, p.len );
+		if( sl - at > 0 )
+			fb_hStrCopy( dst->data + at + p.len, sp + at, sl - at );
+		dst->data[n] = 0;
+	}
+
+	hPatRel( &p );
+	return dst;
+}

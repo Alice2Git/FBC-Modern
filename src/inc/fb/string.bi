@@ -231,6 +231,197 @@ extern "C"
 		( byref s as const ustring, byref match as const ustring, _
 		  byval ignoreCase as boolean = false ) as boolean
 
+	'' =====================================================================
+	'' EXTRACT -- slicing by content rather than by position
+	''
+	'' RETURN TYPES. There is no dynamic ZSTRING or WSTRING, so a function
+	'' cannot hand back the type it was given:
+	''
+	''     string, zstring   ->  string       bytes, no encoding assumed
+	''     wstring, ustring  ->  ustring      UTF-16 on every target
+	''
+	'' A WSTRING in therefore means a USTRING out. On Windows that costs
+	'' nothing to use -- a ustring already IS UTF-16 -- and it is the only
+	'' answer available, since a fixed-length result would need a buffer the
+	'' caller has not supplied.
+	'' =====================================================================
+
+	'' Text BEFORE the first occurrence of `match` at or after `start`.
+	''
+	'' A MISS RETURNS THE WHOLE REMAINDER, not "". That is the PowerBASIC
+	'' EXTRACT$ rule AfxStrExtract carries, and it is what makes a parse loop
+	'' terminate cleanly: the final field has no trailing delimiter, and this
+	'' hands it back instead of losing it. An empty `match` is a miss.
+	''
+	''     Extract( 1, "abacadabra", "cad" )    '' "aba"
+	''     Extract( 1, "abacadabra", "zzz" )    '' "abacadabra"
+	''
+	'' Deliberately the opposite of Remain, whose miss is empty. The two are
+	'' complements: everything before, and everything after.
+
+	declare function Extract overload alias "fb_StrExtract" _
+		( byval start as integer, byref s as const string, _
+		  byref match as const ustring, byval ignoreCase as boolean = false ) as string
+
+	declare function Extract overload alias "fb_WStrExtract" _
+		( byval start as integer, byref s as const wstring, _
+		  byref match as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	declare function Extract overload alias "fb_UStrExtract" _
+		( byval start as integer, byref s as const ustring, _
+		  byref match as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	'' Text before the first character that is in `chars`. Same miss rule.
+	''     ExtractChars( 1, "abacadabra", "cd" )   '' "aba"
+
+	declare function ExtractChars overload alias "fb_StrExtractChars" _
+		( byval start as integer, byref s as const string, _
+		  byref chars as const ustring, byval ignoreCase as boolean = false ) as string
+
+	declare function ExtractChars overload alias "fb_WStrExtractChars" _
+		( byval start as integer, byref s as const wstring, _
+		  byref chars as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	declare function ExtractChars overload alias "fb_UStrExtractChars" _
+		( byval start as integer, byref s as const ustring, _
+		  byref chars as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	'' Text AFTER the first occurrence of `match` at or after `start`.
+	''
+	'' A MISS RETURNS "". Nothing followed the thing that was not there, and
+	'' returning the remainder would produce text that was never after
+	'' anything. An empty `match` is a miss.
+	''
+	''     Remain( "Brevity is the soul of wit", "is " )  '' "the soul of wit"
+	''     Remain( "Brevity is the soul of wit", "zzz" )  '' ""
+
+	declare function Remain overload alias "fb_StrRemain" _
+		( byref s as const string, byref match as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as string
+
+	declare function Remain overload alias "fb_WStrRemain" _
+		( byref s as const wstring, byref match as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	declare function Remain overload alias "fb_UStrRemain" _
+		( byref s as const ustring, byref match as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	'' Text after the first character that is in `chars`. Same miss rule.
+
+	declare function RemainChars overload alias "fb_StrRemainChars" _
+		( byref s as const string, byref chars as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as string
+
+	declare function RemainChars overload alias "fb_WStrRemainChars" _
+		( byref s as const wstring, byref chars as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	declare function RemainChars overload alias "fb_UStrRemainChars" _
+		( byref s as const ustring, byref chars as const ustring, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	'' Text between the first `open` at or after `start` and the first `close`
+	'' AFTER that one. Either delimiter missing gives "" -- there is no
+	'' "between" without both ends.
+	''
+	''     Between( "blah (text here) blah", "(", ")" )   '' "text here"
+	''
+	'' `close` is searched from the end of `open`, never from `start`, so
+	'' Between( "(a)(b)", "(", ")" ) is "a" and cannot pair the first "(" with
+	'' the second ")".
+
+	declare function Between overload alias "fb_StrBetween" _
+		( byref s as const string, byref opening as const ustring, _
+		  byref closing as const ustring, byval start as integer = 1, _
+		  byval ignoreCase as boolean = false ) as string
+
+	declare function Between overload alias "fb_WStrBetween" _
+		( byref s as const wstring, byref opening as const ustring, _
+		  byref closing as const ustring, byval start as integer = 1, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	declare function Between overload alias "fb_UStrBetween" _
+		( byref s as const ustring, byref opening as const ustring, _
+		  byref closing as const ustring, byval start as integer = 1, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	'' ------------------------------------------------- slicing by position
+	''
+	'' A count of 0 or less removes nothing; a count at or past the length
+	'' removes everything. Neither clamps into a negative length.
+	''
+	''     ClipLeft( "1234567890", 3 )     '' "4567890"
+	''     ClipRight( "1234567890", 3 )    '' "1234567"
+
+	declare function ClipLeft overload alias "fb_StrClipLeft" _
+		( byref s as const string, byval count as integer ) as string
+
+	declare function ClipLeft overload alias "fb_WStrClipLeft" _
+		( byref s as const wstring, byval count as integer ) as ustring
+
+	declare function ClipLeft overload alias "fb_UStrClipLeft" _
+		( byref s as const ustring, byval count as integer ) as ustring
+
+	declare function ClipRight overload alias "fb_StrClipRight" _
+		( byref s as const string, byval count as integer ) as string
+
+	declare function ClipRight overload alias "fb_WStrClipRight" _
+		( byref s as const wstring, byval count as integer ) as ustring
+
+	declare function ClipRight overload alias "fb_UStrClipRight" _
+		( byref s as const ustring, byval count as integer ) as ustring
+
+	'' `count` characters removed starting at the 1-based `start`.
+	''
+	''     DeleteAt( "1234567890", 4, 3 )   '' "1237890"
+	''
+	'' EVERY INVALID ARGUMENT IS A NO-OP returning the string unchanged --
+	'' start below 1, start past the end, count of 0 or less. An out-of-range
+	'' delete is not an error and never truncates. A count running past the
+	'' end removes only what is there.
+	''
+	'' This is AfxNova's AfxStrDelete and AfxStrClipMid, which are the same
+	'' algorithm under two names; one is enough.
+
+	declare function DeleteAt overload alias "fb_StrDeleteAt" _
+		( byref s as const string, byval start as integer, _
+		  byval count as integer ) as string
+
+	declare function DeleteAt overload alias "fb_WStrDeleteAt" _
+		( byref s as const wstring, byval start as integer, _
+		  byval count as integer ) as ustring
+
+	declare function DeleteAt overload alias "fb_UStrDeleteAt" _
+		( byref s as const ustring, byval start as integer, _
+		  byval count as integer ) as ustring
+
+	'' `insert` spliced in at the 1-based `position`.
+	''
+	''     InsertAt( "1234567890", "--", 6 )   '' "12345--67890"
+	''
+	'' A position PAST THE END APPENDS, which is the useful reading of
+	'' "insert at position 20 of a 5-character string". A position BELOW 1
+	'' does not insert at all and returns the string unchanged, matching
+	'' DeleteAt's treatment of an invalid start.
+	''
+	'' (AfxStrInsert's comment says a position <= 0 appends; its code returns
+	'' the string untouched. The code is followed here -- appending on a
+	'' negative index is the kind of silent success that hides a caller's
+	'' off-by-one.)
+
+	declare function InsertAt overload alias "fb_StrInsertAt" _
+		( byref s as const string, byref insert as const ustring, _
+		  byval position as integer ) as string
+
+	declare function InsertAt overload alias "fb_WStrInsertAt" _
+		( byref s as const wstring, byref insert as const ustring, _
+		  byval position as integer ) as ustring
+
+	declare function InsertAt overload alias "fb_UStrInsertAt" _
+		( byref s as const ustring, byref insert as const ustring, _
+		  byval position as integer ) as ustring
+
 end extern
 
 end namespace

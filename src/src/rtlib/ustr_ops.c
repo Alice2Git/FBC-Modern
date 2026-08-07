@@ -372,4 +372,413 @@ FBCALL int fb_WStrContains( const FB_WCHAR *s, FBUSTRING *arg, int ic )
 	return r;
 }
 
+
+/* --- extract family, 16-bit width ---
+**
+** Both the USTRING and the WSTRING overloads RETURN A USTRING. There is no
+** dynamic WSTRING to hand back, and a fixed one would need a caller-supplied
+** buffer. A ustring on Windows already IS UTF-16, so passing the result straight
+** to a wide API costs nothing.
+**
+** The result is a temp descriptor the CALLER frees, exactly as in the byte
+** family. Nothing here releases its own arguments -- those belong to the caller.
+**
+** Spans come from str_ops_core.h, so the offsets are computed by the same code
+** the byte family uses and the two widths cannot disagree. */
+
+static FBUSTRING *hUTempFrom( const FB_UCHAR *src, ssize_t units )
+{
+	FBUSTRING *dst;
+
+	if( units <= 0 )
+		return &__fb_ctx.unull_desc;
+
+	dst = fb_hUStrAllocTemp( NULL, units );
+	if( dst == NULL )
+		return &__fb_ctx.unull_desc;
+
+	if( dst->data != NULL )
+	{
+		fb_hUStrCopy( dst->data, src, units );
+		dst->data[units] = 0;
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hUTempFrom2
+	(
+		const FB_UCHAR *a, ssize_t alen, const FB_UCHAR *b, ssize_t blen
+	)
+{
+	FBUSTRING *dst;
+	ssize_t n = alen + blen;
+
+	if( n <= 0 )
+		return &__fb_ctx.unull_desc;
+
+	dst = fb_hUStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.unull_desc;
+
+	if( dst->data != NULL )
+	{
+		if( alen > 0 )
+			fb_hUStrCopy( dst->data, a, alen );
+		if( blen > 0 )
+			fb_hUStrCopy( dst->data + alen, b, blen );
+		dst->data[n] = 0;
+	}
+
+	return dst;
+}
+
+/* head[0..at-1] + ins + head[at..slen-1] */
+static FBUSTRING *hUSplice
+	(
+		const FB_UCHAR *s, ssize_t slen, ssize_t at,
+		const FB_UCHAR *ins, ssize_t inslen
+	)
+{
+	FBUSTRING *dst;
+	ssize_t n = slen + inslen;
+
+	if( n <= 0 )
+		return &__fb_ctx.unull_desc;
+
+	dst = fb_hUStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.unull_desc;
+
+	if( dst->data != NULL )
+	{
+		if( at > 0 )
+			fb_hUStrCopy( dst->data, s, at );
+		if( inslen > 0 )
+			fb_hUStrCopy( dst->data + at, ins, inslen );
+		if( slen - at > 0 )
+			fb_hUStrCopy( dst->data + at + inslen, s + at, slen - at );
+		dst->data[n] = 0;
+	}
+
+	return dst;
+}
+
+/* ----------------------------------------------------------------- USTRING */
+
+FBCALL FBUSTRING *fb_UStrExtract( ssize_t start, FBUSTRING *s, FBUSTRING *pat, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl, off, cnt;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pat, &pp, &pl );
+
+	hu_hExtractSpan( sp, sl, pp, pl, start - 1, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrExtractChars( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl, off, cnt;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+
+	hu_hExtractCharsSpan( sp, sl, tp, tl, start - 1, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrRemain( FBUSTRING *s, FBUSTRING *pat, ssize_t start, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl, off, cnt;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pat, &pp, &pl );
+
+	hu_hRemainSpan( sp, sl, pp, pl, start - 1, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrRemainChars( FBUSTRING *s, FBUSTRING *set, ssize_t start, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl, off, cnt;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+
+	hu_hRemainCharsSpan( sp, sl, tp, tl, start - 1, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrBetween
+	(
+		FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic
+	)
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl, off, cnt;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( d1, &ap, &al );
+	hUStrArg( d2, &bp, &bl );
+
+	hu_hBetweenSpan( sp, sl, ap, al, bp, bl, start - 1, ic, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrClipLeft( FBUSTRING *s, ssize_t n )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, off, cnt;
+
+	hUStrArg( s, &sp, &sl );
+	hu_hClipLeftSpan( sl, n, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrClipRight( FBUSTRING *s, ssize_t n )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, off, cnt;
+
+	hUStrArg( s, &sp, &sl );
+	hu_hClipRightSpan( sl, n, &off, &cnt );
+
+	return hUTempFrom( sp + off, cnt );
+}
+
+FBCALL FBUSTRING *fb_UStrDeleteAt( FBUSTRING *s, ssize_t start, ssize_t count )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, coff, clen;
+
+	hUStrArg( s, &sp, &sl );
+	hu_hDeleteCut( sl, start, count, &coff, &clen );
+
+	if( clen <= 0 )
+		return hUTempFrom( sp, sl );
+
+	return hUTempFrom2( sp, coff, sp + coff + clen, sl - coff - clen );
+}
+
+FBCALL FBUSTRING *fb_UStrInsertAt( FBUSTRING *s, FBUSTRING *ins, ssize_t pos )
+{
+	const FB_UCHAR *sp, *ip;
+	ssize_t sl, il, at;
+
+	hUStrArg( s, &sp, &sl );
+
+	at = hu_hInsertSplit( sl, pos );
+	if( at < 0 )
+		return hUTempFrom( sp, sl );
+
+	hUStrArg( ins, &ip, &il );
+
+	return hUSplice( sp, sl, at, ip, il );
+}
+
+/* ----------------------------------------------------------------- WSTRING */
+
+FBCALL FBUSTRING *fb_WStrExtract( ssize_t start, const FB_WCHAR *s, FBUSTRING *pat, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pat, &pp, &pl );
+
+	hu_hExtractSpan( sp, sl, pp, pl, start - 1, ic, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrExtractChars( ssize_t start, const FB_WCHAR *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( set, &tp, &tl );
+
+	hu_hExtractCharsSpan( sp, sl, tp, tl, start - 1, ic, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRemain( const FB_WCHAR *s, FBUSTRING *pat, ssize_t start, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pat, &pp, &pl );
+
+	hu_hRemainSpan( sp, sl, pp, pl, start - 1, ic, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRemainChars( const FB_WCHAR *s, FBUSTRING *set, ssize_t start, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( set, &tp, &tl );
+
+	hu_hRemainCharsSpan( sp, sl, tp, tl, start - 1, ic, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrBetween
+	(
+		const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic
+	)
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	if( start < 1 )
+		return &__fb_ctx.unull_desc;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( d1, &ap, &al );
+	hUStrArg( d2, &bp, &bl );
+
+	hu_hBetweenSpan( sp, sl, ap, al, bp, bl, start - 1, ic, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrClipLeft( const FB_WCHAR *s, ssize_t n )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hu_hClipLeftSpan( sl, n, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrClipRight( const FB_WCHAR *s, ssize_t n )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, off, cnt;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hu_hClipRightSpan( sl, n, &off, &cnt );
+	r = hUTempFrom( sp + off, cnt );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrDeleteAt( const FB_WCHAR *s, ssize_t start, ssize_t count )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl, coff, clen;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hu_hDeleteCut( sl, start, count, &coff, &clen );
+
+	if( clen <= 0 )
+		r = hUTempFrom( sp, sl );
+	else
+		r = hUTempFrom2( sp, coff, sp + coff + clen, sl - coff - clen );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrInsertAt( const FB_WCHAR *s, FBUSTRING *ins, ssize_t pos )
+{
+	const FB_UCHAR *sp, *ip;
+	ssize_t sl, il, at;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+
+	at = hu_hInsertSplit( sl, pos );
+	if( at < 0 )
+	{
+		r = hUTempFrom( sp, sl );
+	}
+	else
+	{
+		hUStrArg( ins, &ip, &il );
+		r = hUSplice( sp, sl, at, ip, il );
+	}
+
+	hWstrRel( &t1 );
+	return r;
+}
+
 #undef FB_UPOS

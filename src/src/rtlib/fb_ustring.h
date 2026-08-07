@@ -387,4 +387,41 @@ FBCALL int          fb_WStrStartsWith   ( const FB_WCHAR *s, FBUSTRING *arg, int
 FBCALL int          fb_WStrEndsWith     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
 FBCALL int          fb_WStrContains     ( const FB_WCHAR *s, FBUSTRING *arg, int ic );
 
+/* The extract family (phase 2). These RETURN TEXT, so each hands back a temp
+ * descriptor the CALLER frees -- ordinary fbc handling for a string result
+ * reached through a plain declare, the same contract fb_StrFormat has.
+ *
+ * A STRING argument yields a STRING; a WSTRING or USTRING argument yields a
+ * USTRING. There is no dynamic ZSTRING or WSTRING to return. */
+
+FBCALL FBSTRING    *fb_StrExtract      ( ssize_t start, FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBSTRING    *fb_StrExtractChars ( ssize_t start, FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrRemain       ( FBSTRING *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrRemainChars  ( FBSTRING *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrBetween      ( FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBSTRING    *fb_StrClipLeft     ( FBSTRING *s, ssize_t n );
+FBCALL FBSTRING    *fb_StrClipRight    ( FBSTRING *s, ssize_t n );
+FBCALL FBSTRING    *fb_StrDeleteAt     ( FBSTRING *s, ssize_t start, ssize_t count );
+FBCALL FBSTRING    *fb_StrInsertAt     ( FBSTRING *s, FBUSTRING *ins, ssize_t pos );
+
+FBCALL FBUSTRING   *fb_UStrExtract      ( ssize_t start, FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_UStrExtractChars ( ssize_t start, FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrRemain       ( FBUSTRING *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrRemainChars  ( FBUSTRING *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrBetween      ( FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_UStrClipLeft     ( FBUSTRING *s, ssize_t n );
+FBCALL FBUSTRING   *fb_UStrClipRight    ( FBUSTRING *s, ssize_t n );
+FBCALL FBUSTRING   *fb_UStrDeleteAt     ( FBUSTRING *s, ssize_t start, ssize_t count );
+FBCALL FBUSTRING   *fb_UStrInsertAt     ( FBUSTRING *s, FBUSTRING *ins, ssize_t pos );
+
+FBCALL FBUSTRING   *fb_WStrExtract      ( ssize_t start, const FB_WCHAR *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_WStrExtractChars ( ssize_t start, const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrRemain       ( const FB_WCHAR *s, FBUSTRING *pat, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrRemainChars  ( const FB_WCHAR *s, FBUSTRING *set, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrBetween      ( const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, ssize_t start, int ic );
+FBCALL FBUSTRING   *fb_WStrClipLeft     ( const FB_WCHAR *s, ssize_t n );
+FBCALL FBUSTRING   *fb_WStrClipRight    ( const FB_WCHAR *s, ssize_t n );
+FBCALL FBUSTRING   *fb_WStrDeleteAt     ( const FB_WCHAR *s, ssize_t start, ssize_t count );
+FBCALL FBUSTRING   *fb_WStrInsertAt     ( const FB_WCHAR *s, FBUSTRING *ins, ssize_t pos );
+
 #endif /*__FB_USTRING_H__*/
