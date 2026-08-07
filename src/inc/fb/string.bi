@@ -422,6 +422,225 @@ extern "C"
 		( byref s as const ustring, byref insert as const ustring, _
 		  byval position as integer ) as ustring
 
+	'' =====================================================================
+	'' TRANSFORM -- building a new string from the old one
+	''
+	'' Same return rule as the extract family: string/zstring -> string,
+	'' wstring/ustring -> ustring.
+	'' =====================================================================
+
+	'' Every NON-OVERLAPPING occurrence of `match` becomes `with`.
+	''
+	''     Replace( "Hello World", "World", "Earth" )   '' "Hello Earth"
+	''
+	'' SINGLE PASS. The scan continues after each replacement and never
+	'' re-reads what was just written, so a replacement that contains the
+	'' pattern neither cascades nor loops:
+	''
+	''     Replace( "a", "a", "aa" )     '' "aa", not a hang
+	''
+	'' An empty `match` matches nothing and copies the input through.
+
+	declare function Replace overload alias "fb_StrReplace" _
+		( byref s as const string, byref match as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as string
+
+	declare function Replace overload alias "fb_WStrReplace" _
+		( byref s as const wstring, byref match as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	declare function Replace overload alias "fb_UStrReplace" _
+		( byref s as const ustring, byref match as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	'' Every occurrence of `match` deleted. EXACTLY Replace with an empty
+	'' replacement, and that equivalence is the point.
+	''
+	'' AfxStrRemove restarts its search from position 1 after each deletion,
+	'' so removals CASCADE -- deleting "ab" from "aabb" leaves "" there,
+	'' because the deletion creates a new match that did not exist in the
+	'' input. Here it leaves "ab". A single pass is what Replace does, it is
+	'' what the documentation of both implies, and it is O(n) rather than
+	'' O(n^2). Deliberate divergence.
+
+	declare function Remove overload alias "fb_StrRemove" _
+		( byref s as const string, byref match as const ustring, _
+		  byval ignoreCase as boolean = false ) as string
+
+	declare function Remove overload alias "fb_WStrRemove" _
+		( byref s as const wstring, byref match as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	declare function Remove overload alias "fb_UStrRemove" _
+		( byref s as const ustring, byref match as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	'' Every character that is in `chars` deleted. An empty set deletes
+	'' nothing.
+	''     RemoveChars( "abacadabra", "bac" )     '' "dr"
+
+	declare function RemoveChars overload alias "fb_StrRemoveChars" _
+		( byref s as const string, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as string
+
+	declare function RemoveChars overload alias "fb_WStrRemoveChars" _
+		( byref s as const wstring, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	declare function RemoveChars overload alias "fb_UStrRemoveChars" _
+		( byref s as const ustring, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	'' Only the characters that are in `chars` kept -- the complement of
+	'' RemoveChars. An empty set keeps nothing, which is that complement.
+	''     RetainChars( "abacadabra", "bc" )      '' "bcb"
+
+	declare function RetainChars overload alias "fb_StrRetainChars" _
+		( byref s as const string, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as string
+
+	declare function RetainChars overload alias "fb_WStrRetainChars" _
+		( byref s as const wstring, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	declare function RetainChars overload alias "fb_UStrRetainChars" _
+		( byref s as const ustring, byref chars as const ustring, _
+		  byval ignoreCase as boolean = false ) as ustring
+
+	'' Every character in `chars` mapped to `with_`.
+	''
+	''     ReplaceChars( "abacadabra", "bac", "*" )   '' "*****d**r*"
+	''
+	'' THE LENGTH NEVER CHANGES -- one unit for one unit, so positions into
+	'' the result still line up with the input. `with_` must therefore be
+	'' EXACTLY ONE unit: anything else (empty, longer, or an astral character,
+	'' which is two units) has no one-for-one form and the call returns the
+	'' string unchanged rather than guessing.
+	''
+	'' On the BYTE family a unit is a byte, so a non-ASCII `with_` is a UTF-8
+	'' lead byte rather than a character and is rejected on the same rule. Use
+	'' the ustring overload for non-ASCII substitution.
+
+	declare function ReplaceChars overload alias "fb_StrReplaceChars" _
+		( byref s as const string, byref chars as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as string
+
+	declare function ReplaceChars overload alias "fb_WStrReplaceChars" _
+		( byref s as const wstring, byref chars as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	declare function ReplaceChars overload alias "fb_UStrReplaceChars" _
+		( byref s as const ustring, byref chars as const ustring, _
+		  byref with_ as const ustring, byval ignoreCase as boolean = false ) as ustring
+
+	'' From each `opening` through the matching `closing`, delimiters
+	'' included, deleted. `removeAll` repeats until no pair is left.
+	''
+	''     RemoveBetween( "blah (text) blah", "(", ")" )
+	''         '' "blah  blah"
+	''     RemoveBetween( "var1(34), var2( 73 ), var3(any)", "(", ")", true )
+	''         '' "var1, var2, var3"
+	''
+	'' An unbalanced opener stops the walk and leaves the rest alone, so a
+	'' stray "(" does not swallow the tail. `closing` is searched from the end
+	'' of `opening`, so a pair cannot be crossed.
+
+	declare function RemoveBetween overload alias "fb_StrRemoveBetween" _
+		( byref s as const string, byref opening as const ustring, _
+		  byref closing as const ustring, byval removeAll as boolean = false, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as string
+
+	declare function RemoveBetween overload alias "fb_WStrRemoveBetween" _
+		( byref s as const wstring, byref opening as const ustring, _
+		  byref closing as const ustring, byval removeAll as boolean = false, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	declare function RemoveBetween overload alias "fb_UStrRemoveBetween" _
+		( byref s as const ustring, byref opening as const ustring, _
+		  byref closing as const ustring, byval removeAll as boolean = false, _
+		  byval start as integer = 1, byval ignoreCase as boolean = false ) as ustring
+
+	'' Reversed.
+	''
+	'' SURROGATE PAIRS SURVIVE ON THE WIDE FAMILY AND NOT ON THE BYTE ONE,
+	'' which is the one place these two deliberately differ.
+	''
+	'' A ustring is UTF-16 by definition, so reversing its code units blindly
+	'' would emit a low surrogate before its high one -- invalid UTF-16 every
+	'' time an astral character is present, not occasionally. AfxStrReverse
+	'' does exactly that. Here the pair is kept together.
+	''
+	'' A STRING is bytes with no declared encoding, so there is no pair to
+	'' recognise; bytes reverse as bytes. That does mangle multi-byte UTF-8,
+	'' and it is the only defensible answer for a type that does not say what
+	'' it holds. Reverse UTF-8 text through the ustring overload.
+
+	declare function Reverse overload alias "fb_StrReverse" _
+		( byref s as const string ) as string
+
+	declare function Reverse overload alias "fb_WStrReverse" _
+		( byref s as const wstring ) as ustring
+
+	declare function Reverse overload alias "fb_UStrReverse" _
+		( byref s as const ustring ) as ustring
+
+	'' `count` copies joined. A count of 0 or less gives "".
+	''     Repeat( 3, "ab" )      '' "ababab"
+	''
+	'' STRING( n, ch ) already repeats a single character; this repeats a
+	'' whole string, in one allocation rather than n concatenations.
+
+	declare function Repeat overload alias "fb_StrRepeat" _
+		( byval count as integer, byref s as const string ) as string
+
+	declare function Repeat overload alias "fb_WStrRepeat" _
+		( byval count as integer, byref s as const wstring ) as ustring
+
+	declare function Repeat overload alias "fb_UStrRepeat" _
+		( byval count as integer, byref s as const ustring ) as ustring
+
+	'' Runs of `mask` characters collapsed to one, and stripped from both
+	'' ends. The result is words separated by exactly one mask(1).
+	''
+	''     Shrink( ",,, one , two     three, four,", " ," )
+	''         '' "one two three four"
+	''
+	'' An EMPTY mask returns the input unchanged -- there is nothing to
+	'' shrink. (AfxStrShrink returns the EMPTY STRING for an empty mask, which
+	'' reads like a guard clause that fell through to the wrong variable.)
+	''
+	'' No ignoreCase: a mask is a set of delimiters, and a delimiter whose
+	'' case matters is not a delimiter.
+
+	declare function Shrink overload alias "fb_StrShrink" _
+		( byref s as const string, byref mask as const ustring = " " ) as string
+
+	declare function Shrink overload alias "fb_WStrShrink" _
+		( byref s as const wstring, byref mask as const ustring = " " ) as ustring
+
+	declare function Shrink overload alias "fb_UStrShrink" _
+		( byref s as const ustring, byref mask as const ustring = " " ) as ustring
+
+	'' Title case: the first letter of each word upper, the rest lower.
+	''     MCase( "hello wide world" )    '' "Hello Wide World"
+	''
+	'' A WORD STARTS after any character that is not alphanumeric. AfxNova's
+	'' DWStrMCase tests against a fixed list of punctuation instead, so it
+	'' capitalises after "." and "-" but not after "/", "_" or a tab -- gaps
+	'' rather than decisions. "Not alphanumeric" needs no list.
+	''
+	'' Non-ASCII counts as a word character: an accented letter continues a
+	'' word, and a character with no case mapping is left as it is.
+
+	declare function MCase overload alias "fb_StrMCase" _
+		( byref s as const string ) as string
+
+	declare function MCase overload alias "fb_WStrMCase" _
+		( byref s as const wstring ) as ustring
+
+	declare function MCase overload alias "fb_UStrMCase" _
+		( byref s as const ustring ) as ustring
+
 end extern
 
 end namespace

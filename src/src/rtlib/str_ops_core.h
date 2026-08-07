@@ -512,3 +512,336 @@ static ssize_t FB_SOP(hInsertSplit)( ssize_t slen, ssize_t pos1 )
 
 	return pos1 - 1;
 }
+
+/* ==========================================================================
+** TRANSFORMS
+**
+** These build a new string rather than slicing the old one, so each is a FILL:
+** it writes into a caller-allocated buffer and returns how much it wrote. The
+** caller sizes the buffer; every function here has a length the caller can
+** compute in advance, which is why none of them needs a measure pass.
+**
+**   Replace       slen + count * (replen - patlen), count from hTally
+**   Remove*       at most slen
+**   Retain*       at most slen
+**   ReplaceChars  exactly slen
+**   Reverse       exactly slen
+**   MCase         exactly slen
+**   Shrink        at most slen
+**   RemoveBetween at most slen
+** ========================================================================== */
+
+/* Replace every NON-OVERLAPPING occurrence of pat with rep.
+**
+** SINGLE PASS. The scan advances past each replacement and never re-examines
+** what was just written, so a replacement containing the pattern does not
+** cascade and cannot loop: Replace( "a", "a", "aa" ) is "aa", not a hang.
+**
+** The count that sizes the buffer comes from hTally, which walks with exactly
+** this loop, so the two agree by construction rather than by review. An empty
+** pattern matches nothing and copies the input through. */
+static ssize_t FB_SOP(hReplaceFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *pat, ssize_t patlen,
+		const FB_SOP_UNIT *rep, ssize_t replen,
+		int ic
+	)
+{
+	ssize_t i = 0, w = 0, at;
+
+	if( patlen <= 0 || slen <= 0 )
+	{
+		if( slen > 0 )
+			memcpy( dst, s, slen * sizeof( FB_SOP_UNIT ) );
+		return (slen > 0) ? slen : 0;
+	}
+
+	while( (at = FB_SOP(hFind)( s, slen, pat, patlen, i, ic )) >= 0 )
+	{
+		if( at > i )
+		{
+			memcpy( &dst[w], &s[i], (at - i) * sizeof( FB_SOP_UNIT ) );
+			w += at - i;
+		}
+
+		if( replen > 0 )
+		{
+			memcpy( &dst[w], rep, replen * sizeof( FB_SOP_UNIT ) );
+			w += replen;
+		}
+
+		i = at + patlen;
+	}
+
+	if( slen > i )
+	{
+		memcpy( &dst[w], &s[i], (slen - i) * sizeof( FB_SOP_UNIT ) );
+		w += slen - i;
+	}
+
+	return w;
+}
+
+/* Drop every unit that is in `set`. An empty set drops nothing. */
+static ssize_t FB_SOP(hRemoveCharsFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *set, ssize_t setlen,
+		int ic
+	)
+{
+	ssize_t i, w = 0;
+
+	for( i = 0; i < slen; i++ )
+	{
+		if( setlen <= 0 || !FB_SOP(hInSet)( (FB_SOP_UUNIT)s[i], set, setlen, ic ) )
+			dst[w++] = s[i];
+	}
+
+	return w;
+}
+
+/* Keep only the units that are in `set` -- the complement of the above. An
+** empty set keeps nothing, which is the complement of dropping nothing. */
+static ssize_t FB_SOP(hRetainCharsFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *set, ssize_t setlen,
+		int ic
+	)
+{
+	ssize_t i, w = 0;
+
+	if( setlen <= 0 )
+		return 0;
+
+	for( i = 0; i < slen; i++ )
+	{
+		if( FB_SOP(hInSet)( (FB_SOP_UUNIT)s[i], set, setlen, ic ) )
+			dst[w++] = s[i];
+	}
+
+	return w;
+}
+
+/* Map every unit that is in `set` to `unit`. LENGTH NEVER CHANGES -- this is a
+** one-for-one substitution, not a replacement, which is what makes offsets into
+** the result still line up with the input. */
+static ssize_t FB_SOP(hReplaceCharsFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *set, ssize_t setlen,
+		FB_SOP_UNIT unit,
+		int ic
+	)
+{
+	ssize_t i;
+
+	for( i = 0; i < slen; i++ )
+	{
+		if( setlen > 0 && FB_SOP(hInSet)( (FB_SOP_UUNIT)s[i], set, setlen, ic ) )
+			dst[i] = unit;
+		else
+			dst[i] = s[i];
+	}
+
+	return slen;
+}
+
+/* Reverse.
+**
+** SURROGATE PAIRS ARE KEPT INTACT at the 16-bit width and not at the byte
+** width, and that asymmetry is deliberate.
+**
+** A ustring is UTF-16 by definition, so reversing its code units blindly emits
+** a low surrogate before its high one -- invalid UTF-16, every single time an
+** astral character is present, not occasionally. AfxStrReverse does exactly
+** that. Keeping the pair together costs one comparison per unit and is the only
+** result that is still a string.
+**
+** A STRING is bytes with no declared encoding, so there is no pair to preserve
+** and no way to know whether there would be one; bytes reverse as bytes. That
+** does corrupt multi-byte UTF-8, and it is the only defensible answer for a
+** type that does not say what it holds. Callers with UTF-8 in a STRING want the
+** ustring overload.
+**
+** FB_SOP_ISHIGH/FB_SOP_ISLOW are constant 0 at the byte width, so the branch
+** folds away there entirely. */
+static void FB_SOP(hReverseFill)
+	(
+		FB_SOP_UNIT *dst, const FB_SOP_UNIT *s, ssize_t slen
+	)
+{
+	ssize_t i = slen - 1, w = 0;
+
+	while( i >= 0 )
+	{
+		if( i >= 1 &&
+		    FB_SOP_ISLOW( (FB_SOP_UUNIT)s[i] ) &&
+		    FB_SOP_ISHIGH( (FB_SOP_UUNIT)s[i-1] ) )
+		{
+			dst[w++] = s[i-1];
+			dst[w++] = s[i];
+			i -= 2;
+		}
+		else
+		{
+			dst[w++] = s[i];
+			i -= 1;
+		}
+	}
+}
+
+/* Collapse runs of mask characters, and strip them from both ends.
+**
+** Every maximal run of characters that are in `mask` becomes a single copy of
+** mask[0], and leading and trailing runs are removed outright. So the result is
+** words separated by exactly one mask[0].
+**
+** An EMPTY MASK returns the input unchanged -- there is nothing to shrink.
+** (AfxStrShrink returns the EMPTY STRING for an empty mask. That looks like a
+** guard clause that fell through to the wrong variable, and "shrink by nothing"
+** destroying the input is not a behaviour worth preserving.) */
+static ssize_t FB_SOP(hShrinkFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *mask, ssize_t masklen
+	)
+{
+	ssize_t i = 0, w = 0;
+	int pending = 0;
+
+	if( masklen <= 0 )
+	{
+		if( slen > 0 )
+			memcpy( dst, s, slen * sizeof( FB_SOP_UNIT ) );
+		return (slen > 0) ? slen : 0;
+	}
+
+	for( i = 0; i < slen; i++ )
+	{
+		if( FB_SOP(hInSet)( (FB_SOP_UUNIT)s[i], mask, masklen, 0 ) )
+		{
+			/* remember it, but only emit if a word follows -- that is
+			   what strips the trailing run without a second pass */
+			if( w > 0 )
+				pending = 1;
+		}
+		else
+		{
+			if( pending )
+			{
+				dst[w++] = mask[0];
+				pending = 0;
+			}
+			dst[w++] = s[i];
+		}
+	}
+
+	return w;
+}
+
+/* Title case: the first letter of each word upper, everything else lower.
+**
+** A WORD STARTS after any character that is not alphanumeric. That is a
+** different rule from AfxNova's, which tests against a fixed list of
+** punctuation -- so DWStrMCase capitalises after "." and "-" but not after "/"
+** or "_" or a tab, which is an omission rather than a decision. "Not
+** alphanumeric" needs no list and has no gaps.
+**
+** Non-ASCII counts as a word character: an accented letter continues a word,
+** and a CJK character has no case to change anyway. */
+static ssize_t FB_SOP(hMCaseFill)
+	(
+		FB_SOP_UNIT *dst, const FB_SOP_UNIT *s, ssize_t slen
+	)
+{
+	ssize_t i;
+	int startsWord = 1;
+
+	for( i = 0; i < slen; i++ )
+	{
+		FB_SOP_UUNIT c = (FB_SOP_UUNIT)s[i];
+
+		if( startsWord )
+			dst[i] = (FB_SOP_UNIT)FB_SOP_UPPER( c );
+		else
+			dst[i] = (FB_SOP_UNIT)FB_SOP_LOWER( c );
+
+		startsWord = !FB_SOP_ISWORD( c );
+	}
+
+	return slen;
+}
+
+/* Remove from each `d1` through the matching `d2`, delimiters included.
+**
+** `removeAll` decides whether this happens once or until no pair is left.
+** Either delimiter missing stops the walk and copies the rest through, so an
+** unbalanced opener is left alone rather than swallowing the tail.
+**
+** d2 is searched from the END of d1, so the pair cannot be crossed -- the same
+** rule hBetweenSpan follows, and for the same reason. */
+static ssize_t FB_SOP(hRemoveBetweenFill)
+	(
+		FB_SOP_UNIT *dst,
+		const FB_SOP_UNIT *s, ssize_t slen,
+		const FB_SOP_UNIT *d1, ssize_t d1len,
+		const FB_SOP_UNIT *d2, ssize_t d2len,
+		int removeAll, ssize_t from, int ic
+	)
+{
+	ssize_t i = 0, w = 0, a, b;
+
+	if( slen <= 0 )
+		return 0;
+
+	if( from < 0 )
+		from = 0;
+	if( from > slen )
+		from = slen;
+
+	/* everything before `from` is untouched */
+	if( from > 0 )
+	{
+		memcpy( dst, s, from * sizeof( FB_SOP_UNIT ) );
+		w = from;
+	}
+	i = from;
+
+	for( ;; )
+	{
+		a = FB_SOP(hFind)( s, slen, d1, d1len, i, ic );
+		if( a < 0 )
+			break;
+
+		b = FB_SOP(hFind)( s, slen, d2, d2len, a + d1len, ic );
+		if( b < 0 )
+			break;
+
+		if( a > i )
+		{
+			memcpy( &dst[w], &s[i], (a - i) * sizeof( FB_SOP_UNIT ) );
+			w += a - i;
+		}
+
+		i = b + d2len;
+
+		if( !removeAll )
+			break;
+	}
+
+	if( slen > i )
+	{
+		memcpy( &dst[w], &s[i], (slen - i) * sizeof( FB_SOP_UNIT ) );
+		w += slen - i;
+	}
+
+	return w;
+}

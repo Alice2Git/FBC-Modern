@@ -59,6 +59,19 @@
 
 /* ASCII fold, deliberately. See the header comment. */
 #define FB_SOP_FOLD(c)   ( (unsigned char)( ((c) >= 'a' && (c) <= 'z') ? ((c) - 32) : (c) ) )
+#define FB_SOP_UPPER(c)  FB_SOP_FOLD(c)
+#define FB_SOP_LOWER(c)  ( (unsigned char)( ((c) >= 'A' && (c) <= 'Z') ? ((c) + 32) : (c) ) )
+
+/* A word character, for title case. ASCII alphanumerics, plus everything at or
+** above 0x80 -- in a UTF-8 STRING those are the continuation and lead bytes of
+** a letter, so treating them as word characters keeps a multi-byte letter from
+** being read as a word boundary. */
+#define FB_SOP_ISWORD(c) ( ((c) >= '0' && (c) <= '9') ||                            ((c) >= 'A' && (c) <= 'Z') ||                            ((c) >= 'a' && (c) <= 'z') || ((c) >= 0x80) )
+
+/* No surrogates at byte width: both fold to 0 and the pair branch in
+** hReverseFill disappears entirely. */
+#define FB_SOP_ISHIGH(c) 0
+#define FB_SOP_ISLOW(c)  0
 
 #include "str_ops_core.h"
 
@@ -66,6 +79,11 @@
 #undef FB_SOP_UUNIT
 #undef FB_SOP
 #undef FB_SOP_FOLD
+#undef FB_SOP_UPPER
+#undef FB_SOP_LOWER
+#undef FB_SOP_ISWORD
+#undef FB_SOP_ISHIGH
+#undef FB_SOP_ISLOW
 
 /* --- descriptor unpacking --- */
 
@@ -536,5 +554,295 @@ FBCALL FBSTRING *fb_StrInsertAt( FBSTRING *s, FBUSTRING *ins, ssize_t pos )
 	}
 
 	hPatRel( &p );
+	return dst;
+}
+
+/* --- transform family, byte width ---
+**
+** Each builds a new string whose length is known before it is written, so there
+** is no measure pass: the caller-side allocation below is exact, or a safe
+** upper bound where the result can only shrink. */
+
+/* Allocate a temp of exactly n and hand back its buffer, or NULL. */
+static FBSTRING *hStrTempAlloc( ssize_t n, char **out )
+{
+	FBSTRING *dst;
+
+	*out = NULL;
+
+	if( n <= 0 )
+		return &__fb_ctx.null_desc;
+
+	dst = fb_hStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.null_desc;
+
+	*out = dst->data;
+	return dst;
+}
+
+/* Trim a temp whose fill wrote fewer units than were reserved. The descriptor
+** owns the block either way, so this only corrects the length. */
+static void hStrTempTrim( FBSTRING *dst, ssize_t written )
+{
+	if( dst->data == NULL )
+		return;
+
+	fb_hStrSetLength( dst, written );
+	dst->data[written] = 0;
+}
+
+FBCALL FBSTRING *fb_StrReplace( FBSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic )
+{
+	const char *sp;
+	ssize_t sl, n, count, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p, r;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( pat, &p );
+	hPatArg( rep, &r );
+
+	/* hTally walks with the same loop hReplaceFill does, so the size is
+	   exact rather than an estimate */
+	count = hb_hTally( sp, sl, p.ptr, p.len, ic );
+	n = sl + count * (r.len - p.len);
+
+	dst = hStrTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		w = hb_hReplaceFill( out, sp, sl, p.ptr, p.len, r.ptr, r.len, ic );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	hPatRel( &r );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrRemove( FBSTRING *s, FBUSTRING *pat, int ic )
+{
+	const char *sp;
+	ssize_t sl, n, count, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( pat, &p );
+
+	count = hb_hTally( sp, sl, p.ptr, p.len, ic );
+	n = sl - count * p.len;
+
+	dst = hStrTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		w = hb_hReplaceFill( out, sp, sl, p.ptr, p.len, NULL, 0, ic );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrRemoveChars( FBSTRING *s, FBUSTRING *set, int ic )
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		w = hb_hRemoveCharsFill( out, sp, sl, p.ptr, p.len, ic );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrRetainChars( FBSTRING *s, FBUSTRING *set, int ic )
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		w = hb_hRetainCharsFill( out, sp, sl, p.ptr, p.len, ic );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	return dst;
+}
+
+/* ReplaceChars maps one byte to one byte, so `with` contributes only its FIRST
+** BYTE. On this family that is the first byte of the UTF-8 encoding, which for
+** a non-ASCII replacement is a lead byte and not a character -- so a non-ASCII
+** `with` is meaningless here and the call is a no-op instead. The ustring
+** overload is where a non-ASCII replacement belongs. */
+FBCALL FBSTRING *fb_StrReplaceChars( FBSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic )
+{
+	const char *sp;
+	ssize_t sl;
+	FBSTRING *dst;
+	char *out;
+	HPAT p, r;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( set, &p );
+	hPatArg( with, &r );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		if( r.len != 1 )
+		{
+			/* nothing usable to substitute: copy through unchanged */
+			if( sl > 0 )
+				memcpy( out, sp, sl );
+			hStrTempTrim( dst, sl );
+		}
+		else
+		{
+			hb_hReplaceCharsFill( out, sp, sl, p.ptr, p.len, r.ptr[0], ic );
+			hStrTempTrim( dst, sl );
+		}
+	}
+
+	hPatRel( &p );
+	hPatRel( &r );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrReverse( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl;
+	FBSTRING *dst;
+	char *out;
+
+	hStrArg( s, &sp, &sl );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		hb_hReverseFill( out, sp, sl );
+		hStrTempTrim( dst, sl );
+	}
+
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrRepeat( ssize_t count, FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl, n, i;
+	FBSTRING *dst;
+	char *out;
+
+	hStrArg( s, &sp, &sl );
+
+	if( count <= 0 || sl <= 0 )
+		return &__fb_ctx.null_desc;
+
+	n = count * sl;
+
+	dst = hStrTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		for( i = 0; i < count; i++ )
+			memcpy( out + i * sl, sp, sl );
+		hStrTempTrim( dst, n );
+	}
+
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrShrink( FBSTRING *s, FBUSTRING *mask )
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p;
+
+	hStrArg( s, &sp, &sl );
+	hPatArg( mask, &p );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		w = hb_hShrinkFill( out, sp, sl, p.ptr, p.len );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p );
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrMCase( FBSTRING *s )
+{
+	const char *sp;
+	ssize_t sl;
+	FBSTRING *dst;
+	char *out;
+
+	hStrArg( s, &sp, &sl );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		hb_hMCaseFill( out, sp, sl );
+		hStrTempTrim( dst, sl );
+	}
+
+	return dst;
+}
+
+FBCALL FBSTRING *fb_StrRemoveBetween
+	(
+		FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2,
+		int removeAll, ssize_t start, int ic
+	)
+{
+	const char *sp;
+	ssize_t sl, w;
+	FBSTRING *dst;
+	char *out;
+	HPAT p1, p2;
+
+	hStrArg( s, &sp, &sl );
+
+	if( start < 1 )
+		return hStrTempFrom( sp, sl );
+
+	hPatArg( d1, &p1 );
+	hPatArg( d2, &p2 );
+
+	dst = hStrTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		w = hb_hRemoveBetweenFill( out, sp, sl, p1.ptr, p1.len, p2.ptr, p2.len,
+		                           removeAll, start - 1, ic );
+		hStrTempTrim( dst, w );
+	}
+
+	hPatRel( &p1 );
+	hPatRel( &p2 );
 	return dst;
 }

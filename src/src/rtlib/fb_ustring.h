@@ -424,4 +424,40 @@ FBCALL FBUSTRING   *fb_WStrClipRight    ( const FB_WCHAR *s, ssize_t n );
 FBCALL FBUSTRING   *fb_WStrDeleteAt     ( const FB_WCHAR *s, ssize_t start, ssize_t count );
 FBCALL FBUSTRING   *fb_WStrInsertAt     ( const FB_WCHAR *s, FBUSTRING *ins, ssize_t pos );
 
+/* The transform family (phase 3). Same return rule: STRING in, STRING out;
+ * WSTRING or USTRING in, USTRING out. */
+
+FBCALL FBSTRING    *fb_StrReplace       ( FBSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBSTRING    *fb_StrRemove        ( FBSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBSTRING    *fb_StrRemoveChars   ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrRetainChars   ( FBSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBSTRING    *fb_StrReplaceChars  ( FBSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBSTRING    *fb_StrReverse       ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrRepeat        ( ssize_t count, FBSTRING *s );
+FBCALL FBSTRING    *fb_StrShrink        ( FBSTRING *s, FBUSTRING *mask );
+FBCALL FBSTRING    *fb_StrMCase         ( FBSTRING *s );
+FBCALL FBSTRING    *fb_StrRemoveBetween ( FBSTRING *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
+FBCALL FBUSTRING   *fb_UStrReplace       ( FBUSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBUSTRING   *fb_UStrRemove        ( FBUSTRING *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_UStrRemoveChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrRetainChars   ( FBUSTRING *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_UStrReplaceChars  ( FBUSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBUSTRING   *fb_UStrReverse       ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrRepeat        ( ssize_t count, FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrShrink        ( FBUSTRING *s, FBUSTRING *mask );
+FBCALL FBUSTRING   *fb_UStrMCase         ( FBUSTRING *s );
+FBCALL FBUSTRING   *fb_UStrRemoveBetween ( FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
+FBCALL FBUSTRING   *fb_WStrReplace       ( const FB_WCHAR *s, FBUSTRING *pat, FBUSTRING *rep, int ic );
+FBCALL FBUSTRING   *fb_WStrRemove        ( const FB_WCHAR *s, FBUSTRING *pat, int ic );
+FBCALL FBUSTRING   *fb_WStrRemoveChars   ( const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrRetainChars   ( const FB_WCHAR *s, FBUSTRING *set, int ic );
+FBCALL FBUSTRING   *fb_WStrReplaceChars  ( const FB_WCHAR *s, FBUSTRING *set, FBUSTRING *with, int ic );
+FBCALL FBUSTRING   *fb_WStrReverse       ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrRepeat        ( ssize_t count, const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrShrink        ( const FB_WCHAR *s, FBUSTRING *mask );
+FBCALL FBUSTRING   *fb_WStrMCase         ( const FB_WCHAR *s );
+FBCALL FBUSTRING   *fb_WStrRemoveBetween ( const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2, int removeAll, ssize_t start, int ic );
+
 #endif /*__FB_USTRING_H__*/

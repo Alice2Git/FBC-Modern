@@ -39,6 +39,18 @@
 #define FB_SOP_UUNIT     FB_UCHAR
 #define FB_SOP(name)     hu_##name
 #define FB_SOP_FOLD(c)   fb_hUStrToUpper( c )
+#define FB_SOP_UPPER(c)  fb_hUStrToUpper( c )
+#define FB_SOP_LOWER(c)  fb_hUStrToLower( c )
+
+/* A word character, for title case. ASCII alphanumerics plus everything
+** non-ASCII: an accented letter continues a word, and a CJK character is a word
+** character with no case to change. */
+#define FB_SOP_ISWORD(c) ( ((c) >= '0' && (c) <= '9') ||                            ((c) >= 'A' && (c) <= 'Z') ||                            ((c) >= 'a' && (c) <= 'z') || ((c) >= 0x80) )
+
+/* Real surrogate tests here -- this is the width where a pair exists, and where
+** hReverseFill must not split one. */
+#define FB_SOP_ISHIGH(c) FB_UCHAR_IS_HIGHSUR(c)
+#define FB_SOP_ISLOW(c)  FB_UCHAR_IS_LOWSUR(c)
 
 #include "str_ops_core.h"
 
@@ -46,6 +58,11 @@
 #undef FB_SOP_UUNIT
 #undef FB_SOP
 #undef FB_SOP_FOLD
+#undef FB_SOP_UPPER
+#undef FB_SOP_LOWER
+#undef FB_SOP_ISWORD
+#undef FB_SOP_ISHIGH
+#undef FB_SOP_ISLOW
 
 /* --- descriptor unpacking --- */
 
@@ -775,6 +792,508 @@ FBCALL FBUSTRING *fb_WStrInsertAt( const FB_WCHAR *s, FBUSTRING *ins, ssize_t po
 	{
 		hUStrArg( ins, &ip, &il );
 		r = hUSplice( sp, sl, at, ip, il );
+	}
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+
+/* --- transform family, 16-bit width ---
+**
+** USTRING and WSTRING overloads, both returning a USTRING. The lengths are all
+** computable before the write, so none of these needs a measure pass.
+**
+** The USTRING and WSTRING bodies differ only in how the haystack is unpacked, so
+** each pair shares a static worker that takes an already-unpacked (ptr, len).
+** That is what keeps the two from drifting -- the earlier families paid for the
+** duplication in review instead. */
+
+static FBUSTRING *hUTempAlloc( ssize_t n, FB_UCHAR **out )
+{
+	FBUSTRING *dst;
+
+	*out = NULL;
+
+	if( n <= 0 )
+		return &__fb_ctx.unull_desc;
+
+	dst = fb_hUStrAllocTemp( NULL, n );
+	if( dst == NULL )
+		return &__fb_ctx.unull_desc;
+
+	*out = dst->data;
+	return dst;
+}
+
+static void hUTempTrim( FBUSTRING *dst, ssize_t written )
+{
+	if( dst->data == NULL )
+		return;
+
+	fb_hUStrSetLength( dst, written );
+	dst->data[written] = 0;
+}
+
+/* ------------------------------------------------------------- the workers */
+
+static FBUSTRING *hUReplace
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *pp, ssize_t pl,
+		const FB_UCHAR *rp, ssize_t rl,
+		int ic
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+	ssize_t count, n, w;
+
+	count = hu_hTally( sp, sl, pp, pl, ic );
+	n = sl + count * (rl - pl);
+
+	dst = hUTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		w = hu_hReplaceFill( out, sp, sl, pp, pl, rp, rl, ic );
+		hUTempTrim( dst, w );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hURemoveChars
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *tp, ssize_t tl, int ic
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hRemoveCharsFill( out, sp, sl, tp, tl, ic ) );
+
+	return dst;
+}
+
+static FBUSTRING *hURetainChars
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *tp, ssize_t tl, int ic
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hRetainCharsFill( out, sp, sl, tp, tl, ic ) );
+
+	return dst;
+}
+
+/* One code unit for one code unit, so `with` must be EXACTLY ONE UNIT. An
+** astral replacement is two units and has no one-for-one form, so it is a
+** no-op rather than a silent half-character. */
+static FBUSTRING *hUReplaceChars
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *tp, ssize_t tl,
+		const FB_UCHAR *rp, ssize_t rl, int ic
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		if( rl != 1 )
+			memcpy( out, sp, sl * sizeof( FB_UCHAR ) );
+		else
+			hu_hReplaceCharsFill( out, sp, sl, tp, tl, rp[0], ic );
+
+		hUTempTrim( dst, sl );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hUReverse( const FB_UCHAR *sp, ssize_t sl )
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		hu_hReverseFill( out, sp, sl );
+		hUTempTrim( dst, sl );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hURepeat( ssize_t count, const FB_UCHAR *sp, ssize_t sl )
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+	ssize_t n, i;
+
+	if( count <= 0 || sl <= 0 )
+		return &__fb_ctx.unull_desc;
+
+	n = count * sl;
+
+	dst = hUTempAlloc( n, &out );
+	if( out != NULL )
+	{
+		for( i = 0; i < count; i++ )
+			memcpy( out + i * sl, sp, sl * sizeof( FB_UCHAR ) );
+		hUTempTrim( dst, n );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hUShrink
+	(
+		const FB_UCHAR *sp, ssize_t sl, const FB_UCHAR *mp, ssize_t ml
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hShrinkFill( out, sp, sl, mp, ml ) );
+
+	return dst;
+}
+
+static FBUSTRING *hUMCase( const FB_UCHAR *sp, ssize_t sl )
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+	{
+		hu_hMCaseFill( out, sp, sl );
+		hUTempTrim( dst, sl );
+	}
+
+	return dst;
+}
+
+static FBUSTRING *hURemoveBetween
+	(
+		const FB_UCHAR *sp, ssize_t sl,
+		const FB_UCHAR *ap, ssize_t al,
+		const FB_UCHAR *bp, ssize_t bl,
+		int removeAll, ssize_t from, int ic
+	)
+{
+	FBUSTRING *dst;
+	FB_UCHAR *out;
+
+	dst = hUTempAlloc( sl, &out );
+	if( out != NULL )
+		hUTempTrim( dst, hu_hRemoveBetweenFill( out, sp, sl, ap, al, bp, bl,
+		                                        removeAll, from, ic ) );
+
+	return dst;
+}
+
+/* ----------------------------------------------------------------- USTRING */
+
+FBCALL FBUSTRING *fb_UStrReplace( FBUSTRING *s, FBUSTRING *pat, FBUSTRING *rep, int ic )
+{
+	const FB_UCHAR *sp, *pp, *rp;
+	ssize_t sl, pl, rl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pat, &pp, &pl );
+	hUStrArg( rep, &rp, &rl );
+
+	return hUReplace( sp, sl, pp, pl, rp, rl, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrRemove( FBUSTRING *s, FBUSTRING *pat, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( pat, &pp, &pl );
+
+	return hUReplace( sp, sl, pp, pl, NULL, 0, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrRemoveChars( FBUSTRING *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+
+	return hURemoveChars( sp, sl, tp, tl, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrRetainChars( FBUSTRING *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+
+	return hURetainChars( sp, sl, tp, tl, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrReplaceChars( FBUSTRING *s, FBUSTRING *set, FBUSTRING *with, int ic )
+{
+	const FB_UCHAR *sp, *tp, *rp;
+	ssize_t sl, tl, rl;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( set, &tp, &tl );
+	hUStrArg( with, &rp, &rl );
+
+	return hUReplaceChars( sp, sl, tp, tl, rp, rl, ic );
+}
+
+FBCALL FBUSTRING *fb_UStrReverse( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hUReverse( sp, sl );
+}
+
+FBCALL FBUSTRING *fb_UStrRepeat( ssize_t count, FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hURepeat( count, sp, sl );
+}
+
+FBCALL FBUSTRING *fb_UStrShrink( FBUSTRING *s, FBUSTRING *mask )
+{
+	const FB_UCHAR *sp, *mp;
+	ssize_t sl, ml;
+
+	hUStrArg( s, &sp, &sl );
+	hUStrArg( mask, &mp, &ml );
+
+	return hUShrink( sp, sl, mp, ml );
+}
+
+FBCALL FBUSTRING *fb_UStrMCase( FBUSTRING *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+
+	hUStrArg( s, &sp, &sl );
+
+	return hUMCase( sp, sl );
+}
+
+FBCALL FBUSTRING *fb_UStrRemoveBetween
+	(
+		FBUSTRING *s, FBUSTRING *d1, FBUSTRING *d2,
+		int removeAll, ssize_t start, int ic
+	)
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+
+	hUStrArg( s, &sp, &sl );
+
+	if( start < 1 )
+	{
+		hUStrArg( s, &sp, &sl );
+		return hUTempFrom( sp, sl );
+	}
+
+	hUStrArg( d1, &ap, &al );
+	hUStrArg( d2, &bp, &bl );
+
+	return hURemoveBetween( sp, sl, ap, al, bp, bl, removeAll, start - 1, ic );
+}
+
+/* ----------------------------------------------------------------- WSTRING */
+
+FBCALL FBUSTRING *fb_WStrReplace( const FB_WCHAR *s, FBUSTRING *pat, FBUSTRING *rep, int ic )
+{
+	const FB_UCHAR *sp, *pp, *rp;
+	ssize_t sl, pl, rl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pat, &pp, &pl );
+	hUStrArg( rep, &rp, &rl );
+
+	r = hUReplace( sp, sl, pp, pl, rp, rl, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRemove( const FB_WCHAR *s, FBUSTRING *pat, int ic )
+{
+	const FB_UCHAR *sp, *pp;
+	ssize_t sl, pl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( pat, &pp, &pl );
+
+	r = hUReplace( sp, sl, pp, pl, NULL, 0, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRemoveChars( const FB_WCHAR *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( set, &tp, &tl );
+
+	r = hURemoveChars( sp, sl, tp, tl, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRetainChars( const FB_WCHAR *s, FBUSTRING *set, int ic )
+{
+	const FB_UCHAR *sp, *tp;
+	ssize_t sl, tl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( set, &tp, &tl );
+
+	r = hURetainChars( sp, sl, tp, tl, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrReplaceChars( const FB_WCHAR *s, FBUSTRING *set, FBUSTRING *with, int ic )
+{
+	const FB_UCHAR *sp, *tp, *rp;
+	ssize_t sl, tl, rl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( set, &tp, &tl );
+	hUStrArg( with, &rp, &rl );
+
+	r = hUReplaceChars( sp, sl, tp, tl, rp, rl, ic );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrReverse( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hUReverse( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRepeat( ssize_t count, const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hURepeat( count, sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrShrink( const FB_WCHAR *s, FBUSTRING *mask )
+{
+	const FB_UCHAR *sp, *mp;
+	ssize_t sl, ml;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	hUStrArg( mask, &mp, &ml );
+
+	r = hUShrink( sp, sl, mp, ml );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrMCase( const FB_WCHAR *s )
+{
+	const FB_UCHAR *sp;
+	ssize_t sl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+	r = hUMCase( sp, sl );
+
+	hWstrRel( &t1 );
+	return r;
+}
+
+FBCALL FBUSTRING *fb_WStrRemoveBetween
+	(
+		const FB_WCHAR *s, FBUSTRING *d1, FBUSTRING *d2,
+		int removeAll, ssize_t start, int ic
+	)
+{
+	const FB_UCHAR *sp, *ap, *bp;
+	ssize_t sl, al, bl;
+	FBUSTRING *r;
+	HWSTRARG t1;
+
+	hWstrArg( s, &sp, &sl, &t1 );
+
+	if( start < 1 )
+	{
+		r = hUTempFrom( sp, sl );
+	}
+	else
+	{
+		hUStrArg( d1, &ap, &al );
+		hUStrArg( d2, &bp, &bl );
+		r = hURemoveBetween( sp, sl, ap, al, bp, bl, removeAll, start - 1, ic );
 	}
 
 	hWstrRel( &t1 );
