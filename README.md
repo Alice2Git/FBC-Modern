@@ -2,11 +2,11 @@
 
 # FBC-Modern
 
-**A FreeBASIC compiler with a portable Unicode string type, generics, an iterator protocol, `FOR EACH`, a standard container library, `defer`, and lambdas — built on fbc 1.20.0, with the existing language left untouched.**
+**A FreeBASIC compiler with a portable Unicode string type, generics, an iterator protocol, `FOR EACH`, a standard container library, a modern date/time library, `defer`, and lambdas — built on fbc 1.20.0, with the existing language left untouched.**
 
 [![Version](https://img.shields.io/badge/fbc-1.20.0-blue)](#)
 [![Targets](https://img.shields.io/badge/targets-win64%20%7C%20win32%20%7C%20linux--x86__64-green)](#)
-[![Tests](https://img.shields.io/badge/unit--tests-1%2C154%2C420%20assertions-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/unit--tests-1%2C594%2C943%20assertions-brightgreen)](#tests)
 [![Licence](https://img.shields.io/badge/licence-GPLv2%2B%20%2F%20LGPLv2.1%2B-lightgrey)](#-license)
 [![Status](https://img.shields.io/badge/status-complete%2C%20offered%20upstream-orange)](#-project-goals)
 
@@ -18,7 +18,7 @@
 
 ## Hero
 
-FBC-Modern is a modified copy of the [FreeBASIC](https://www.freebasic.net/) compiler that adds language features, each built on the one before it: **generics**, a **structural iterator protocol**, **`FOR EACH`**, a **standard container library**, **`defer`** for scope-exit cleanup, and **lambdas** with optional capture — plus **`USTRING`**, a dynamic Unicode string type that is byte-identical on every target.
+FBC-Modern is a modified copy of the [FreeBASIC](https://www.freebasic.net/) compiler that adds language features, each built on the one before it: **generics**, a **structural iterator protocol**, **`FOR EACH`**, a **standard container library**, **`defer`** for scope-exit cleanup, and **lambdas** with optional capture — plus **`USTRING`**, a dynamic Unicode string type that is byte-identical on every target, and **`fb/chrono.bi`**, a date/time library that replaces the VB6 serial-`double` model with ticks, durations, clocks and ISO 8601.
 
 It exists because FreeBASIC is a fast, direct, genuinely useful systems language with two long-standing gaps: there is no portable Unicode string, and there is no way to write a container that works for more than one element type without macros, `ANY PTR`, or copy-paste. Both gaps push real programs toward workarounds that lose type information — and both are fixable inside the existing language rather than beside it.
 
@@ -41,9 +41,10 @@ Everything here is **purely additive**. `STRING`, `ZSTRING`, `WSTRING`, `FOR`, a
 | **`defer`** | `defer <statement>` runs on the way out of the enclosing **scope**, in reverse order, on **every** path — fallthrough, `exit`, `return`, `goto` out of nested scopes — and every iteration of a loop body. For the one-off `CloseHandle` that does not justify declaring a type. A **contextual keyword**: existing code using `defer` as a name keeps working. |
 | **Lambdas** | `function( byval x as long ) as long … end function` in expression position. Non-capturing ones are **plain procedure pointers**, so every existing callback API — including `cdecl`/`stdcall` ones like `qsort` and Win32 — works unchanged. Capturing ones, `sub[ byref total ]( … )`, build a stack closure; every capture states `byval` or `byref` explicitly. |
 | **`Optional` / `Result`** | `Optional( of T )` for a value that might not be there, `Result( of T, E )` for a value or the reason there isn't one. Pure library, no compiler support. Zero is a value; a default-constructed `Result` is a **failure**, so a forgotten assignment cannot read as success. |
+| **Date/time** | `fb/chrono.bi` — `DateTime`, `LocalDate`, `LocalTime`, `Instant`, `TimeSpan`, `Clock`, `Stopwatch`, `CpuClock`, `TimeZoneInfo`. Immutable value types over `int64` ticks of 100 ns, years 1–9999. ISO 8601 / RFC 3339, custom patterns, OS-native offsets and DST, a monotonic clock. **Arithmetic never wraps**; out-of-range gives an `Invalid` sentinel. Ships **alongside** `datetime.bi`, which is unchanged; the two meet at `FromSerial` / `Serial`. |
 | **Standard containers** | `Array`, `Map`, `Set`, `LinkedList` in namespace `FB`. Written in ordinary FreeBASIC on top of the three features above, with **zero compiler support** — so a better implementation by anybody else is on exactly equal footing. |
 | **`USTRING`** | A dynamic Unicode string that is UTF-16 on *every* target, unlike `WSTRING` (2 bytes on Windows, 4 on Linux, 1 on DOS). A true intrinsic type in the compiler, not a library — `LEN` is O(1) and every string intrinsic works. |
-| **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite: 1,155,921 assertions and 1,745 log-tests across four dialects, under **both** backends. |
+| **Backwards compatibility** | Nothing existing changes. Verified by fbc's own suite — 1,154,412 assertions of it, plus this project's own suites on top — across four dialects, under **both** backends. |
 | **Diagnostics** | New, specific messages for the new features — including the **instantiation chain** for an error inside a generic, and near-miss reporting that names the *missing member* rather than saying "not iterable". Diagnostics elsewhere are byte-identical to stock fbc. |
 | **Unicode** | UTF-8 ↔ UTF-16 conversion fixed on every target (not locale-dependent), a generated BMP case-mapping table, and UTF-8 file output everywhere. |
 | **Cross-platform** | Built, tested and shipped prebuilt for **win64**, **win32** and **linux-x86_64**. |
@@ -66,6 +67,8 @@ Against **stock fbc 1.20.0**. Only rows where something actually changed:
 | `WSTRING` append walks to the terminator: **O(n²)** | `USTRING` keeps its length in the descriptor: **O(1) amortised** — 400–900× faster at n=40,000 ([numbers](#performance-appending)) |
 | `STRING` ↔ `WSTRING` conversion goes through the C locale — codepage- and machine-dependent | `STRING` ↔ `USTRING` is UTF-8 on every target, identical everywhere |
 | A ustring-shaped file written on Windows is not what Linux writes | Files, pipes and non-Windows consoles get **UTF-8** on every platform |
+| Dates are serial `double`s at second resolution — no duration type, no offset, no ISO 8601, no monotonic clock | `fb/chrono.bi` — 100 ns ticks, `TimeSpan`, UTC offsets and DST, ISO 8601 / RFC 3339, `Stopwatch` |
+| `DateSerial( 2025, 13, 40 )` silently normalizes; a bad parse is indistinguishable from a valid one | Out-of-range construction returns `Invalid`; parsing is `TryParse` and **strict**; arithmetic never wraps |
 
 Everything not in this table is deliberately identical, including diagnostics, code generation and compile times.
 
@@ -208,6 +211,29 @@ print Replace( u, "noir", "au lait" )
 AfxNova originals, plus two AfxNova bugs found by the differential harness, are
 listed in [docs/string/string.txt](docs/string/string.txt).
 
+### Date and time
+
+```basic
+#include once "fb/chrono.bi"
+using FB
+
+dim as DateTime d = DateTime( 2025, 3, 4, 14, 30, 5, 0 ).WithOffset( 330 )
+print d.ToIsoString( )                      '' 2025-03-04T14:30:05+05:30
+print d.ToString( "dddd, dd MMMM yyyy" )    '' Tuesday, 04 March 2025
+
+dim as DateTime bad = DateTime( 2025, 2, 30 )
+print bad.IsValid                           '' false — not a normalized 2025-03-02
+
+dim as TimeSpan age = Clock.UtcNow( ) - d.ToInstant( )
+print age.TotalDays
+
+dim as Stopwatch sw = Stopwatch.StartNew( )  '' monotonic; TIMER is not
+'' … work …
+print sw.ElapsedMilliseconds
+```
+
+> **Four things to know.** Values are **immutable** — `AddDays` returns a new one. Out-of-range construction and overflow give the `Invalid` sentinel rather than wrapping or erroring, and `Invalid = Invalid` is **false**, so test with `IsValid`. Parsing is strict `TryParse`, never a locale guess. `DateTime.FromSerial` / `.Serial` bridge to legacy `datetime.bi` doubles, so migration is per-function.
+
 ### `USTRING`
 
 ```basic
@@ -341,7 +367,7 @@ FBC-Modern uses fbc's existing pipeline. Only two stages gained anything.
 | **Symbol / semantic** | `symb*` — types, overload resolution, mangling | **Yes** — instantiation cache, type-parameter binding, Itanium `I…E` mangling |
 | **AST** | Expression and statement trees, constant folding | Unchanged — an instantiation is an ordinary UDT by the time the AST sees it |
 | **IR / backends** | `gcc` (C), `gas64`, `gas` (x86), `llvm` | Unchanged for generics; `USTRING` emission added to all four |
-| **Runtime** | libfb / libfbmt / libfbgfx | `USTRING` descriptors, codecs and I/O added; nothing for generics |
+| **Runtime** | libfb / libfbmt / libfbgfx | `USTRING` descriptors, codecs and I/O added; the date/time tick kernel, ISO and pattern engines, and the per-OS clock and zone backends added; nothing for generics |
 
 <details>
 <summary><b>How generics actually work</b> — four sentences, because nothing else in fbc looks like this</summary>
@@ -444,8 +470,8 @@ fbc has four test targets. All four are run.
 
 | Target | Scale | Result |
 |---|---|---|
-| `unit-tests` (win64, gcc) | 2,308 test modules | **1,154,420 assertions — 11 failed** |
-| `unit-tests` (win64, gas64) | 2,308 test modules | **identical** |
+| `unit-tests` (win64, gcc) | fbc's suite plus this project's | **1,594,943 assertions — 11 failed** |
+| `unit-tests` (win64, gas64) | same | **identical** |
 | `log-tests` | 1,731 tests across `fb`, `fblite`, `qb`, `deprecated` | **1,731 passed, 0 failed** |
 | `warning-tests` | 68 files × 5 targets | **0 diagnostic changes** |
 | `error-tests` | golden diagnostics × 5 targets | **0 diagnostic changes** |
@@ -459,6 +485,7 @@ The 11 failures are all `fbc_tests.threads.threadcall_`, caused by `libffi` bein
 | Suite | Covers |
 |---|---|
 | `src/tests/generics/` | 42 files — instantiation and identity, out-of-line members, operators and properties, generic procedures and inference, global operators, all three inheritance directions with `VIRTUAL`/`ABSTRACT`/RTTI, self-reference, mangling, deferral, multi-module linking, every container member and complexity claim, and 25 one-case diagnostic files |
+| `src/tests/chrono/` | 8 fbcunit suites — ticks and components, `TimeSpan`, calendar arithmetic, clocks, ISO 8601, patterns, zones and locale, the `USTRING` overloads. Plus `tests/dt_core_test.c`, a standalone C harness: **23,304,597 checks**, including an exhaustive civil↔tick round trip over all 3,652,059 days in range |
 | `tests/ustring_*.bas`, `tests/ustr_*.c` | 464 checks — the language surface, every declaration form, I/O and encodings, `DRAW STRING` compared pixel by pixel, the codecs against malformed input, and the wchar helpers at **all three wchar widths** |
 
 Behaviour tests are additionally run under **both** backends by hand, and against the **prebuilt** compilers rather than the build tree — 17/17 on win64, win32 and linux-x86_64.
@@ -499,6 +526,9 @@ Everything below is in this repository. There is no documentation website.
 | **[Iterator protocol](docs/for_each/iterator-protocol.txt)** | The RFC-0002 contract, and why the existing `OPERATOR FOR` protocol does not cover collections |
 | **Standard library** — [Array](docs/array/array.txt) · [Map](docs/map/map.txt) · [Set](docs/set/set.txt) · [LinkedList](docs/linkedlist/linkedlist.txt) | Every member, its complexity, and the traps |
 | **[String library](docs/string/string.txt)** | All 37 functions, their complexity, the rules that are easy to get wrong, and every divergence from AfxNova |
+| **[Date/time reference](docs/datetime/datetime.txt)** | Every type and member, the tick model, the `Invalid` rules, exact vs calendar arithmetic, ISO 8601, the pattern language, clocks, zones and interop |
+| **[Date/time overview](docs/datetime/README.md)** | What shipped, how to build and test it, what is and is not verified — and the index to the seven RFCs that specify it |
+| **[Date/time migration guide](docs/datetime/migration.md)** | Every `datetime.bi` and AfxNova date member mapped to its `chrono` equivalent, and the `FromSerial` / `Serial` bridge |
 | **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
 | **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
 | **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
@@ -513,6 +543,7 @@ Carried deliberately, all measured, none blocking. The full list with reasoning 
 - **`typeof( T )` does not see through a type parameter**, so a generic body cannot branch on what `T` is bound to. This is why the hash contract is an overloaded `HashOf`.
 - **One copy of each instantiation per module.** Costs size, not correctness.
 - **`CONST u AS USTRING`** is not supported — fbc's `CONST` accepts exactly one string type. `WSTRING` is rejected too.
+- **No IANA tzdb in the date/time library.** Zones are OS-native only — UTC, the OS local zone, fixed offsets. No named zones, no historical rules, and `AssumeLocal` inside a DST fall-back hour takes the OS's answer. Leap seconds and non-Gregorian calendars are out of scope as well; each is argued in [docs/datetime/rationale.md](docs/datetime/rationale.md).
 
 ---
 

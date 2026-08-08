@@ -24,6 +24,7 @@ print ( Clock.UtcNow( ) - d.ToInstant( ) ).TotalDays
 
 | | |
 |---|---|
+| **The reference** | [datetime.txt](datetime.txt) — every type and member, the rules, and the traps |
 | **Using it** | [migration.md](migration.md) — every `datetime.bi` and AfxNova member mapped to its equivalent |
 | **Seeing it** | [examples/tour.bas](examples/tour.bas), [examples/migrating.bas](examples/migrating.bas) — both compile and run |
 | **Why it is shaped this way** | [rationale.md](rationale.md) |
@@ -46,7 +47,7 @@ print ( Clock.UtcNow( ) - d.ToInstant( ) ).TotalDays
 | | |
 |---|---|
 | Shape | Library only. C in `src/src/rtlib`, FB types in `src/inc/fb/chrono.bi`. **No compiler changes.** |
-| Platforms | Windows and Linux. **Linux is written but unverified — see Status.** |
+| Platforms | win64, win32 and linux-x86_64 — each verified by running the shipped prebuilt tree. |
 | Representation | `int64` ticks of 100 ns since `0001-01-01T00:00:00`. Range year 1 – 9999. |
 | Semantics | Immutable value types. `AddDays` returns a new value. |
 | Timezones | OS-native only: UTC, the OS local zone, fixed offsets. No IANA tzdb. |
@@ -94,7 +95,19 @@ make rtlib CFLAGS="-DDISABLE_FFI"
 That disables `ThreadCall` only. The 11 `fbc_tests.threads.threadcall_` failures
 it causes are the documented baseline; a 12th failure anywhere is a regression.
 
-### Four traps this work hit
+### Five traps this work hit
+
+**A Vista-or-later Win32 API compiles on win64 and fails on win32.** mingw gates
+the zone and locale APIs behind `_WIN32_WINNT`, and the 64-bit headers default
+high enough while the 32-bit ones do not — so `win32/dt_zone.c` built clean at
+64-bit and failed outright at 32-bit on `GetDynamicTimeZoneInformation`,
+`GetLocaleInfoEx` and `LOCALE_NAME_USER_DEFAULT`. The file now states
+`_WIN32_WINNT 0x0600` before any include. `GetTimeZoneInformationForYear` needs
+`0x0601`, and a static import of it would have raised the whole binary's minimum
+OS to Windows 7 — so it is resolved through `GetProcAddress` instead (the same
+thing `dt_clock.c` already does for the Windows 8 precise-time API), with the
+existing static-TZI path as the fallback. **A win64 build is not evidence that a
+Win32 call is available**; rebuilding the prebuilts is what surfaces this.
 
 **A per-OS `.c` must not share its base name with one in `src/rtlib/`.** The
 makefile maps every `RTLIB_DIRS` entry through
@@ -155,6 +168,11 @@ and every divergence was handled that way.
   and an exhaustive ISO-week structural check over the same.
 - `errors` and `warnings` golden-diff suites clean.
 - Both example programs compile and run.
+- **All three shipped toolchains, run as shipped** — invoked from `toolchains/`
+  with no `-i` and no `-p`. win64 and win32 each report their own target and
+  execute the chrono tour correctly. Linux was rebuilt in WSL2, its rtlib
+  compiles warning-free, and **94 checks, 0 failures** run against the shipped
+  tree, exercising `unix/dt_clock.c` and `unix/dt_zone.c`.
 - **~40 seeded mutants killed** across the eight suites. Three survived and are
   documented as such: two provably equivalent mutants, and one property (the
   dynamic-vs-static Windows zone API) that is not portably testable and is
@@ -162,10 +180,14 @@ and every divergence was handled that way.
 
 ### Not verified
 
-- **Linux.** `unix/dt_clock.c` and `unix/dt_zone.c` have never been compiled or
-  run. This is the single largest gap in the work, and phase 7 is where the two
-  platforms diverge most. Everything else in the library is portable C or FB
-  that does not touch the OS.
+- **The full fbcunit suite on Linux and win32.** Only win64 runs the 1.59 M
+  assertion gate; the other two targets are covered by the 94-check
+  shipped-tree run and the tour example, which exercise the platform backends
+  but not every member.
+- **`gfxlib2` on Linux** was not rebuilt — `libxpm-dev` is absent and `sudo` is
+  unavailable in that environment. Safe here because chrono adds new `.c` files
+  plus declarations in a new header, and declarations cannot alter gfxlib2's
+  codegen; recorded rather than glossed.
 - `log-tests` (the per-dialect compile-and-run suite) was not run.
 - Locale-formatted output is asserted only by invariant — non-emptiness,
   ordering, distinctness, valid UTF-8. It is whatever the machine says, and
