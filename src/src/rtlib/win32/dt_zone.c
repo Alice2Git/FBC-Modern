@@ -7,6 +7,17 @@
 ** makefile's $(sort) -- see docs/datetime/README.md.
 */
 
+/* GetDynamicTimeZoneInformation, GetTimeZoneInformationForYear, GetLocaleInfoEx,
+** GetDateFormatEx / GetTimeFormatEx and LOCALE_NAME_USER_DEFAULT are all
+** Vista-and-later, and mingw gates them behind _WIN32_WINNT.  The 64-bit
+** headers default high enough and the 32-bit ones do NOT, so the 64-bit build
+** compiles clean while the 32-bit build fails outright -- say it explicitly,
+** and say it BEFORE any header is pulled in. */
+#undef  _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#undef  WINVER
+#define WINVER 0x0600
+
 #include "../fb.h"
 #include <windows.h>
 
@@ -37,13 +48,39 @@ static int fb_hDtW2U( const WCHAR *w, char *buf, int buflen )
 ** every year, which silently misdates anything from before a rule change.
 ** AfxNova's AfxTimeZone* family uses the static form and inherits that bug;
 ** this is a deliberate divergence from the requirements source. */
+/* GetTimeZoneInformationForYear is Windows 7, and mingw only declares it at
+** _WIN32_WINNT >= 0x0601.  Resolve it at run time rather than raising the whole
+** binary's minimum OS with a static import -- the same approach dt_clock.c
+** takes for the Windows 8 precise-time API.  When it is absent the static
+** fallback below still gives a correct answer for the CURRENT year, which is
+** what the old AfxNova behaviour was. */
+typedef WINBOOL (WINAPI *FB_TZFORYEARPROC)( USHORT, PDYNAMIC_TIME_ZONE_INFORMATION,
+                                            LPTIME_ZONE_INFORMATION );
+static FB_TZFORYEARPROC fb_hDtTzForYear = NULL;
+static int              fb_hDtTzForYearChecked = 0;
+
+static FB_TZFORYEARPROC fb_hDtGetTzForYearProc( void )
+{
+    if( !fb_hDtTzForYearChecked ) {
+        HMODULE k32 = GetModuleHandle( "kernel32.dll" );
+        if( k32 != NULL )
+            fb_hDtTzForYear = (FB_TZFORYEARPROC)(void *)
+                GetProcAddress( k32, "GetTimeZoneInformationForYear" );
+        fb_hDtTzForYearChecked = 1;
+    }
+    return fb_hDtTzForYear;
+}
+
 static int fb_hDtTziForYear( const SYSTEMTIME *utc, TIME_ZONE_INFORMATION *tzi )
 {
     DYNAMIC_TIME_ZONE_INFORMATION dtzi;
+    FB_TZFORYEARPROC forYear = fb_hDtGetTzForYearProc( );
 
-    if( GetDynamicTimeZoneInformation( &dtzi ) != TIME_ZONE_ID_INVALID ) {
-        if( GetTimeZoneInformationForYear( utc->wYear, &dtzi, tzi ) )
-            return 0;
+    if( forYear != NULL ) {
+        if( GetDynamicTimeZoneInformation( &dtzi ) != TIME_ZONE_ID_INVALID ) {
+            if( forYear( (USHORT)utc->wYear, &dtzi, tzi ) )
+                return 0;
+        }
     }
     if( GetTimeZoneInformation( tzi ) != TIME_ZONE_ID_INVALID )
         return 0;
@@ -102,10 +139,9 @@ FBCALL int fb_DtZoneIsDst( long long utcTicks )
 
     if( fb_hDtTicksToSystemTime( utcTicks, &utc ) )
         return 0;
-    if( GetDynamicTimeZoneInformation( &dtzi ) == TIME_ZONE_ID_INVALID )
+    if( fb_hDtTziForYear( &utc, &tzi ) )
         return 0;
-    if( !GetTimeZoneInformationForYear( utc.wYear, &dtzi, &tzi ) )
-        return 0;
+    (void)dtzi;
     if( tzi.DaylightBias == 0 )
         return 0;
     /* in DST when the offset differs from the standard one */
