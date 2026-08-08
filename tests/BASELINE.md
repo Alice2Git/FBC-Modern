@@ -165,7 +165,7 @@ garbage. `FB.Split` was always case-insensitive whatever its flag said.
 
 Fixed in `ir-gas64.bas` by extending into the whole register, `movsx` for signed
 `BYTE`/`SHORT` and `movzx` for `UBYTE`/`USHORT`/`BOOLEAN`/`CHAR`. Both backends
-now report 11. See `docs/rapport-bogue-gas64.pdf`.
+now report 11.
 
 **The lesson is about the measurement, not the bug.** A figure taken under one
 backend and quoted as if it covered both turned a wrong-code defect into a line
