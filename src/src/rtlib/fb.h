@@ -357,6 +357,7 @@ void                fb_hListDynElemRemove   ( FB_LIST *list, FB_LISTELEM *elem )
 #include "fb_serial.h"
 #include "fb_printer.h"
 #include "fb_datetime.h"
+#include "fb_chrono.h"
 #include "fb_thread.h"
 #include "fb_event.h"
 #include "fb_hook.h"
