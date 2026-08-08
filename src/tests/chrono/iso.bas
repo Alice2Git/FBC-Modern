@@ -1,4 +1,4 @@
-'' ISO 8601 / RFC 3339 -- docs/datetime/RFC-0005-iso8601.md section 6.
+'' ISO 8601 / RFC 3339 -- C:\dev\docs\datetime\RFC-0005-iso8601.md section 6.
 ''
 '' Everything here asserts EXACT strings in both directions.  That is possible
 '' precisely because this layer is locale-independent by construction, and it

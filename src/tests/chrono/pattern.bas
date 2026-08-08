@@ -1,4 +1,4 @@
-'' Custom patterns -- docs/datetime/RFC-0006-patterns.md section 6.
+'' Custom patterns -- C:\dev\docs\datetime\RFC-0006-patterns.md section 6.
 ''
 '' Every assertion here is an EXACT string, which is possible only because this
 '' layer uses invariant English and never consults the locale.

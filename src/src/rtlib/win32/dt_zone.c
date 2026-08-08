@@ -1,10 +1,10 @@
 /* chrono: timezone offsets and locale formatting, Windows backend.
 **
-** docs/datetime/RFC-0007-zones-locale-interop.md.
+** C:\dev\docs\datetime\RFC-0007-zones-locale-interop.md.
 **
 ** NOTE the file name exists ONLY under win32/ and unix/.  A per-OS .c that
 ** shares a base name with one in src/rtlib/ is silently dropped by the
-** makefile's $(sort) -- see docs/datetime/README.md.
+** makefile's $(sort) -- see C:\dev\docs\datetime\README.md.
 */
 
 /* GetDynamicTimeZoneInformation, GetTimeZoneInformationForYear, GetLocaleInfoEx,

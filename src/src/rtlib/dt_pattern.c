@@ -1,6 +1,6 @@
 /* chrono: custom pattern formatting and strict parsing.
 **
-** Specified by docs/datetime/RFC-0006-patterns.md.
+** Specified by C:\dev\docs\datetime\RFC-0006-patterns.md.
 **
 ** Pattern letters (yyyy-MM-dd HH:mm:ss), the .NET/Java family, chosen because
 ** it is what C#, Java, Rust's chrono, ICU and every spreadsheet use, and it is

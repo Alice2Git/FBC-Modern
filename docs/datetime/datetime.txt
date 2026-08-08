@@ -38,10 +38,19 @@ NO COMPILER CHANGE WAS MADE. This is a library: C in src/rtlib, FreeBASIC types
 in src/inc/fb/chrono.bi. Nothing here is a keyword, and DateTime, Instant, Clock
 and the rest stay available as your own identifiers until you write 'using FB'.
 
-It is specified before it is implemented -- seven RFCs in this directory, one
-per area, and each is normative. Where the code and an RFC disagreed, the RFC
-was amended in the same change. This file is the reference; the RFCs are the
-reasoning.
+It is specified before it is implemented -- seven RFCs, one per area, each
+normative. Where the code and an RFC disagreed, the RFC was amended in the same
+change. This file is the reference; the RFCs are the reasoning.
+
+THE SPECIFICATION IS NOT IN THIS REPOSITORY. It lives in
+
+    C:\dev\docs\datetime\
+
+along with migration.md (every legacy member mapped to its equivalent),
+rationale.md (why each thing is shaped this way), comparison-matrix.md and
+ranked-gaps.md (what it was measured against), and README.md (what shipped, how
+to build and test it, and what is and is not verified). Every bare filename
+below refers to that directory.
 
 
 THE TICK
@@ -880,7 +889,7 @@ iteration sweep has no sensible home in the .bas suite:
 23,304,597 checks, 0 failures, including an exhaustive civil<->tick round trip
 over every day in range and an exhaustive ISO-week structural check over the
 same. The FB suites are part of the ordinary unit-tests gate; see
-tests/BASELINE.md and this directory's README.md for what was and was not
+tests/BASELINE.md and C:\dev\docs\datetime\README.md for what was and was not
 verified, which includes the platforms.
 
 ASSERT YOUR TEST GENERATOR'S RANGE. Every fixed-seed sweep here originally drew

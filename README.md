@@ -527,8 +527,7 @@ Everything below is in this repository. There is no documentation website.
 | **Standard library** — [Array](docs/array/array.txt) · [Map](docs/map/map.txt) · [Set](docs/set/set.txt) · [LinkedList](docs/linkedlist/linkedlist.txt) | Every member, its complexity, and the traps |
 | **[String library](docs/string/string.txt)** | All 37 functions, their complexity, the rules that are easy to get wrong, and every divergence from AfxNova |
 | **[Date/time reference](docs/datetime/datetime.txt)** | Every type and member, the tick model, the `Invalid` rules, exact vs calendar arithmetic, ISO 8601, the pattern language, clocks, zones and interop |
-| **[Date/time overview](docs/datetime/README.md)** | What shipped, how to build and test it, what is and is not verified — and the index to the seven RFCs that specify it |
-| **[Date/time migration guide](docs/datetime/migration.md)** | Every `datetime.bi` and AfxNova date member mapped to its `chrono` equivalent, and the `FromSerial` / `Serial` bridge |
+| **Date/time specification** — `C:\dev\docs\datetime\` | Not in this repository. The seven RFCs, the migration guide, the rationale and the comparison matrix live there; `datetime.txt` above is the reference generated from them |
 | **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
 | **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
 | **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
@@ -543,7 +542,7 @@ Carried deliberately, all measured, none blocking. The full list with reasoning 
 - **`typeof( T )` does not see through a type parameter**, so a generic body cannot branch on what `T` is bound to. This is why the hash contract is an overloaded `HashOf`.
 - **One copy of each instantiation per module.** Costs size, not correctness.
 - **`CONST u AS USTRING`** is not supported — fbc's `CONST` accepts exactly one string type. `WSTRING` is rejected too.
-- **No IANA tzdb in the date/time library.** Zones are OS-native only — UTC, the OS local zone, fixed offsets. No named zones, no historical rules, and `AssumeLocal` inside a DST fall-back hour takes the OS's answer. Leap seconds and non-Gregorian calendars are out of scope as well; each is argued in [docs/datetime/rationale.md](docs/datetime/rationale.md).
+- **No IANA tzdb in the date/time library.** Zones are OS-native only — UTC, the OS local zone, fixed offsets. No named zones, no historical rules, and `AssumeLocal` inside a DST fall-back hour takes the OS's answer. Leap seconds and non-Gregorian calendars are out of scope as well; each is argued in `C:\dev\docs\datetime\rationale.md`.
 
 ---
 

@@ -1,4 +1,4 @@
-/* chrono clocks: the Windows backend.  docs/datetime/RFC-0003-clocks.md */
+/* chrono clocks: the Windows backend.  C:\dev\docs\datetime\RFC-0003-clocks.md */
 
 #include "../fb.h"
 #include <windows.h>

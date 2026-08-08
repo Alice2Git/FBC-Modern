@@ -2,7 +2,7 @@
 ''
 ''     #include once "fb/chrono.bi"
 ''
-'' Specified by docs/datetime/RFC-0001-core-representation.md (core types) and
+'' Specified by C:\dev\docs\datetime\RFC-0001-core-representation.md (core types) and
 '' RFC-0002-timespan.md (durations).  This header is phase 2: the types, their
 '' component accessors, exact arithmetic and operators.  Formatting and parsing
 '' (RFC-0005/0006), calendar arithmetic (RFC-0004), clocks (RFC-0003) and zones
@@ -69,7 +69,7 @@ const DT_TICKS_LLONG_MIN       as longint = -9223372036854775807ll
 
 '' Interop epochs, as tick counts measured from 0001-01-01, so each conversion
 '' is an addition.  This is why the epoch and tick size were chosen at all --
-'' see docs/datetime/rationale.md.  The converters themselves are RFC-0007.
+'' see C:\dev\docs\datetime\rationale.md.  The converters themselves are RFC-0007.
 '' Julian day number of 0001-01-01.  JD 2451545.0 is 2000-01-01T12:00 UTC.
 const DT_JULIAN_DAY_AT_EPOCH   as longint = 1721426ll
 
@@ -104,7 +104,7 @@ const DT_SUNDAY    as long = 7
 
 '' ------------------------------------------------------------- the C kernel
 ''
-'' docs/datetime/RFC-0001 section 5.  Pure functions in src/rtlib/dt_core.c:
+'' C:\dev\docs\datetime\RFC-0001 section 5.  Pure functions in src/rtlib/dt_core.c:
 '' no OS calls, no allocation, no locale.  Declared here rather than in a
 '' separate header so the whole library is one #include.
 

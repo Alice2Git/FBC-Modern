@@ -1,4 +1,4 @@
-'' Clock / Stopwatch / CpuClock -- docs/datetime/RFC-0003-clocks.md section 5.
+'' Clock / Stopwatch / CpuClock -- C:\dev\docs\datetime\RFC-0003-clocks.md section 5.
 ''
 '' Clock tests cannot assert exact values, so they assert INVARIANTS.  Every
 '' threshold below is chosen so a correct implementation passes on a loaded

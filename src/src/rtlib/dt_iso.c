@@ -1,6 +1,6 @@
 /* chrono: ISO 8601 / RFC 3339 formatting and strict parsing.
 **
-** Specified by docs/datetime/RFC-0005-iso8601.md.
+** Specified by C:\dev\docs\datetime\RFC-0005-iso8601.md.
 **
 ** Portable, pure, locale-independent, ASCII-only.  No sprintf anywhere: a
 ** "%f" picking up a comma decimal point on a European machine is a real bug
@@ -13,7 +13,7 @@
 ** input does not match it.  There is no locale, no guessing, and no partial
 ** acceptance; trailing characters are an error.  The lenient, locale-guessing
 ** parser in time_parsedate.c is untouched and is not built upon -- see
-** docs/datetime/rationale.md.
+** C:\dev\docs\datetime\rationale.md.
 */
 
 #include "fb.h"

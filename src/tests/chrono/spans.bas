@@ -1,4 +1,4 @@
-'' TimeSpan -- docs/datetime/RFC-0002-timespan.md section 6.
+'' TimeSpan -- C:\dev\docs\datetime\RFC-0002-timespan.md section 6.
 
 #include once "fbcunit.bi"
 #include once "fb/chrono.bi"

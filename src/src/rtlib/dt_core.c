@@ -1,6 +1,6 @@
 /* chrono kernel: civil calendar <-> tick conversion.
 **
-** Specified by docs/datetime/RFC-0001-core-representation.md.
+** Specified by C:\dev\docs\datetime\RFC-0001-core-representation.md.
 **
 ** Pure. No OS calls, no allocation, no locale, no globals. Proleptic
 ** Gregorian throughout -- the Gregorian rules projected back past 1582, with
@@ -169,7 +169,7 @@ FBCALL int fb_DtIsValidTime( int hour, int minute, int second,
         return 0;
     if( minute < 0 || minute > 59 )
         return 0;
-    /* No leap seconds: 60 is not a valid second. See docs/datetime/rationale.md */
+    /* No leap seconds: 60 is not a valid second. See C:\dev\docs\datetime\rationale.md */
     if( second < 0 || second > 59 )
         return 0;
     if( subsecond_ticks < 0 || subsecond_ticks >= FB_DT_TICKS_PER_SECOND )

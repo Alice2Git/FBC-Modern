@@ -5,7 +5,7 @@
 ** exhaustive sweep has no sensible home there. The kernel is the one piece of
 ** chrono that can be proved correct before any FB-visible code exists.
 **
-** Specified by docs/datetime/RFC-0001-core-representation.md section 6.
+** Specified by C:\dev\docs\datetime\RFC-0001-core-representation.md section 6.
 **
 ** Build (from C:\dev\FBC-Modern):
 **   gcc -O2 -Wall -I src/src/rtlib tests/dt_core_test.c src/src/rtlib/dt_core.c \

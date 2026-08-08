@@ -1,4 +1,4 @@
-'' Calendar arithmetic and utilities -- docs/datetime/RFC-0004-calendar.md s5.
+'' Calendar arithmetic and utilities -- C:\dev\docs\datetime\RFC-0004-calendar.md s5.
 
 #include once "fbcunit.bi"
 #include once "fb/chrono.bi"

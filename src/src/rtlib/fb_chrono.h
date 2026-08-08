@@ -1,7 +1,7 @@
 /* chrono: modern date/time kernel.
 **
 ** The tick model and every rule enforced here are specified in
-** docs/datetime/RFC-0001-core-representation.md.  Nothing in this header
+** C:\dev\docs\datetime\RFC-0001-core-representation.md.  Nothing in this header
 ** touches, replaces or depends on the legacy fb_datetime.h surface.
 **
 ** A tick is 100 ns.  A DateTime is a count of ticks since
@@ -43,7 +43,7 @@
 /* -- interop epochs (RFC-0001 section 1) -------------------------------- */
 /* Each is the tick count of that epoch measured from 0001-01-01, so the
 ** conversion is an addition.  This is why the epoch and tick size were
-** chosen; see docs/datetime/rationale.md. */
+** chosen; see C:\dev\docs\datetime\rationale.md. */
 
 #define FB_DT_DAYS_TO_UNIX_EPOCH     719162LL
 #define FB_DT_TICKS_TO_UNIX_EPOCH    621355968000000000LL   /* 1970-01-01 */

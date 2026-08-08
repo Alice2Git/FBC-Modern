@@ -1,5 +1,5 @@
 '' DateTime / LocalDate / LocalTime / Instant
-'' docs/datetime/RFC-0001-core-representation.md section 6.
+'' C:\dev\docs\datetime\RFC-0001-core-representation.md section 6.
 
 #include once "fbcunit.bi"
 #include once "fb/chrono.bi"

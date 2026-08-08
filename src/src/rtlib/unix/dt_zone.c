@@ -1,6 +1,6 @@
 /* chrono: timezone offsets and locale formatting, Unix backend.
 **
-** docs/datetime/RFC-0007-zones-locale-interop.md.
+** C:\dev\docs\datetime\RFC-0007-zones-locale-interop.md.
 **
 ** localtime_r reads TZ / /etc/localtime, which is where glibc consults the
 ** system tz database.  That buys historical correctness for free, without this

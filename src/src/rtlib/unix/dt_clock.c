@@ -1,4 +1,4 @@
-/* chrono clocks: the Unix backend.  docs/datetime/RFC-0003-clocks.md */
+/* chrono clocks: the Unix backend.  C:\dev\docs\datetime\RFC-0003-clocks.md */
 
 #include "../fb.h"
 
