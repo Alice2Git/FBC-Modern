@@ -665,11 +665,21 @@ end function
 
 '' Capture a procedure body up to and including its terminating END <kind>.
 ''
-'' No depth counting, unlike genCaptureTypeBody: procedures cannot nest in
-'' FreeBASIC, and nothing else in a procedure body produces an 'END SUB' /
-'' 'END FUNCTION'.  A procedure-pointer declaration ('dim cb as sub( )') mentions
-'' the keyword but never terminates a block, which is exactly why counting
-'' openings -- what hSkipCompound does for error recovery -- would be wrong here.
+'' Procedures cannot nest in FreeBASIC, but LAMBDAS can sit inside one, and a
+'' lambda of the same kind as the generic ends with the very same
+'' 'END FUNCTION' / 'END SUB'. Stopping at the first one cut the generic's body
+'' short at the lambda's terminator: the rest of the body -- 'return ...', the
+'' real 'end function' -- was then parsed at module level ("error 53: Illegal
+'' outside a ... FUNCTION ... block", "error 112: END SUB or FUNCTION without
+'' SUB or FUNCTION"), even for a generic that was never instantiated.
+''
+'' So lambda openings are counted, and an END SUB|FUNCTION at depth > 0 closes
+'' a lambda rather than the generic. What counts as an opening is decided by
+'' lambdaOpensHere( ), shared with the lambda capture itself: a procedure-
+'' pointer declaration ('dim cb as sub( )') and a result assignment
+'' ('function = x') mention the keyword without opening anything, which is
+'' exactly why counting every SUB|FUNCTION -- what hSkipCompound does for error
+'' recovery -- would be wrong here.
 private function hCaptureProcBody _
 	( _
 		byval body as FB_GENPROC ptr, _
@@ -678,6 +688,12 @@ private function hCaptureProcBody _
 	) as integer
 
 	#define hAddProcTok( b, t, l ) hAddTokTo( (b)->tokhead, (b)->toktail, t, l )
+
+	'' lambdas open inside the body, not yet closed
+	dim as integer depth = 0
+
+	'' the two tokens before the current one, for lambdaOpensHere( )
+	dim as integer prevtk = INVALID, prevprevtk = INVALID
 
 	do
 		select case as const lexGetToken( GENTOK_FLAGS )
@@ -699,7 +715,24 @@ private function hCaptureProcBody _
 			continue do
 
 		case FB_TK_END
-			if( lexGetLookAhead( 1, GENTOK_FLAGS ) = body->kindtk ) then
+			dim as integer kind = lexGetLookAhead( 1, GENTOK_FLAGS )
+
+			if( depth > 0 ) then
+				select case kind
+				case FB_TK_SUB, FB_TK_FUNCTION
+					'' a lambda closing -- record 'end' and the kind keyword
+					'' together, so the keyword is never re-examined as an opening
+					depth -= 1
+					hAddProcTok( body, lexGetText( ), lexLineNum( ) )
+					lexSkipToken( GENTOK_FLAGS )
+					hAddProcTok( body, lexGetText( ), lexLineNum( ) )
+					lexSkipToken( GENTOK_FLAGS )
+					prevprevtk = FB_TK_END
+					prevtk = kind
+					continue do
+				end select
+
+			elseif( kind = body->kindtk ) then
 				'' record 'end' and the kind keyword together and stop
 				hAddProcTok( body, lexGetText( ), lexLineNum( ) )
 				lexSkipToken( GENTOK_FLAGS )
@@ -708,8 +741,15 @@ private function hCaptureProcBody _
 				exit do
 			end if
 
+		case FB_TK_SUB, FB_TK_FUNCTION
+			if( lambdaOpensHere( prevtk, prevprevtk, GENTOK_FLAGS ) ) then
+				depth += 1
+			end if
+
 		end select
 
+		prevprevtk = prevtk
+		prevtk = lexGetToken( GENTOK_FLAGS )
 		hAddProcTok( body, lexGetText( ), lexLineNum( ) )
 		lexSkipToken( GENTOK_FLAGS )
 	loop

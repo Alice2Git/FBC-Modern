@@ -50,6 +50,12 @@ type FB_LAMBDA
 	srcfile         as zstring ptr
 	done            as integer
 
+	'' The generic instantiation this lambda was WRITTEN inside -- the namespace
+	'' holding its type parameters -- or NULL when written outside every
+	'' generic. The body is parsed in that context and no other; see
+	'' lambdaDrainBodies( ).
+	instns          as FBSYMBOL ptr
+
 	'' capturing lambdas only
 	clo             as FBSYMBOL ptr             '' the synthesised closure struct
 	capcount        as integer
@@ -196,15 +202,97 @@ private function hCaptureLambdaHeader( byval lam as FB_LAMBDA ptr ) as integer
 	function = TRUE
 end function
 
+'' Does the SUB|FUNCTION at the current token OPEN a lambda?
+''
+'' The parser proper needs no such test: cLambdaExpr( ) is reached from
+'' cAtom( ) only, so there a SUB|FUNCTION is a lambda by position. The two
+'' token-level captures that run BEFORE any parse -- a lambda's own body
+'' (hCaptureLambdaBody below) and a generic procedure's body
+'' (hCaptureProcBody in parser-generic-capture.bas) -- have no position to go
+'' by, and need to know where nested lambdas begin so that a nested
+'' 'END SUB|FUNCTION' is not taken as their own terminator.
+''
+'' Both got it wrong, in opposite directions:
+''   - the generic capture ignored lambdas and stopped at the FIRST
+''     'end <kind>', so a 'function' lambda inside a generic function cut the
+''     generic's body short, and everything after it was parsed at module level;
+''   - the lambda capture counted EVERY SUB|FUNCTION as an opening, so
+''     'function = x' or 'dim cb as sub( )' inside a lambda left it unterminated.
+''
+'' The keywords appear in a procedure body in exactly these other roles, none of
+'' which is followed by what a lambda's header must start with:
+''     function = x              result assignment    -- next is '='
+''     exit sub / end function   block keywords       -- END/EXIT handled by
+''                                                       the callers, next is EOL
+'' and as a procedure TYPE, which IS followed by '(' but only ever in type
+'' position:
+''     dim cb as sub( ... )              after AS
+''     cast( function( ... ) as T, p )   first argument of a type-taking
+''     cptr( ... ) / sizeof( ... ) / typeof( ... )      intrinsic
+''
+'' prevtk / prevprevtk are the two tokens before this one, or INVALID.
+function lambdaOpensHere _
+	( _
+		byval prevtk as integer, _
+		byval prevprevtk as integer, _
+		byval flags as integer _
+	) as integer
+
+	select case lexGetToken( flags )
+	case FB_TK_SUB, FB_TK_FUNCTION
+	case else
+		return FALSE
+	end select
+
+	'' what a lambda header starts with: '(' params, '[' captures, or a
+	'' calling convention -- see hCaptureList( ) and hCaptureLambdaHeader( )
+	select case lexGetLookAhead( 1, flags )
+	case CHAR_LPRNT, CHAR_LBRACKET, _
+	     FB_TK_CDECL, FB_TK_STDCALL, FB_TK_PASCAL, FB_TK_THISCALL
+	case else
+		return FALSE
+	end select
+
+	'' a procedure type
+	if( prevtk = FB_TK_AS ) then
+		return FALSE
+	end if
+
+	if( prevtk = CHAR_LPRNT ) then
+		select case prevprevtk
+		case FB_TK_CAST, FB_TK_CPTR, FB_TK_SIZEOF, FB_TK_TYPEOF
+			return FALSE
+		end select
+	end if
+
+	function = TRUE
+end function
+
 '' Capture the body up to its matching END SUB|FUNCTION, which is consumed but
 '' not recorded.
 ''
-'' DEPTH-COUNTED, not "stop at the first END" the way hCaptureProcBody( ) does.
-'' That one is allowed its shortcut because procedures cannot nest in FreeBASIC;
-'' lambdas can, and a lambda inside a lambda would truncate the outer capture at
-'' the inner one's terminator.
+'' DEPTH-COUNTED: a lambda inside a lambda would otherwise truncate the outer
+'' capture at the inner one's terminator. Only a SUB|FUNCTION that really opens
+'' a lambda counts -- see lambdaOpensHere( ).
+private sub hRecordLamTok _
+	( _
+		byval lam as FB_LAMBDA ptr, _
+		byref prevtk as integer, _
+		byref prevprevtk as integer _
+	)
+
+	hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
+	prevprevtk = prevtk
+	prevtk = lexGetToken( LAMTOK_FLAGS )
+	lexSkipToken( LAMTOK_FLAGS )
+end sub
+
 private function hCaptureLambdaBody( byval lam as FB_LAMBDA ptr ) as integer
 	dim as integer depth = 1, tk = any
+
+	'' the two tokens before the current one, for lambdaOpensHere( ); the body
+	'' starts after the ':' or EOL that ended the header
+	dim as integer prevtk = FB_TK_STMTSEP, prevprevtk = INVALID
 
 	do
 		tk = lexGetToken( LAMTOK_FLAGS )
@@ -217,10 +305,8 @@ private function hCaptureLambdaBody( byval lam as FB_LAMBDA ptr ) as integer
 		'' 'exit sub' / 'exit function' name the kind without opening one, so
 		'' both tokens are recorded together and the second is never examined
 		case FB_TK_EXIT
-			hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
-			lexSkipToken( LAMTOK_FLAGS )
-			hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
-			lexSkipToken( LAMTOK_FLAGS )
+			hRecordLamTok( lam, prevtk, prevprevtk )
+			hRecordLamTok( lam, prevtk, prevprevtk )
 			continue do
 
 		case FB_TK_END
@@ -235,22 +321,23 @@ private function hCaptureLambdaBody( byval lam as FB_LAMBDA ptr ) as integer
 				end if
 
 				'' a nested lambda closing -- record both together, or the
-				'' SUB|FUNCTION would be re-examined and counted as opening one
-				hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
-				lexSkipToken( LAMTOK_FLAGS )
-				hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
-				lexSkipToken( LAMTOK_FLAGS )
+				'' SUB|FUNCTION would be re-examined as a possible opening
+				hRecordLamTok( lam, prevtk, prevprevtk )
+				hRecordLamTok( lam, prevtk, prevprevtk )
 				continue do
 			end select
 
 		case FB_TK_SUB, FB_TK_FUNCTION
-			'' a nested lambda opening
-			depth += 1
+			'' a nested lambda opening -- NOT 'function = x', not a procedure
+			'' type such as 'dim cb as sub( )'
+			if( lambdaOpensHere( prevtk, prevprevtk, LAMTOK_FLAGS ) ) then
+				depth += 1
+			end if
 		end select
 
-		hAddTok( lam->tokhead, lam->toktail, lexGetText( ), lexLineNum( ) )
-		lexSkipToken( LAMTOK_FLAGS )
+		hRecordLamTok( lam, prevtk, prevprevtk )
 	loop
+
 
 	function = TRUE
 end function
@@ -347,6 +434,28 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 
 	'' hidelocals = FALSE: this replay parses a BODY, and its own locals and
 	'' parameters must shadow normally. See genEnterGlobalScope( ).
+	'' A lambda written inside a generic needs that instantiation's type
+	'' parameters. Normally it is drained while that replay is still running
+	'' and the namespace is already nested; if it outlived the replay -- a
+	'' generic TYPE body is parsed by cTypeDecl( ), which has no statement
+	'' boundary to drain at -- and is drained from module level instead,
+	'' re-nest the namespace here. Never on top of a DIFFERENT instantiation:
+	'' lambdaDrainBodies( ) only calls this from the lambda's own context or
+	'' from outside every generic.
+	''
+	'' BEFORE genEnterGlobalScope( ), not after: that is the order the normal
+	'' path runs in (hReplayProcBody nests, then this enters global scope), so
+	'' the instance namespace is visible to LOOKUPS while the CURRENT namespace
+	'' is the global one. Nesting afterwards made the instance namespace the
+	'' current one, the body was defined as a C++-mangled member of it, and the
+	'' global prototype the call site points at was never defined:
+	''     undefined reference to `..._LT_0003'
+	dim as integer nested = FALSE
+	if( (lam->instns <> NULL) andalso (lam->instns <> genCurrentInstNamespc( )) ) then
+		symbNestBegin( lam->instns, FALSE )
+		nested = TRUE
+	end if
+
 	genEnterGlobalScope( gs, NULL, FALSE )
 
 	lambdactx.inreplay += 1
@@ -357,7 +466,27 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 	lambdactx.inreplay -= 1
 
 	genLeaveGlobalScope( gs )
+
+	if( nested ) then
+		symbNestEnd( FALSE )
+	end if
 end sub
+
+private function hIsDrainableHere _
+	( _
+		byval lam as FB_LAMBDA ptr, _
+		byval curns as FBSYMBOL ptr _
+	) as integer
+
+	'' outside every generic: anything goes, hReplayLambdaBody( ) restores a
+	'' generic lambda's own namespace itself
+	if( curns = NULL ) then
+		return TRUE
+	end if
+
+	'' inside an instantiation: only that instantiation's own lambdas
+	function = (lam->instns = curns)
+end function
 
 '' Replay every lambda body owed. Safe at any module-level statement boundary,
 '' and cheap when there is nothing to do, which is the common case.
@@ -379,12 +508,24 @@ sub lambdaDrainBodies( )
 
 	lambdactx.draining = TRUE
 
+	'' Which pending bodies may be parsed at THIS boundary.
+	''
+	'' A generic body replay runs cProgram( ), whose statement boundaries call
+	'' here too -- with the instantiation's namespace nested and its type
+	'' parameters visible. Only lambdas written inside that same instantiation
+	'' belong there. Any other pending lambda waits for its own context, at the
+	'' latest the module-level boundary right after the replay, where no
+	'' instantiation is current. Draining it inside the foreign one let 'T'
+	'' shadow a lambda parameter 't' (FreeBASIC is case-insensitive): the
+	'' body silently computed len( T ), or failed with "Variable not declared".
+	dim as FBSYMBOL ptr curns = genCurrentInstNamespc( )
+
 	do
 		dim as FB_LAMBDA ptr p = listGetHead( @lambdactx.list )
 		dim as integer didwork = FALSE
 
 		while( p )
-			if( p->done = FALSE ) then
+			if( (p->done = FALSE) andalso hIsDrainableHere( p, curns ) ) then
 				p->done = TRUE
 				lambdactx.pending -= 1
 				didwork = TRUE
@@ -512,6 +653,31 @@ end function
 '' The field types come from symbTypeToStr( ) on the captured symbol, because the
 '' hoisted declaration cannot name the types of locals that are not in scope
 '' there -- 'typeof( total )' would not resolve at module level.
+'' '__C0', '__C1', ... -- a closure's own capture-type placeholders.
+''
+'' A closure written inside ANOTHER closure's body is built while that one's
+'' instantiation is being replayed, so the enclosing instance namespace holds
+'' the outer closure's placeholders next to any real type parameters. They are
+'' internal -- user code never names them, and the capture aliases are declared
+'' through 'typeof', not through them -- and passing them on would collide with
+'' the inner closure's own: "error 334: Duplicated type parameter, __C0".
+private function hIsClosurePlaceholder( byval id as const zstring ptr ) as integer
+	if( len( *id ) < 4 ) then
+		return FALSE
+	end if
+	if( ucase( left( *id, 3 ) ) <> "__C" ) then
+		return FALSE
+	end if
+	for i as integer = 3 to len( *id ) - 1
+		select case (*id)[i]
+		case asc( "0" ) to asc( "9" )
+		case else
+			return FALSE
+		end select
+	next
+	function = TRUE
+end function
+
 private function hBuildClosure _
 	( _
 		byval lam as FB_LAMBDA ptr, _
@@ -524,8 +690,54 @@ private function hBuildClosure _
 	dim as FB_GENSCOPE gs
 	dim as string text
 	dim as string kw = hKeyword( lam->kindtk )
-	dim as integer argdtype( 0 to LAMBDA_MAXCAPTURES-1 )
-	dim as FBSYMBOL ptr argsubtype( 0 to LAMBDA_MAXCAPTURES-1 )
+	dim as integer argdtype( )
+	dim as FBSYMBOL ptr argsubtype( )
+
+	'' The ENCLOSING instantiation's type parameters, when the lambda is written
+	'' inside a generic body.
+	''
+	'' The closure is a generic of its own and is replayed in its OWN
+	'' instantiation's namespace, where the outer generic's 'T' does not exist:
+	''     function F( of T )( byref a as T ) as long
+	''         var q = sub[ byref k ]( byval x as T ) ...
+	''         -- error 59: Illegal specification, at parameter 1 (x)
+	'' and 'T' in the body was "Variable not declared". So the closure takes
+	'' them as extra type parameters, under the SAME names, bound to the same
+	'' types -- the lambda's header and body then mean exactly what they meant
+	'' where they were written, with no rewriting and no namespace juggling.
+	''
+	'' The instance namespace holds one TYPEDEF per type parameter, bound by
+	'' genInstantiateType( ) / genInstantiateProc( ) in declaration order; a
+	'' generic body cannot add typedefs of its own to it.
+	dim as integer outercount = 0
+	dim as FBSYMBOL ptr outer( )
+	if( lam->instns ) then
+		dim as FBSYMBOL ptr it = symbGetNamespaceTbHead( lam->instns )
+		while( it )
+			if( symbIsTypedef( it ) andalso (hIsClosurePlaceholder( symbGetName( it ) ) = FALSE) ) then
+				redim preserve outer( 0 to outercount )
+				outer( outercount ) = it
+				outercount += 1
+			end if
+			it = it->next
+		wend
+	end if
+
+	dim as integer argcount = lam->capcount + outercount
+	redim argdtype( 0 to argcount-1 )
+	redim argsubtype( 0 to argcount-1 )
+
+	'' '__C0, __C1, ..., T, F' -- the placeholders, then the outer names
+	dim as string params
+	for i as integer = 0 to lam->capcount-1
+		if( i > 0 ) then
+			params += ", "
+		end if
+		params += "__C" & i
+	next
+	for i as integer = 0 to outercount-1
+		params += ", " + *symbGetName( outer( i ) )
+	next
 
 	'' The closure is declared as a GENERIC, with one type parameter per
 	'' capture, and then instantiated with the captured symbols' real types.
@@ -541,14 +753,7 @@ private function hBuildClosure _
 	''
 	'' The declaration below mentions only the placeholders, so it is always
 	'' valid source whatever is captured.
-	text = "type " + cloid + "( of "
-	for i as integer = 0 to lam->capcount-1
-		if( i > 0 ) then
-			text += ", "
-		end if
-		text += "__C" & i
-	next
-	text += " )" + LFCHAR
+	text = "type " + cloid + "( of " + params + " )" + LFCHAR
 
 	for i as integer = 0 to lam->capcount-1
 		with lam->caps( i )
@@ -567,14 +772,7 @@ private function hBuildClosure _
 	'' generic. The generics machinery then owns it -- captured with the
 	'' generic, replayed once per instantiation -- so lambdas no longer queue
 	'' capturing bodies on their own pending list at all.
-	text += kw + " " + cloid + "( of "
-	for i as integer = 0 to lam->capcount-1
-		if( i > 0 ) then
-			text += ", "
-		end if
-		text += "__C" & i
-	next
-	text += " )." + FB_INVOKE_NAME + " " + hdr + LFCHAR
+	text += kw + " " + cloid + "( of " + params + " )." + FB_INVOKE_NAME + " " + hdr + LFCHAR
 
 	'' One BYREF alias per capture, so the body is replayed unchanged and
 	'' FreeBASIC's own scoping decides what a colliding local means.
@@ -629,8 +827,14 @@ private function hBuildClosure _
 		argsubtype( i ) = symbGetSubtype( lam->caps( i ).sym )
 	next
 
+	'' ...and the outer type parameters with the types they are bound to here
+	for i as integer = 0 to outercount-1
+		argdtype( lam->capcount + i ) = symbGetFullType( outer( i ) )
+		argsubtype( lam->capcount + i ) = symbGetSubtype( outer( i ) )
+	next
+
 	genEnterGlobalScope( gs, NULL, TRUE )
-	lam->clo = genInstantiateType( gensym, argdtype(), argsubtype(), lam->capcount )
+	lam->clo = genInstantiateType( gensym, argdtype(), argsubtype(), argcount )
 	genLeaveGlobalScope( gs )
 
 	if( lam->clo = NULL ) then
@@ -673,6 +877,7 @@ function cLambdaExpr( ) as ASTNODE ptr
 	lam->toktail = NULL
 	lam->srcline = startline
 	lam->done    = TRUE
+	lam->instns  = genCurrentInstNamespc( )
 	lam->clo     = NULL
 	lam->capcount = 0
 	lam->srcfile = ZstrAllocate( len( env.inf.name ) )

@@ -1230,6 +1230,15 @@ declare sub genEnterGlobalScope _
 
 declare sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )
 
+declare function genCurrentInstNamespc( ) as FBSYMBOL ptr
+
+declare function lambdaOpensHere _
+	( _
+		byval prevtk as integer, _
+		byval prevprevtk as integer, _
+		byval flags as integer _
+	) as integer
+
 declare function genReplayBegin _
 	( _
 		byref st as FB_PARSERSTATE, _

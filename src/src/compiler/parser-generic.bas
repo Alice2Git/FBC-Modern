@@ -441,9 +441,31 @@ type GENINSTCTX
 	'' 'extends Inner( of T )' instantiates Inner BEFORE the outer struct is
 	'' begun, so the inner replay would otherwise consume the outer's tag.
 	pendalias       as zstring ptr
+
+	'' The synthetic namespace of the instantiation whose text is being replayed
+	'' right now -- the one holding its type-parameter TYPEDEFs -- or NULL
+	'' outside every generic replay.  Saved and restored around each replay, so
+	'' it always names the INNERMOST one.
+	''
+	'' Lambdas record it when they are captured and are only drained under the
+	'' same value: see genCurrentInstNamespc( ) and lambdaDrainBodies( ).
+	curinstns       as FBSYMBOL ptr
 end type
 
 dim shared as GENINSTCTX genctx2
+
+'' The instantiation namespace a replay is currently parsing inside, or NULL.
+''
+'' A lambda body is parsed later than it is written, at the next statement
+'' boundary.  A generic body replay has statement boundaries of its own, so
+'' without this a lambda written OUTSIDE any generic, but still pending when a
+'' generic body was replayed, got its body parsed INSIDE that instantiation --
+'' its type parameters in scope ahead of the lambda's own parameters and
+'' locals.  'function( byref t as const string ) ... len( t )' then read
+'' 'len( T )', the size of the type, and the predicate was always true.
+function genCurrentInstNamespc( ) as FBSYMBOL ptr
+	function = genctx2.curinstns
+end function
 
 '' Internal name of every instantiated struct, inside its own synthetic
 '' namespace.  Never user-visible: mangling goes through the ALIAS.
@@ -784,6 +806,8 @@ private sub hReplayProcBody _
 	'' Bind the type parameters: they are TYPEDEFs living in this
 	'' instantiation's synthetic namespace, and __FBGENINST resolves there too.
 	symbNestBegin( entry->nsp, FALSE )
+	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns
+	genctx2.curinstns = entry->nsp
 
 	errPushInstLocation( entry->desc, entry->instfile, entry->instline )
 
@@ -800,6 +824,7 @@ private sub hReplayProcBody _
 
 	errPopInstLocation( )
 
+	genctx2.curinstns = savedinstns
 	symbNestEnd( FALSE )
 
 	genLeaveGlobalScope( gs )
@@ -987,6 +1012,8 @@ function genInstantiateType _
 	nsp->attrib or= FB_SYMBATTRIB_GENERICSCOPE
 
 	symbNestBegin( nsp, FALSE )
+	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns
+	genctx2.curinstns = nsp
 
 	'' Publish a forward reference under the instantiated name BEFORE the body is
 	'' replayed, and cache it.  A generic whose body mentions itself --
@@ -1111,6 +1138,7 @@ function genInstantiateType _
 
 	errPopInstLocation( )
 
+	genctx2.curinstns = savedinstns
 	symbNestEnd( FALSE )
 
 	'' find what the replay built -- the STRUCT, never the forward reference that
@@ -1224,6 +1252,8 @@ function genInstantiateProc _
 	nsp->attrib or= FB_SYMBATTRIB_GENERICSCOPE
 
 	symbNestBegin( nsp, FALSE )
+	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns
+	genctx2.curinstns = nsp
 
 	'' bind each type parameter
 	prm = gensym->gen.paramhead
@@ -1314,6 +1344,7 @@ function genInstantiateProc _
 
 	errPopInstLocation( )
 
+	genctx2.curinstns = savedinstns
 	symbNestEnd( FALSE )
 
 	if( body->op <> INVALID ) then
