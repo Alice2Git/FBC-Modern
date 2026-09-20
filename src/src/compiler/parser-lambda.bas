@@ -616,6 +616,19 @@ private function hCaptureList( byval lam as FB_LAMBDA ptr ) as integer
 				return FALSE
 			end if
 
+			'' An array has no single value to copy and no reference form to
+			'' point at: what identifies it is its DESCRIPTOR, which a capture
+			'' field built from the element type cannot hold. Refused HERE, at
+			'' the capture list, because the failure otherwise surfaced much
+			'' later and elsewhere -- inside the closure's own instantiation,
+			'' as "error 72: Array not dimensioned" against a generic the user
+			'' never wrote. Capture a container instead: FB.Array( of T ) is a
+			'' struct and captures like any other value.
+			if( symbIsArray( .sym ) ) then
+				errReportEx( FB_ERRMSG_CAPTUREISARRAY, .id )
+				return FALSE
+			end if
+
 			.fld = "__cap_" & .id
 		end with
 
@@ -969,7 +982,28 @@ function cLambdaExpr( ) as ASTNODE ptr
 
 				dim as ASTNODE ptr dst = astBuildVarField( tmp, fld )
 				dim as ASTNODE ptr src = any
-				if( .isref ) then
+
+				'' A BYREF parameter, a BYREF alias ('dim byref as T r = v')
+				'' and an imported symbol are all held as a POINTER to the real
+				'' storage, and reading one means dereferencing it first -- the
+				'' same test astBuildVarField( ) makes just above. Taking the
+				'' symbol at face value captured the pointer instead of what it
+				'' points at:
+				''   BYVAL: the field has the base type, so the store was an
+				''          "Implicit conversion" of a pointer and the value came
+				''          out wrong (the capture never landed at all);
+				''   BYREF: ADDROF over a symbol that IS already the address gave
+				''          the address of the PARAMETER SLOT -- "Suspicious
+				''          pointer assignment", garbage on read, and writes that
+				''          never reached the caller's variable.
+				if( symbIsParamVarByRef( .sym ) orelse symbIsImport( .sym ) orelse symbIsRef( .sym ) ) then
+					'' the pointer the symbol holds IS the address of the
+					'' variable, so BYREF wants it as-is and BYVAL wants its target
+					src = astNewVAR( .sym, , typeAddrOf( symbGetFullType( .sym ) ), symbGetSubtype( .sym ) )
+					if( .isref = FALSE ) then
+						src = astNewDEREF( src )
+					end if
+				elseif( .isref ) then
 					src = astNewADDROF( astNewVAR( .sym ) )
 				else
 					src = astNewVAR( .sym )

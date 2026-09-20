@@ -6,3 +6,6 @@
 	error 112: END SUB or FUNCTION without SUB or FUNCTION, found 'end'
 === a capturing lambda converted to a procedure pointer ===
 	error 355: A capturing lambda cannot convert to a procedure pointer
+=== an array capture ===
+	error 356: An array cannot be captured by a lambda, a
+	error 112: END SUB or FUNCTION without SUB or FUNCTION, found 'end'

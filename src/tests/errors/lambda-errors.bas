@@ -19,6 +19,12 @@ sub toProcPtr( )
 	dim f as Fn = function[ byval bias ]( byval x as long ) as long : return x : end function
 end sub
 
+#print === an array capture ===
+sub arrayCapture( )
+	dim as long a( 0 to 2 )
+	var f = sub[ byref a ]( ) : end sub
+end sub
+
 '' NOT pinned here: errors 350 (malformed header) and 351 (unterminated body)
 '' need EOF to arrive inside the lambda, which would swallow the rest of the
 '' file and every case above it. An 'end sub' that is merely the WRONG one is
