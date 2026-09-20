@@ -224,7 +224,15 @@ private sub hCheckPrototype _
 
 		'' Warn about mismatching param initializers?
 		'' If both params are optional, compare the two initializers
-		if( symbParamIsOptional( proto_param ) and symbParamIsOptional( param ) ) then
+		''
+		'' Not inside a generic instantiation: there the prototype and the body
+		'' are replayed from the SAME captured tokens, so a difference cannot
+		'' mean what this warning reports. An initializer that allocates a
+		'' symbol of its own produces a fresh one per replay and compares
+		'' unequal every time -- a default value that is a lambda warned once
+		'' per instantiation, about source the user wrote only once.
+		if( symbParamIsOptional( proto_param ) and symbParamIsOptional( param ) andalso _
+		    (genCurrentInstNamespc( ) = NULL) ) then
 			if( astIsEqualParamInit( proto_param->param.optexpr, param->param.optexpr ) = FALSE ) then
 				errReportParamWarn( proc, i, NULL, FB_WARNINGMSG_MISMATCHINGPARAMINIT )
 			end if

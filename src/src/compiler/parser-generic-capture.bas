@@ -809,11 +809,53 @@ end function
 '' Stops at EOL or ':' so that a one-liner --
 ''     sub f( of T )( byval x as T ) : print x : end sub
 '' -- splits in the same place a multi-line declaration does.
+''
+'' At DEPTH 0 only. Inside the parameter list both may belong to a default
+'' value that is a lambda, which carries ':' between its statements and real
+'' EOLs when written over several lines:
+''     function G( of T )( byval f as Fn = function( byval x as long ) as long : return x + 1 : end function ) as long
+'' Ending the header at that ':' cut the declaration in half -- "error 3:
+'' Expected End-of-Line, found ')'" -- and the remains of the parameter list
+'' were then parsed as statements. Both forms work outside generics, so the
+'' capture is what has to keep up.
 private sub hCaptureProcHeader( byval d as FB_GENPROC ptr )
+	'' open '(' and '[' -- a lambda's capture list can hold neither, but it
+	'' nests the same way and costs nothing to track
+	dim as integer depth = 0
+
 	do
 		select case lexGetToken( GENTOK_FLAGS )
-		case FB_TK_EOL, FB_TK_EOF, FB_TK_STMTSEP, FB_TK_COMMENT, FB_TK_REM
+		case FB_TK_EOF
 			exit do
+
+		case FB_TK_EOL, FB_TK_STMTSEP
+			if( depth = 0 ) then
+				exit do
+			end if
+
+		case FB_TK_COMMENT, FB_TK_REM
+			if( depth = 0 ) then
+				exit do
+			end if
+
+			'' inside the list: not part of the header, and an 'end sub' in
+			'' one must not be mistaken for anything -- drop it
+			do
+				lexSkipToken( GENTOK_FLAGS )
+				select case lexGetToken( GENTOK_FLAGS )
+				case FB_TK_EOL, FB_TK_EOF
+					exit do
+				end select
+			loop
+			continue do
+
+		case CHAR_LPRNT, CHAR_LBRACKET
+			depth += 1
+
+		case CHAR_RPRNT, CHAR_RBRACKET
+			if( depth > 0 ) then
+				depth -= 1
+			end if
 		end select
 
 		hAddTokTo( d->hdrhead, d->hdrtail, lexGetText( ), lexLineNum( ) )
