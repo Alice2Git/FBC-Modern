@@ -181,6 +181,40 @@ Version 1.20.0
   are still live and still flagged LOCAL. That pass is now suppressed for the
   replays that parse DECLARATIONS; a member BODY replay still runs it, so the
   generic's own locals and parameters shadow its fields as before.
+- Generics: the statement right after a generic's first instantiation could be
+  parsed against an unrelated symbol -- 'Arata( m.IsEmpty( ) )' after 'dim m as
+  xMap( ... )' failed with error 42, 58, 202, 214 or 215 about the CALLER's
+  code, and without an error in front it could emit a call to the wrong
+  procedure. Member bodies are replayed at the next statement boundary, after
+  the lexer has already looked up that statement's first token; a large generic
+  performs more than the 4096 lookups the symbol-chain ring holds, and the
+  token's chain was overwritten. Each generic and lambda replay now allocates
+  from a ring of its own.
+- Generics: an error inside a replayed generic or lambda body is reported on
+  its own line, quoting that line from the generic's file, instead of on the
+  body's first line with a quote from whatever file the replay interrupted.
+- Generics: instantiated types are named as written in diagnostics and
+  typeof( ) -- 'Box( of long )' -- not by their internal '$GEN$...__FBGENINST'.
+- Generics: a procedure-pointer type written inside a procedure -- a lambda's
+  own type, or 'dim p as function( ... )' -- used as a type argument left the
+  instantiation bound to a prototype deleted at 'end sub'; a lambda passed to a
+  generic from inside a generic body failed with "Expected ')'". Such arguments
+  are now bound to the global prototype of the same signature.
+- Lambdas: two lambdas in one statement could compile pending generic member
+  bodies from inside the second lambda's header replay, with the parser still
+  in expression state, so every SUB call in statement position in those bodies
+  was 'error 17: Syntax error'. Nothing is drained inside a header replay now.
+- FOR EACH: the iterator protocol is found in base types too, on the collection
+  and on the iterator; a GetIterator( ) that returns something other than a
+  TYPE is now error 357 instead of "not iterable".
+- Generics: a member procedure with type parameters of its own -- a generic
+  method, which does not exist -- is now error 358 saying so, instead of
+  error 147 about default types.
+- fb/array.bi: Array.Push( a[ 0 ] ) read freed memory when the push had to grow
+  the array; the argument is now copied before growing, as Insert did.
+- fb/hash.bi: the FB.HashOf overloads are private, so two modules including
+  fb/map.bi or fb/set.bi link together instead of failing with 'multiple
+  definition'.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
