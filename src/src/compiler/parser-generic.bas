@@ -647,6 +647,34 @@ private function hCacheFind _
 	function = NULL
 end function
 
+'' How an instantiated struct is written, e.g. "Box( of long )", and the
+'' generic it came from -- or NULL.  For diagnostics and typeof( ): the struct's
+'' own name is the internal __FBGENINST inside a namespace named after the
+'' mangled key, and messages read '$GEN$$BOX$L$.__FBGENINST' from it.
+function genInstDesc _
+	( _
+		byval inst as FBSYMBOL ptr, _
+		byref gensym as FBSYMBOL ptr _
+	) as zstring ptr
+
+	gensym = NULL
+
+	if( genctx2.inited = FALSE ) then
+		return NULL
+	end if
+
+	dim as FB_GENINST ptr n = listGetHead( @genctx2.list )
+	while( n )
+		if( (n->inst = inst) andalso (n->desc <> NULL) ) then
+			gensym = n->gensym
+			return n->desc
+		end if
+		n = listGetNext( n )
+	wend
+
+	function = NULL
+end function
+
 sub genInstCacheEnd( )
 	if( genctx2.inited ) then
 		dim as FB_GENINST ptr n = listGetHead( @genctx2.list )

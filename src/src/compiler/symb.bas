@@ -2035,8 +2035,23 @@ function symbTypeToStr _
 
 	select case as const( dtypeonly )
 	case FB_DATATYPE_FWDREF, FB_DATATYPE_STRUCT, FB_DATATYPE_ENUM
-		s += hGetNamespacePrefix( subtype )
-		s += *symbGetName( subtype )
+		'' an instantiated generic reads as written -- "NS.Box( of long )" --
+		'' not by its internal name
+		dim as zstring ptr desc = NULL
+		dim as FBSYMBOL ptr gensym = NULL
+		if( subtype <> NULL ) then
+			if( symbIsGenericInst( subtype ) ) then
+				desc = genInstDesc( subtype, gensym )
+			end if
+		end if
+
+		if( desc <> NULL ) then
+			s += hGetNamespacePrefix( gensym )
+			s += *desc
+		else
+			s += hGetNamespacePrefix( subtype )
+			s += *symbGetName( subtype )
+		end if
 
 	case FB_DATATYPE_CHAR, FB_DATATYPE_WCHAR, FB_DATATYPE_FIXSTR
 		s += *symb_dtypeTB(dtypeonly).name

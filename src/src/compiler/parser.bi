@@ -1254,6 +1254,11 @@ declare sub genReplayEnd( byref st as FB_PARSERSTATE )
 #define FB_INVOKE_NAME "__FBINVOKE"
 
 declare function cLambdaExpr( ) as ASTNODE ptr
+declare function genInstDesc _
+	( _
+		byval inst as FBSYMBOL ptr, _
+		byref gensym as FBSYMBOL ptr _
+	) as zstring ptr
 declare sub lambdaDrainBodies( )
 declare function lambdaInHeaderReplay( ) as integer
 
