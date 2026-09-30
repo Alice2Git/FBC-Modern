@@ -112,13 +112,15 @@ A user type is made usable as a key by RE-OPENING the namespace:
     end operator
 
     namespace FB
-        function HashOf overload ( byref k as PairKey ) as ulongint
+        private function HashOf overload ( byref k as PairKey ) as ulongint
             return HashOf( k.a ) xor (HashOf( k.b ) shl 1)
         end function
     end namespace
 
 Derive the hash only from the fields '=' compares, or equal keys will hash
-differently.
+differently.  Make it PRIVATE, as every overload in fb/hash.bi is, when it
+lives in a header: a public one is emitted by every module that includes the
+header, and two such modules fail to link with 'multiple definition'.
 
 A key type with no overload fails at the INSTANTIATION site:
 

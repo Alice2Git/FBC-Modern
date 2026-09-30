@@ -541,6 +541,7 @@ Carried deliberately, all measured, none blocking. The full list with reasoning 
 - **No constraints on type parameters.** A member needing `=` on `T` makes the whole type unusable for a `T` without one — which is why `Array`'s `Sort`/`IndexOf`/`Contains` are free procedures.
 - **`typeof( T )` does not see through a type parameter**, so a generic body cannot branch on what `T` is bound to. This is why the hash contract is an overloaded `HashOf`.
 - **One copy of each instantiation per module.** Costs size, not correctness.
+- **No generic methods.** A member procedure cannot have type parameters of its own (error 358), so a method cannot take a lambda of a type it does not already know; use a generic `SUB`/`FUNCTION` taking the object as a parameter.
 - **`CONST u AS USTRING`** is not supported — fbc's `CONST` accepts exactly one string type. `WSTRING` is rejected too.
 - **No IANA tzdb in the date/time library.** Zones are OS-native only — UTC, the OS local zone, fixed offsets. No named zones, no historical rules, and `AssumeLocal` inside a DST fall-back hour takes the OS's answer. Leap seconds and non-Gregorian calendars are out of scope as well; each is argued in `C:\dev\docs\datetime\rationale.md`.
 
