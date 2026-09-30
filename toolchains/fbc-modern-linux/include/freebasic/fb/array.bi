@@ -139,8 +139,16 @@ function Array( of T ).At( byval i as long ) byref as T
 end function
 
 sub Array( of T ).Push( byref v as T )
-	this.Reserve( this.num + 1 )
-	this.items( this.num ) = v
+	if( this.num < this.Capacity( ) ) then
+		this.items( this.num ) = v
+	else
+		'' Reserve redims, and a byref v pointing INTO this array -- as in
+		'' 'a.Push( a[ 0 ] )' -- would then dangle.  Copy it first, as Insert
+		'' does; only the growing push pays for the copy.
+		dim as T tmp = v
+		this.Reserve( this.num + 1 )
+		this.items( this.num ) = tmp
+	end if
 	this.num += 1
 end sub
 

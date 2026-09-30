@@ -1,0 +1,15 @@
+# TEST_MODE : MULTI_MODULE_OK
+
+# FB.HashOf across SEPARATELY COMPILED modules.
+#
+# fb/hash.bi defines an overload of FB.HashOf for every built-in type.  They
+# were public, so every module that included fb/map.bi or fb/set.bi emitted
+# its own public copy, and any two such modules failed to link:
+#
+#     multiple definition of `FB::HASHOF(signed char)'
+#
+# They are private now, like the helpers beside them.  A single-module test
+# cannot see this, which is why this is a .bmk.
+
+MAIN := hash-mm-main.bas
+SRCS := hash-mm-a.bas hash-mm-b.bas

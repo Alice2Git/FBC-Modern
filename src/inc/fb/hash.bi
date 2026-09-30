@@ -5,10 +5,15 @@
 '' type is made hashable by re-opening the namespace and adding one:
 ''
 ''     namespace FB
-''         function HashOf( byref k as MyKey ) as ulongint
+''         private function HashOf( byref k as MyKey ) as ulongint
 ''             return HashOf( k.name ) xor culngint( k.id )
 ''         end function
 ''     end namespace
+''
+'' Every overload here is PRIVATE, so each module that includes this header gets
+'' its own copy and two such modules link together.  Make yours private too when
+'' it lives in a header; a public one defined in a header is emitted by every
+'' module that includes it, and the link fails with 'multiple definition'.
 ''
 '' THE INVARIANT, and getting it wrong produces a container that loses data:
 ''
@@ -81,47 +86,47 @@ end function
 
 '' ---------------------------------------------------------------- integers
 
-function HashOf overload ( byval v as byte ) as ulongint
+private function HashOf overload ( byval v as byte ) as ulongint
 	function = HashInt( culngint( cast( ubyte, v ) ) )
 end function
 
-function HashOf overload ( byval v as ubyte ) as ulongint
+private function HashOf overload ( byval v as ubyte ) as ulongint
 	function = HashInt( culngint( v ) )
 end function
 
-function HashOf overload ( byval v as short ) as ulongint
+private function HashOf overload ( byval v as short ) as ulongint
 	function = HashInt( culngint( cast( ushort, v ) ) )
 end function
 
-function HashOf overload ( byval v as ushort ) as ulongint
+private function HashOf overload ( byval v as ushort ) as ulongint
 	function = HashInt( culngint( v ) )
 end function
 
-function HashOf overload ( byval v as long ) as ulongint
+private function HashOf overload ( byval v as long ) as ulongint
 	function = HashInt( culngint( cast( ulong, v ) ) )
 end function
 
-function HashOf overload ( byval v as ulong ) as ulongint
+private function HashOf overload ( byval v as ulong ) as ulongint
 	function = HashInt( culngint( v ) )
 end function
 
-function HashOf overload ( byval v as integer ) as ulongint
+private function HashOf overload ( byval v as integer ) as ulongint
 	function = HashInt( culngint( cast( uinteger, v ) ) )
 end function
 
-function HashOf overload ( byval v as uinteger ) as ulongint
+private function HashOf overload ( byval v as uinteger ) as ulongint
 	function = HashInt( culngint( v ) )
 end function
 
-function HashOf overload ( byval v as longint ) as ulongint
+private function HashOf overload ( byval v as longint ) as ulongint
 	function = HashInt( cast( ulongint, v ) )
 end function
 
-function HashOf overload ( byval v as ulongint ) as ulongint
+private function HashOf overload ( byval v as ulongint ) as ulongint
 	function = HashInt( v )
 end function
 
-function HashOf overload ( byval v as boolean ) as ulongint
+private function HashOf overload ( byval v as boolean ) as ulongint
 	function = HashInt( iif( v, 1ull, 0ull ) )
 end function
 
@@ -135,7 +140,7 @@ end function
 '' comparison whatever it hashes to; that is a property of the value, not of
 '' this function.
 
-function HashOf overload ( byval v as single ) as ulongint
+private function HashOf overload ( byval v as single ) as ulongint
 	dim as single f = v
 	if( f = 0.0f ) then
 		f = 0.0f
@@ -143,7 +148,7 @@ function HashOf overload ( byval v as single ) as ulongint
 	function = HashInt( culngint( *cptr( ulong ptr, @f ) ) )
 end function
 
-function HashOf overload ( byval v as double ) as ulongint
+private function HashOf overload ( byval v as double ) as ulongint
 	dim as double d = v
 	if( d = 0.0 ) then
 		d = 0.0
@@ -153,7 +158,7 @@ end function
 
 '' ---------------------------------------------------------------- pointers
 
-function HashOf overload ( byval v as any ptr ) as ulongint
+private function HashOf overload ( byval v as any ptr ) as ulongint
 	function = HashInt( cast( ulongint, cast( uinteger, v ) ) )
 end function
 
@@ -162,21 +167,21 @@ end function
 '' By CONTENT, not by address, because two strings with the same characters
 '' compare equal and therefore must hash equal.
 
-function HashOf overload ( byref v as const string ) as ulongint
+private function HashOf overload ( byref v as const string ) as ulongint
 	if( len( v ) = 0 ) then
 		return FNV_OFFSET_BASIS
 	end if
 	function = HashBytes( cptr( const ubyte ptr, strptr( v ) ), len( v ) )
 end function
 
-function HashOf overload ( byval v as const zstring ptr ) as ulongint
+private function HashOf overload ( byval v as const zstring ptr ) as ulongint
 	if( v = 0 ) then
 		return FNV_OFFSET_BASIS
 	end if
 	function = HashBytes( cptr( const ubyte ptr, v ), len( *v ) )
 end function
 
-function HashOf overload ( byval v as const wstring ptr ) as ulongint
+private function HashOf overload ( byval v as const wstring ptr ) as ulongint
 	if( v = 0 ) then
 		return FNV_OFFSET_BASIS
 	end if
