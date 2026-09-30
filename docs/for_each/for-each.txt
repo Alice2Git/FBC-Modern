@@ -178,3 +178,6 @@ tests/generics/for-each.bas exercises all of the above, plus the backward
 compatibility cases, nesting with itself and with FOR and WHILE, the iterator
 destructor running on EXIT FOR, and the collection being evaluated once.
 Five fail-tests and five golden diagnostic files cover the errors.
+tests/generics/foreach-inherited.bas covers protocol members inherited from a
+base type -- plain, generic and virtual -- and errors/foreach-iterator-not-type
+a GetIterator( ) that returns something other than an iterator TYPE.

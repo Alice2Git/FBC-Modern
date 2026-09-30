@@ -1,0 +1,2 @@
+=== GetIterator returns a pointer ===
+	error 357: GetIterator( ) must return an iterator TYPE with IsValid( ), Value( ) and MoveNext( ), it returns long ptr

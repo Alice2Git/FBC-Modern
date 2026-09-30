@@ -1019,24 +1019,42 @@ end function
 '' One member of the protocol, or NULL.  Names are looked up up-cased because
 '' that is how the symbol table stores them; the protocol is case-insensitive
 '' like every other FreeBASIC identifier.
+''
+'' Inherited members count: the type's own members first, then each base in
+'' turn, which is the order 'x.GetIterator( )' written by hand resolves in.
+'' Only the type itself used to be searched, so a collection whose
+'' GetIterator came from its base -- generic or not -- was "not iterable"
+'' although calling x.GetIterator( ) directly worked.  The calls built from
+'' the result pass the derived instance as the base's THIS, which argument
+'' passing already accepts (hCheckUDTParam in ast-node-arg.bas).
 private function hProtoMember _
 	( _
 		byval udt as FBSYMBOL ptr, _
 		byval id as zstring ptr _
 	) as FBSYMBOL ptr
 
-	dim as FBSYMCHAIN ptr c = symbLookupAt( udt, id, FALSE, FALSE )
+	do while( udt <> NULL )
+		dim as FBSYMCHAIN ptr c = symbLookupAt( udt, id, FALSE, FALSE )
 
-	while( c )
-		dim as FBSYMBOL ptr s = c->sym
-		while( s )
-			if( symbIsProc( s ) ) then
-				return s
-			end if
-			s = s->hash.next
+		while( c )
+			dim as FBSYMBOL ptr s = c->sym
+			while( s )
+				if( symbIsProc( s ) ) then
+					return s
+				end if
+				s = s->hash.next
+			wend
+			c = symbChainGetNext( c )
 		wend
-		c = symbChainGetNext( c )
-	wend
+
+		if( symbIsStruct( udt ) = FALSE ) then
+			exit do
+		end if
+		if( udt->udt.base = NULL ) then
+			exit do
+		end if
+		udt = symbGetSubtype( udt->udt.base )
+	loop
 
 	function = NULL
 end function
@@ -1417,9 +1435,25 @@ sub cForEachStmtBegin( )
 	elseif( typeGetDtOnly( sdtype ) = FB_DATATYPE_STRUCT ) then
 		'' ------------------------------------------- user collection (RFC-0002)
 
+		'' the type as written -- "Box( of long )" for an instantiation, whose
+		'' own name is the internal __FBGENINST
+		dim as string tyname = symbTypeToStr( FB_DATATYPE_STRUCT, ssubtype )
+
 		dim as FBSYMBOL ptr getit = hProtoMember( ssubtype, @"GETITERATOR" )
 		if( getit = NULL ) then
-			errReportEx( FB_ERRMSG_NOTITERABLE, symbGetName( ssubtype ) )
+			errReportEx( FB_ERRMSG_NOTITERABLE, tyname )
+			astDelTree( srcexpr )
+			astScopeEnd( outerscopenode )
+			hSkipCompound( FB_TK_FOR )
+			exit sub
+		end if
+
+		'' GetIterator exists but hands back a pointer, a number, ... -- say
+		'' that, rather than "not iterable", which reads as if it were missing
+		if( typeGetDtAndPtrOnly( symbGetType( getit ) ) <> FB_DATATYPE_STRUCT ) then
+			errReportEx( FB_ERRMSG_ITERATORNOTATYPE, _
+			             symbTypeToStr( symbGetFullType( getit ), symbGetSubtype( getit ) ), _
+			             0, FB_ERRMSGOPT_NONE )
 			astDelTree( srcexpr )
 			astScopeEnd( outerscopenode )
 			hSkipCompound( FB_TK_FOR )
@@ -1432,7 +1466,7 @@ sub cForEachStmtBegin( )
 
 		if( hIsIteratorType( itudt, ivproc, vproc, mnproc, missing ) = FALSE ) then
 			if( missing = NULL ) then
-				errReportEx( FB_ERRMSG_NOTITERABLE, symbGetName( ssubtype ) )
+				errReportEx( FB_ERRMSG_NOTITERABLE, tyname )
 			else
 				errReportEx( FB_ERRMSG_NOITERATORMEMBER, missing )
 			end if

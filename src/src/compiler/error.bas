@@ -471,6 +471,7 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_CAPTUREUNDECLARED                  '/ @"Captured variable not declared", _
 		/'FB_ERRMSG_CLOSURETOPROCPTR                   '/ @"A capturing lambda cannot convert to a procedure pointer", _
 		/'FB_ERRMSG_CAPTUREISARRAY                     '/ @"An array cannot be captured by a lambda", _
+		/'FB_ERRMSG_ITERATORNOTATYPE                   '/ @"GetIterator( ) must return an iterator TYPE with IsValid( ), Value( ) and MoveNext( ), it returns", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

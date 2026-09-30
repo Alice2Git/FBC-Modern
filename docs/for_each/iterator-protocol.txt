@@ -84,6 +84,12 @@ STRUCTURAL, NOT NOMINAL
 There is no Iterable interface to implement and nothing to inherit. A type is
 iterable because name lookup finds the members.
 
+Members inherited from a base type count, on the collection and on the
+iterator alike, and are found the way a hand-written call finds them: the
+type's own members first, then each base in turn. A derived type that
+declares its own GetIterator therefore uses that one, and a VIRTUAL
+GetIterator is dispatched as any virtual call is.
+
 This is deliberate. FreeBASIC has no interface feature independent of
 inheritance, so a nominal protocol would consume the type's single inheritance
 slot, add a vtable and a virtual call per element to types that are otherwise
