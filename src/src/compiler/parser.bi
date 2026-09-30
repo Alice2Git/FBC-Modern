@@ -1255,6 +1255,7 @@ declare sub genReplayEnd( byref st as FB_PARSERSTATE )
 
 declare function cLambdaExpr( ) as ASTNODE ptr
 declare sub lambdaDrainBodies( )
+declare function lambdaInHeaderReplay( ) as integer
 
 declare function genFlattenTokens _
 	( _

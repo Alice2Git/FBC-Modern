@@ -79,6 +79,20 @@ type FB_LAMBDACTX
 	'' procedure, and the enclosing 'end sub' was reported as
 	'' 'error 126: Expected END FUNCTION'.
 	inreplay        as integer
+
+	'' Non-zero while a lambda HEADER (or closure declaration) is replayed.
+	''
+	'' That replay runs in the middle of the expression the lambda is written
+	'' in, and its cProgram( ) reaches statement boundaries of its own, where
+	'' generic member bodies used to be drained -- with the parser still in
+	'' that expression's state.  FB_PARSEROPT_ISEXPR was still set, so every
+	'' SUB call in statement position inside those bodies was refused as
+	'' 'error 17: Syntax error'.  It needed two lambdas in one statement:
+	'' the second one's header replay drained the bodies of an instantiation
+	'' the first one had caused, as in
+	''     xWhereOn( xWhere( l, lambda1 ), lambda2 )
+	'' See lambdaInHeaderReplay( ).
+	inheader        as integer
 end type
 
 dim shared as FB_LAMBDACTX lambdactx
@@ -472,6 +486,13 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 	end if
 end sub
 
+'' TRUE while a lambda header or closure declaration is being replayed: a
+'' statement boundary reached inside it is not a real one, and nothing may be
+'' drained there.  See FB_LAMBDACTX.inheader.
+function lambdaInHeaderReplay( ) as integer
+	function = (lambdactx.inheader > 0)
+end function
+
 private function hIsDrainableHere _
 	( _
 		byval lam as FB_LAMBDA ptr, _
@@ -815,10 +836,12 @@ private function hBuildClosure _
 
 	env.includerec += 1
 	lambdactx.inreplay += 1
+	lambdactx.inheader += 1
 	if( genReplayBegin( st, text, lam->srcline, lam->srcfile ) ) then
 		cProgram( )
 		genReplayEnd( st )
 	end if
+	lambdactx.inheader -= 1
 	lambdactx.inreplay -= 1
 	env.includerec -= 1
 
@@ -1049,10 +1072,12 @@ function cLambdaExpr( ) as ASTNODE ptr
 
 	env.includerec += 1
 	lambdactx.inreplay += 1
+	lambdactx.inheader += 1
 	if( genReplayBegin( st, text, startline, lam->srcfile ) ) then
 		cProgram( )
 		genReplayEnd( st )
 	end if
+	lambdactx.inheader -= 1
 	lambdactx.inreplay -= 1
 	env.includerec -= 1
 

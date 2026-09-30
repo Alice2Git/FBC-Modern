@@ -218,8 +218,10 @@ sub cProgram()
 		'' Replay any generic member bodies that became due while parsing that
 		'' statement.  Only where a procedure could legitimately be written by
 		'' hand: nothing open on the compound-statement stack, and not inside a
-		'' procedure body -- this same loop parses those.
-		if( stackGetTOS( @parser.stmt.stk ) = NULL ) then
+		'' procedure body -- this same loop parses those.  Nor inside a lambda
+		'' header replay, whose statement boundaries sit in the middle of the
+		'' user's expression (see FB_LAMBDACTX.inheader).
+		if( (stackGetTOS( @parser.stmt.stk ) = NULL) andalso (lambdaInHeaderReplay( ) = FALSE) ) then
 			genDrainProcBodies( )
 			lambdaDrainBodies( )
 		end if
