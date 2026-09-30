@@ -1,0 +1,4 @@
+=== a generic method on a plain type ===
+	error 358: Generic methods are not supported, a member cannot have type parameters of its own; use a generic SUB or FUNCTION taking the object as a parameter
+=== a parameter named OF is still a parameter ===
+=== done ===

@@ -472,6 +472,7 @@ declare function hMakeParamDesc _
 		/'FB_ERRMSG_CLOSURETOPROCPTR                   '/ @"A capturing lambda cannot convert to a procedure pointer", _
 		/'FB_ERRMSG_CAPTUREISARRAY                     '/ @"An array cannot be captured by a lambda", _
 		/'FB_ERRMSG_ITERATORNOTATYPE                   '/ @"GetIterator( ) must return an iterator TYPE with IsValid( ), Value( ) and MoveNext( ), it returns", _
+		/'FB_ERRMSG_GENERICMETHOD                      '/ @"Generic methods are not supported, a member cannot have type parameters of its own; use a generic SUB or FUNCTION taking the object as a parameter", _
 		/'FB_ERRMSGS                                   '/ @"FB_ERRMSGS"  _
 	}
 

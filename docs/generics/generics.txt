@@ -275,6 +275,9 @@ DIAGNOSTICS
     error 339: Generic instantiation too deep
     error 340: Unable to infer type arguments, specify them explicitly
     error 341: Type parameter list does not match the generic's declaration
+    error 358: Generic methods are not supported, a member cannot have type
+               parameters of its own; use a generic SUB or FUNCTION taking
+               the object as a parameter
 
 Everything else is an ordinary FreeBASIC diagnostic, reported from the replayed
 body and followed by the instantiation chain that reached it, so it is possible
@@ -302,6 +305,14 @@ All measured, none blocking.
     which is honest but not friendly. This is the strongest practical argument
     for adding constraints later; four fail-container-* tests pin the current
     behaviour.
+
+  - No generic methods. A member procedure cannot have type parameters of its
+    own -- 'declare sub Sort( of F )( byval cmp as F )' is error 358 -- so a
+    method cannot take a lambda whose type it does not already know. Write a
+    generic SUB or FUNCTION that takes the object as a parameter, or give the
+    TYPE the extra type parameter. Adding them means adding members to an
+    instantiated TYPE after it is complete, once per call-site argument list,
+    with their own mangling; that is a feature, not a fix, and is not done.
 
   - typeof( T ) does not see through a type parameter. An ordinary TYPEDEF is
     transparent to typeof; the one an instantiation binds is not, so a generic

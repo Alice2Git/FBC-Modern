@@ -1369,6 +1369,44 @@ function cProcHeader _
 	proc->attrib = attrib
 	proc->pattrib = pattrib
 
+	'' '(' OF T ')' before the parameters of a MEMBER: a generic method.
+	''
+	'' There are none -- a free-standing generic procedure is intercepted long
+	'' before this (genIsGenericProcDecl), and a member has no such path -- so
+	'' the clause used to be read as the parameter list: a parameter named
+	'of', and then "error 147: Default types or suffixes are only valid in
+	'' -lang deprecated, found 'F'", which says nothing about the cause.  Say
+	'' what it is, then skip the clause so the real parameter list after it
+	'' still parses.  An identifier after 'of' is what tells a type parameter
+	'' list from a parameter named 'of' (see genIsGenericProcDecl).
+	if( lexGetToken( ) = CHAR_LPRNT ) then
+		if( ucase( *lexGetLookAheadText( 1 ) ) = "OF" ) then
+			if( lexGetLookAheadClass( 2 ) = FB_TKCLASS_IDENTIFIER ) then
+				dim as integer ismember = symbIsStruct( symbGetCurrentNamespc( ) )
+				if( parent <> NULL ) then
+					ismember or= symbIsStruct( parent )
+				end if
+
+				if( ismember ) then
+					errReportEx( FB_ERRMSG_GENERICMETHOD, @"" )
+
+					dim as integer depth = 0
+					do
+						select case lexGetToken( )
+						case CHAR_LPRNT
+							depth += 1
+						case CHAR_RPRNT
+							depth -= 1
+						case FB_TK_EOL, FB_TK_EOF, FB_TK_STMTSEP
+							exit do
+						end select
+						lexSkipToken( )
+					loop while( depth > 0 )
+				end if
+			end if
+		end if
+	end if
+
 	'' Parameters?
 	cParameters( parent, proc, mode, ((options and FB_PROCOPT_ISPROTO) <> 0) )
 
