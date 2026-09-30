@@ -962,6 +962,14 @@ type SYMBCTX
 	chainpool(0 to (CHAINPOOL_SIZE - 1)) as FBSYMCHAIN
 	chainpoolhead       as integer
 
+	'' ...or, during a generic or lambda replay, from a pool of the replay's
+	'' own (see symbChainpoolPush).  chainpoolcur is @chainpool(0) otherwise.
+	chainpoolcur        as FBSYMCHAIN ptr
+	chainpooldepth      as integer
+	chainpoolspare(0 to FB_MAXINCRECLEVEL) as FBSYMCHAIN ptr
+	chainpoolsavedcur(0 to FB_MAXINCRECLEVEL) as FBSYMCHAIN ptr
+	chainpoolsavedhead(0 to FB_MAXINCRECLEVEL) as integer
+
 	globnspc        as FBSYMBOL                 '' global namespace
 
 	namespc         as FBSYMBOL ptr             '' current ns
@@ -1056,6 +1064,9 @@ declare function symbNewChainpool _
 	( _
 		byval sym as FBSYMBOL ptr _
 	) as FBSYMCHAIN ptr
+
+declare sub symbChainpoolPush( )
+declare sub symbChainpoolPop( )
 
 declare function symbLookup _
 	( _

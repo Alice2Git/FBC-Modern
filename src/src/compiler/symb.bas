@@ -73,6 +73,8 @@ sub symbInitSymbols static
 	poolInit( @symb.namepool, FB_INITSYMBOLNODES \ 8, FB_MAXNAMELEN\8+1, FB_MAXNAMELEN+1 )
 
 	symb.chainpoolhead = 0
+	symb.chainpoolcur = @symb.chainpool(0)
+	symb.chainpooldepth = 0
 
 	'' namespace extension's list
 	listInit( @symb.nsextlist, FB_INITSYMBOLNODES \ 16, len( FBNAMESPC_EXT ), LIST_FLAGS_CLEAR )
@@ -224,6 +226,13 @@ sub symbEnd
 	poolEnd( @symb.namepool )
 
 	listEnd( @symb.symlist )
+
+	for i as integer = 0 to FB_MAXINCRECLEVEL
+		deallocate( symb.chainpoolspare(i) )
+		symb.chainpoolspare(i) = NULL
+	next
+	symb.chainpoolcur = @symb.chainpool(0)
+	symb.chainpooldepth = 0
 
 	''
 	symb.inited = FALSE
@@ -860,8 +869,56 @@ private function chainpoolNext() as FBSYMCHAIN ptr
 	if (symb.chainpoolhead >= CHAINPOOL_SIZE) then
 		symb.chainpoolhead = 0
 	end if
-	return @symb.chainpool(symb.chainpoolhead)
+	return @symb.chainpoolcur[symb.chainpoolhead]
 end function
+
+'' A lookup result lives in a ring buffer: it stays valid for the next
+'' CHAINPOOL_SIZE lookups, which is plenty for one statement.  A generic or
+'' lambda replay breaks that assumption.  It parses a whole captured body --
+'' often thousands of lookups -- in the middle of someone else's statement,
+'' while that statement still holds chains: the lexer's lookahead tokens carry
+'' one each (FBTOKEN.sym_chain), and so do the parser frames below the replay.
+'' Once the ring wrapped, those pointed at whatever the replay had looked up
+'' last.  After 'dim m as xMap( of string, long )' the member bodies drained
+'' at the next statement boundary overwrote the chain of the token already
+'' read there, and 'Arata( m.IsEmpty( ) )' was then parsed as a call to some
+'' member of xMap: "Type mismatch, at parameter 1 (k) of Arata()".
+''
+'' So each replay allocates from a ring of its own, and the interrupted parse
+'' finds its chains untouched afterwards.  Replays nest no deeper than the
+'' lexer context stack; past that the ring is shared, as it always was.
+sub symbChainpoolPush( )
+	dim as integer d = symb.chainpooldepth
+
+	symb.chainpooldepth += 1
+
+	if( d > FB_MAXINCRECLEVEL ) then
+		exit sub
+	end if
+
+	if( symb.chainpoolspare(d) = NULL ) then
+		symb.chainpoolspare(d) = xcallocate( CHAINPOOL_SIZE * sizeof( FBSYMCHAIN ) )
+	end if
+
+	symb.chainpoolsavedcur(d) = symb.chainpoolcur
+	symb.chainpoolsavedhead(d) = symb.chainpoolhead
+
+	symb.chainpoolcur = symb.chainpoolspare(d)
+	symb.chainpoolhead = 0
+end sub
+
+sub symbChainpoolPop( )
+	assert( symb.chainpooldepth > 0 )
+	symb.chainpooldepth -= 1
+
+	dim as integer d = symb.chainpooldepth
+	if( d > FB_MAXINCRECLEVEL ) then
+		exit sub
+	end if
+
+	symb.chainpoolcur = symb.chainpoolsavedcur(d)
+	symb.chainpoolhead = symb.chainpoolsavedhead(d)
+end sub
 
 '':::::
 function symbNewChainpool _

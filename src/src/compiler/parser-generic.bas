@@ -286,6 +286,10 @@ function genReplayBegin _
 
 	genSaveState( st )
 
+	'' the replay's symbol lookups must not recycle chains the interrupted
+	'' statement still holds -- see symbChainpoolPush
+	symbChainpoolPush( )
+
 	lexPushCtx( )
 	lexInit( LEX_TKCTX_CONTEXT_GENERIC )
 
@@ -310,6 +314,7 @@ end function
 sub genReplayEnd( byref st as FB_PARSERSTATE )
 	lex.ctx->reclevel -= 1
 	lexPopCtx( )
+	symbChainpoolPop( )
 	genRestoreState( st )
 end sub
 
