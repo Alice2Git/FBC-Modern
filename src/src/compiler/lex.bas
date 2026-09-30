@@ -34,28 +34,41 @@ dim shared as string pponly_ln
 
 '':::::
 '' only update the line count if not inside a multi-line macro
-''
-'' A generic body is replayed from DEFTEXT like a macro, but unlike a macro it
-'' is real source that has to report real line numbers -- an error inside an
-'' instantiated body must point at the line in the generic, not at the
-'' instantiation site.  The capture keeps one LFCHAR per source line, so
-'' counting them here tracks the original exactly.
 #define UPDATE_LINENUM( )            _
 	if( lex.ctx->deflen = 0 ) then  :_
 		lex.ctx->linenum += 1       :_
 	end if
 
-'' NOTE: line numbers are deliberately NOT tracked while replaying a generic
-'' body, so an error inside an instantiated body reports the INSTANTIATION SITE
-'' and the "in instantiation of ..." chain supplies the rest.
+'' Line numbers inside a replayed generic or lambda body.
 ''
-'' Counting LFs in the replayed text was tried and reverted.  Each newline is
-'' counted by both the character-level sites above and the token-level site in
-'' lexSkipToken, and measurement showed replay lines coming out at
-'' start + 2*newlines + 1 -- i.e. still double-counted after separating the two,
-'' because an EOL token can be consumed more than once through the look-ahead
-'' ring.  A confidently wrong line number inside the file is worse than none, so
-'' the frozen-but-honest behaviour stands until the token path is understood.
+'' A replay reads its text from DEFTEXT, like a macro, so UPDATE_LINENUM never
+'' counts there.  But it is real source, and an error in it has to point at the
+'' line in the generic, not at the generic's first line.  The capture keeps one
+'' LF per source line (a continued line as '_' + LF, see genFlattenTokens), so
+'' the line of any character is the start line plus the LFs read before it.
+''
+'' Counting those LFs into linenum was tried once and came out double: linenum
+'' is advanced both where the lexer READS an LF and where the parser SKIPS the
+'' EOL token, and the look-ahead ring lets the lexer run up to FB_LEX_MAXK
+'' tokens ahead of the parser.  So the count is kept apart, in replayline, and
+'' advanced in exactly one place -- where lexNextToken consumes an LF.  Each
+'' token is stamped with replayline as it is read, and lexLineNum( ) reports
+'' the stamp of the token the PARSER is on, however far ahead the lexer is.
+''
+'' An LF inside a macro expanded within the body is counted too; a multi-line
+'' #macro used in a generic body therefore shifts the lines after it.
+
+function lexLineNum( ) as integer
+	if( lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC ) then
+		'' nothing read yet: the line the replay starts on
+		if( lex.ctx->head->id = INVALID ) then
+			return lex.ctx->replayline
+		end if
+		return lex.ctx->head->linenum
+	end if
+
+	function = lex.ctx->linenum
+end function
 
 '':::::
 sub lexPushCtx( )
@@ -146,7 +159,12 @@ sub lexInit _
 	'' (a generic replay overrides linenum right after this, with the line the
 	'' captured body actually started on)
 	if( lexCtxIsInMemory( ctx_kind ) ) then
-		lex.ctx->linenum = (lex.ctx-1)->linenum
+		'' the parent's line as reported, which inside a replay is the
+		'' current token's rather than the replay's first line
+		lex.ctx -= 1
+		dim as integer parentline = lexLineNum( )
+		lex.ctx += 1
+		lex.ctx->linenum = parentline
 		lex.ctx->reclevel = (lex.ctx-1)->reclevel
 		lex.ctx->currmacro = (lex.ctx-1)->currmacro
 
@@ -158,6 +176,7 @@ sub lexInit _
 	end if
 
 	lex.ctx->lasttk_id = INVALID
+	lex.ctx->replayline = lex.ctx->linenum
 
 	''
 	lex.ctx->bufflen = 0
@@ -1729,6 +1748,7 @@ re_read:
 	t->text[0] = 0                                  '' t.text = ""
 	t->len = 0
 	t->sym_chain = NULL
+	t->linenum = lex.ctx->replayline
 
 	'' skip white space
 	islinecont = FALSE
@@ -1791,6 +1811,11 @@ re_read:
 				end if
 			end if
 
+			'' the EOL token keeps the line it ends; what follows is on the next
+			if( lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC ) then
+				lex.ctx->replayline += 1
+			end if
+
 			if( islinecont = FALSE ) then
 				t->id = FB_TK_EOL
 				t->class = FB_TKCLASS_DELIMITER
@@ -1805,6 +1830,7 @@ re_read:
 				t->after_space = TRUE
 				UPDATE_LINENUM( )
 				islinecont = FALSE
+				t->linenum = lex.ctx->replayline
 				continue do
 			end if
 
@@ -2506,6 +2532,66 @@ sub lexSkipLine( ) static
 end sub
 
 '':::::
+'' The source line lexLineNum( ) names, read from env.inf.name -- for a
+'' replayed generic or lambda body, whose text is not in the file being read.
+'' "" when the file cannot be read as bytes, which is better than a wrong quote.
+private function hReplaySourceLine _
+	( _
+		byref token_pos as string, _
+		byval do_trim as integer _
+	) as string
+
+	dim as string res
+	dim as integer linenum = lexLineNum( )
+	dim as integer f = freefile( )
+
+	token_pos = ""
+
+	if( open( env.inf.name, for binary, access read, as #f ) <> 0 ) then
+		return ""
+	end if
+
+	dim as integer n = 0
+	do while( eof( f ) = FALSE )
+		line input #f, res
+		n += 1
+		if( n = linenum ) then
+			exit do
+		end if
+	loop
+	close #f
+
+	if( n <> linenum ) then
+		return ""
+	end if
+
+	'' a UTF-8 BOM on the first line; any other encoding gives no quote
+	if( (linenum = 1) andalso (left( res, 3 ) = !"\&hEF\&hBB\&hBF") ) then
+		res = mid( res, 4 )
+	end if
+	for i as integer = 0 to len( res ) - 1
+		if( res[i] = 0 ) then
+			return ""
+		end if
+	next
+
+	if( do_trim ) then
+		res = trim( res, any !" \t" )
+	else
+		'' the caret goes under the current token's first occurrence, which
+		'' is right for every token that appears once on its line
+		dim as integer p = instr( lcase( res ), lcase( *lexGetText( ) ) )
+		if( p > 0 ) then
+			for i as integer = 0 to p - 2
+				token_pos += chr( iif( res[i] = CHAR_TAB, CHAR_TAB, CHAR_SPACE ) )
+			next
+			token_pos += "^"
+		end if
+	end if
+
+	function = res
+end function
+
 function lexPeekCurrentLine _
 	( _
 		byref token_pos as string, _
@@ -2519,6 +2605,15 @@ function lexPeekCurrentLine _
 	dim as uinteger char
 
 	function = ""
+
+	'' A replayed body is not in the file being read -- it is in memory -- and
+	'' the file position below belongs to whatever file the replay interrupted:
+	'' the quote came out as some unrelated line of the user's own file, often
+	'' its first.  env.inf.name does name the generic's file during a replay,
+	'' and lexLineNum( ) its line, so quote that line from there.
+	if( lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC ) then
+		return hReplaySourceLine( token_pos, do_trim )
+	end if
 
 	'' !!!WRITEME!!!
 	if( env.inf.format <> FBFILE_FORMAT_ASCII ) then

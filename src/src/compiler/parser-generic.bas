@@ -299,10 +299,11 @@ function genReplayBegin _
 	hLoadReplayText( text )
 
 	'' Report against the generic's own source position, not the instantiation
-	'' site.  UPDATE_LINENUM was taught to keep counting for this context kind,
-	'' and the captured text carries one LF per original source line, so line
-	'' numbers track the generic exactly from here on.
+	'' site.  The captured text carries one LF per original source line, and
+	'' the lexer counts them into replayline, so line numbers track the generic
+	'' exactly from here on (see lexLineNum).
 	lex.ctx->linenum = linenum
+	lex.ctx->replayline = linenum
 	if( srcfile ) then
 		env.inf.name = *srcfile
 		env.inf.incfile = srcfile

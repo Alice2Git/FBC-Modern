@@ -1,0 +1,25 @@
+=== a member body, third line ===
+generic-body-lines.bas(17) error 42: Variable not declared, nimic in 'this.v = nimic'
+  in instantiation of 'Cutie( of long )'
+  required from generic-body-lines.bas(19)
+=== a duplicated member: reported on the member, not on the type ===
+generic-body-lines.bas(25) error 4: Duplicated definition in 'declare function Stare( ) as long'
+  in instantiation of 'Dup( of long )'
+  required from generic-body-lines.bas(27)
+=== a continued line ===
+generic-body-lines.bas(36) error 42: Variable not declared, nothere in 'nothere'
+  in instantiation of 'Cont( of long )'
+  required from generic-body-lines.bas(38)
+=== a generic procedure ===
+generic-body-lines.bas(43) error 42: Variable not declared, missing in 'return y + missing'
+  in instantiation of 'Gen( of long )'
+  required from generic-body-lines.bas(45)
+=== a one-line body ===
+generic-body-lines.bas(52) error 42: Variable not declared, gone in 'sub One( of T ).S( ) : dim as T q : q = gone : end sub'
+  in instantiation of 'One( of long )'
+  required from generic-body-lines.bas(53)
+=== a generic declared in an included header ===
+generic-body-lines.bi(11) error 42: Variable not declared, notdeclaredhere in 'this.v = notdeclaredhere'
+  in instantiation of 'Header( of long )'
+  required from generic-body-lines.bas(56)
+=== done ===

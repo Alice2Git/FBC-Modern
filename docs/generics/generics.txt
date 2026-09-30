@@ -280,9 +280,14 @@ Everything else is an ordinary FreeBASIC diagnostic, reported from the replayed
 body and followed by the instantiation chain that reached it, so it is possible
 to see which type argument caused it:
 
-    box.bas(13) error 14: Expected identifier, found 'Wdiget'
+    box.bas(13) error 14: Expected identifier, found 'Wdiget' in 'as Wdiget oops'
       in instantiation of 'Box( of long )'
       required from box.bas(18)
+
+The line number and the quoted source are the offending line's own, in the file
+the generic is declared in -- a header, when it is declared in one.  The body is
+replayed from memory, so the lexer counts the replayed lines itself (see
+lexLineNum in lex.bas); errors/generic-body-lines.bas pins both.
 
 
 KNOWN LIMITS
@@ -315,10 +320,6 @@ All measured, none blocking.
 
   - Debug names are not unique. Every instantiation of Box reports as 'Box' to
     the debugger, so GDB sees N distinct types sharing one name.
-
-  - In-body line numbers point at the body's opening line, not the offending
-    line inside it. The instantiation chain supplies the detail. Attempted,
-    measured and reverted.
 
   - Function-template return types are not mangled: '_Z3IncIiEi' where Itanium
     wants the return type after the I...E list. Names are unique and stable,

@@ -23,6 +23,11 @@
 # makes the golden file readable: each marker is followed by the diagnostics it
 # introduced.
 #
+# Files named *-lines.bas are the exception, for diagnostics whose POSITION is
+# what is being tested: they keep the line numbers (with the file's base name)
+# and are run without -noerrline, so the quoted source line is pinned too --
+# as it is printed with the default single-line error format, no caret.
+#
 
 FBC=`printenv FBC`
 FBC=${FBC:-fbc}
@@ -38,10 +43,20 @@ function run_tests() {
 		echo "TEST $fbtarget $i"
 		withoutext=${i%.bas}
 
-		$FBC -maxerr inf -noerrline -target $fbtarget $i -r -m $withoutext 2>&1 | \
-			sed -e 's,^.*\.\(bas\|bi\)([0-9]*) error ,\terror ,g' \
-			    -e 's,\.\(bas\|bi\)([0-9]*),.\1(N),g' > \
-			$txtdir/$withoutext.txt
+		case $i in
+		*-lines.bas)
+			$FBC -maxerr inf -target $fbtarget $i -r -m $withoutext 2>&1 | \
+				sed -e 's,^.*/\([^/]*\.\(bas\|bi\)([0-9]*)\),\1,' \
+				    -e 's,from .*/\([^/]*\.\(bas\|bi\)([0-9]*)\),from \1,' > \
+				$txtdir/$withoutext.txt
+			;;
+		*)
+			$FBC -maxerr inf -noerrline -target $fbtarget $i -r -m $withoutext 2>&1 | \
+				sed -e 's,^.*\.\(bas\|bi\)([0-9]*) error ,\terror ,g' \
+				    -e 's,\.\(bas\|bi\)([0-9]*),.\1(N),g' > \
+				$txtdir/$withoutext.txt
+			;;
+		esac
 	done
 
 	rm -f *.asm *.c *.o

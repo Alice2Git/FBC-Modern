@@ -71,6 +71,10 @@ type FBTOKEN
 
 	after_space     as integer
 
+	'' The source line the token started on -- maintained only while replaying
+	'' a generic or lambda body, where lexLineNum( ) reports it (see there).
+	linenum         as integer
+
 	next            as FBTOKEN ptr
 end type
 
@@ -102,6 +106,7 @@ type LEX_TKCTX
 	lahdchar2       as uinteger                 '' look ahead second char
 
 	linenum         as integer
+	replayline      as integer                  '' LEX_TKCTX_CONTEXT_GENERIC: line of the next char
 	lasttk_id       as integer
 
 	reclevel        as integer                  '' PP recursion
@@ -178,6 +183,8 @@ declare sub lexInit _
 declare sub lexEnd _
 	( _
 	)
+
+declare function lexLineNum( ) as integer
 
 declare sub lexPushCtx _
 	( _
@@ -289,7 +296,6 @@ declare function hMatch _
 '' macros
 ''
 
-#define lexLineNum( ) lex.ctx->linenum
 
 #define lexGetLastToken( ) lex.ctx->lasttk_id
 
