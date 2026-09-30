@@ -921,6 +921,44 @@ private function hArgKey _
 	function = id
 end function
 
+'' Rebind a procedure-pointer type argument declared in a procedure's scope to
+'' the global prototype with the same signature.  Called once the
+'' instantiation is in the global scope (genEnterGlobalScope), which is what
+'' makes symbAddProcPtrFromFunction produce the global one.
+''
+'' A procedure-pointer type written inside a procedure -- 'dim p as function(
+'' byref x as T ) as boolean', or a lambda's own type -- gets its prototype in
+'' that procedure's scope (symbLookupInternallyMangledSubtype), and the scope
+'' deletes it at 'end sub'.  An instantiation outlives that: its member bodies
+'' and a generic procedure's body are replayed at the next module-level
+'' statement boundary, after the scope is gone, and every later use of the
+'' same arguments hits the cache.  The type parameter was then bound to freed
+'' memory: 'Aplica( v, lambda )' written inside a generic body compiled
+'' Aplica's 'fn( v )' against a garbage prototype -- "Expected ')', found 'v'"
+'' -- and in an ordinary procedure it worked only by luck.
+''
+'' The prototypes are keyed by their mangled signature, so the cache key and
+'' the type's identity for overload resolution are unchanged; only its
+'' lifetime is.  A signature that names a procedure-LOCAL UDT keeps that UDT's
+'' own lifetime problem, as any type argument naming one does (see
+'' genEnterGlobalScope).
+private sub hGlobalizeProcPtrArgs _
+	( _
+		argsubtype() as FBSYMBOL ptr, _
+		byval argcount as integer _
+	)
+
+	for i as integer = 0 to argcount-1
+		dim as FBSYMBOL ptr s = argsubtype(i)
+		if( s <> NULL ) then
+			'' a real procedure is never local: only a procptr prototype is
+			if( symbIsProc( s ) andalso symbIsLocal( s ) ) then
+				argsubtype(i) = symbAddProcPtrFromFunction( s )
+			end if
+		end if
+	next
+end sub
+
 '' Instantiate a generic TYPE|UNION for one argument list.
 ''
 '' The instantiated struct is created inside a synthetic namespace that holds
@@ -1035,7 +1073,9 @@ function genInstantiateType _
 		entry->inprogress = TRUE
 	end if
 
-	'' bind each type parameter
+	'' bind each type parameter -- to a global prototype, if it is a procedure
+	'' pointer type from a procedure's scope
+	hGlobalizeProcPtrArgs( argsubtype(), argcount )
 	prm = gensym->gen.paramhead
 	for i as integer = 0 to argcount-1
 		symbAddTypedef( symbGetName( prm ), argdtype(i), argsubtype(i), _
@@ -1261,7 +1301,9 @@ function genInstantiateProc _
 	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns
 	genctx2.curinstns = nsp
 
-	'' bind each type parameter
+	'' bind each type parameter -- to a global prototype, if it is a procedure
+	'' pointer type from a procedure's scope
+	hGlobalizeProcPtrArgs( argsubtype(), argcount )
 	prm = gensym->gen.paramhead
 	for i as integer = 0 to argcount-1
 		symbAddTypedef( symbGetName( prm ), argdtype(i), argsubtype(i), _
