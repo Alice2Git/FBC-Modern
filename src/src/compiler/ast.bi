@@ -357,6 +357,16 @@ type AST_DTORLIST_SCOPESTACK
 	room    as integer
 end type
 
+'' The whole temp-dtor state, set aside by astDtorListPark() while a generic
+'' or lambda replay compiles procedure bodies in the middle of the caller's
+'' expression (see there).
+type AST_DTORLIST_PARKED
+	list            as TLIST
+	scopes          as AST_DTORLIST_SCOPESTACK
+	cookies         as integer
+	flush           as integer
+end type
+
 type ASTCTX
 	astTB           as TLIST
 
@@ -1363,6 +1373,8 @@ declare sub astDtorListScopeBegin( byval cookie as integer = 0 )
 declare function astDtorListScopeEnd( ) as integer
 declare sub astDtorListUnscope( byval cookie as integer )
 declare sub astDtorListScopeDelete( byval cookie as integer )
+declare sub astDtorListPark( byref parked as AST_DTORLIST_PARKED )
+declare sub astDtorListUnpark( byref parked as AST_DTORLIST_PARKED )
 
 declare sub astSetType _
 	( _

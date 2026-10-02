@@ -1200,6 +1200,10 @@ type FB_PARSERSTATE
 	doemit          as integer
 	typeinicount    as integer
 
+	'' the interrupted statement's pending temporaries, which a replay's
+	'' procedure bodies must neither destroy nor add to (astDtorListPark)
+	dtorlist        as AST_DTORLIST_PARKED
+
 	'' input file
 	inf             as FBFILE
 

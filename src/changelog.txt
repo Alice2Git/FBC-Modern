@@ -215,6 +215,12 @@ Version 1.20.0
 - fb/hash.bi: the FB.HashOf overloads are private, so two modules including
   fb/map.bi or fb/set.bi link together instead of failing with 'multiple
   definition'.
+- Generics: a generic first instantiated inside an expression that already held
+  a string temporary -- 'Ia( "verde", Deriv( of string )( ) )' -- destroyed that
+  temporary inside the instantiated type's implicit constructor, compiled right
+  there at END TYPE: gcc rejected the C ('TMP$7$0 undeclared'), and with gas64
+  the program freed a slot of the wrong stack frame and crashed. The caller's
+  pending temporaries are now set aside for the whole replay.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

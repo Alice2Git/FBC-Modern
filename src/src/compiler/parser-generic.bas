@@ -60,6 +60,7 @@ sub genSaveState( byref st as FB_PARSERSTATE )
 	st.astblock     = ast.currblock
 	st.doemit       = ast.doemit
 	st.typeinicount = ast.typeinicount
+	astDtorListPark( st.dtorlist )
 
 	st.inf          = env.inf
 
@@ -85,6 +86,7 @@ sub genRestoreState( byref st as FB_PARSERSTATE )
 	ast.currblock   = st.astblock
 	ast.doemit      = st.doemit
 	ast.typeinicount = st.typeinicount
+	astDtorListUnpark( st.dtorlist )
 
 	env.inf         = st.inf
 

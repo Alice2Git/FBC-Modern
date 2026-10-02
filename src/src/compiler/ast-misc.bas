@@ -1244,6 +1244,50 @@ sub astDtorListScopeDelete( byval cookie as integer )
 	hastDtorListRescope( cookie, -1 )
 end sub
 
+'' Set the whole dtor list aside and start an empty one, for compiling
+'' procedure bodies in the middle of another procedure's expression.
+''
+'' The dtor list belongs to the statement being parsed, but it is a single
+'' global, and the first astAdd() of ANY procedure flushes it.  Normally no
+'' body is compiled while an expression is open, so that never matters.  A
+'' generic instantiated for the first time inside an expression breaks that:
+'' its TYPE replay reaches END TYPE, which compiles the implicit constructor,
+'' destructor and LET bodies on the spot.  The caller's pending temporaries --
+'' the string temp built for a BYREF argument, say -- were then destroyed in
+'' the constructor's body, where they do not exist: gcc rejected the C
+'' ('TMP$7$0 undeclared'), and gas64 freed a slot of the wrong stack frame.
+'' The caller, meanwhile, never destroyed them at all.
+''
+'' Any dtorlist scope (IIF cookie) open in the caller is parked too, or the
+'' nested body's temporaries would be tagged with the caller's cookie.
+sub astDtorListPark( byref parked as AST_DTORLIST_PARKED )
+	parked.list    = ast.dtorlist
+	parked.scopes  = ast.dtorlistscopes
+	parked.cookies = ast.dtorlistcookies
+	parked.flush   = ast.flushdtorlist
+
+	listInit( @ast.dtorlist, 16, len( AST_DTORLIST_ITEM ), LIST_FLAGS_NOCLEAR )
+	with( ast.dtorlistscopes )
+		.cookies = NULL
+		.count = 0
+		.room = 0
+	end with
+	ast.dtorlistcookies = 0
+	ast.flushdtorlist = TRUE
+end sub
+
+sub astDtorListUnpark( byref parked as AST_DTORLIST_PARKED )
+	'' Whatever the nested bodies left behind (only possible after an error)
+	'' belongs to them, not to the caller's statement: drop it.
+	deallocate( ast.dtorlistscopes.cookies )
+	listEnd( @ast.dtorlist )
+
+	ast.dtorlist        = parked.list
+	ast.dtorlistscopes  = parked.scopes
+	ast.dtorlistcookies = parked.cookies
+	ast.flushdtorlist   = parked.flush
+end sub
+
 '':::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 '' hacks
 '':::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
