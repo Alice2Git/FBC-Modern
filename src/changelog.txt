@@ -221,6 +221,19 @@ Version 1.20.0
   there at END TYPE: gcc rejected the C ('TMP$7$0 undeclared'), and with gas64
   the program freed a slot of the wrong stack frame and crashed. The caller's
   pending temporaries are now set aside for the whole replay.
+- Generics: generic global UNARY operators -- '-', '+', 'not', and '*' / '->' on
+  a UDT -- were accepted when declared but never found at use (error 20, or
+  error 28 'Expected pointer'). Only binary operators instantiated a generic
+  operator from the operand types; the unary, deref and '->' lookups now do too.
+- Generics: two generic global operators with the same symbol for different
+  generic types -- '=' for both H( of T ) and G( of T ) -- could not both be
+  instantiated for the same type arguments: the second failed with error 20.
+- -gen gcc: a PRIVATE NAKED procedure was emitted as a '.globl' asm label with a
+  'static' C prototype, so gcc warned "used but never defined" and two modules
+  including it failed to link with 'multiple definition'. A private (or weak)
+  naked procedure is now a static C function with __attribute__((naked)) --
+  module-private, as with -gen gas64 -- which needs gcc 8 or newer on x86.
+  Public naked procedures are emitted as before.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

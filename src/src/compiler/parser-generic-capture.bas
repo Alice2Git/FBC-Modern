@@ -405,6 +405,7 @@ type GENOPCTX
 	head            as FB_GENOP ptr
 	tail            as FB_GENOP ptr
 	list            as TLIST                    '' of FB_GENOP
+	count           as integer                  '' declarations so far, for the internal names
 end type
 
 dim shared as GENOPCTX genopctx
@@ -433,6 +434,7 @@ sub genProcBodyEnd( )
 		genopctx.head = NULL
 		genopctx.tail = NULL
 	end if
+	genopctx.count = 0
 end sub
 
 '' The bodies belonging to one generic, oldest first
@@ -1000,7 +1002,14 @@ function cGenericOpDecl( byval tk as integer ) as integer
 	'' hArgKey() builds the instantiation cache key and the synthetic namespace
 	'' name out of it, so it has to be a legal identifier.  The readable form
 	'' goes in the ALIAS, which is what every diagnostic prints.
-	dim as string internalid = "__FBGENOP" + str( op )
+	''
+	'' It has to be unique to this declaration, not just to the operator.  Two
+	'' generic '=' -- one for H( of T ), one for G( of T ) -- instantiated for
+	'' the same type arguments built the same key text, the second
+	'' instantiation's synthetic namespace collided with the first's
+	'' (symbAddNamespace returned NULL), and that operator was never registered.
+	genopctx.count += 1
+	dim as string internalid = "__FBGENOP" + str( op ) + "_" + str( genopctx.count )
 	dim as string readable = "operator " + optext
 
 	sym = symbNewSymbol( FB_SYMBOPT_NONE, NULL, NULL, NULL, _

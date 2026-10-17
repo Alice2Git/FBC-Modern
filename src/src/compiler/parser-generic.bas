@@ -1978,6 +1978,30 @@ private sub hTryOneGlobalOp _
 	genInstantiateProc( gensym, bounddtype(), boundsubtype(), gensym->gen.paramcount )
 end sub
 
+'' The AST_OP a generic operator declaration has when used with one operand.
+''
+'' The declaration records what cOperator() made of the token, and the token
+'' alone cannot tell '-' from negation: the parameter count decides, and that
+'' is only known once the header is parsed (cProcHeader turns SUB, ADD and MUL
+'' with one parameter into NEG, PLUS and DEREF).  The captured header is not
+'' parsed until it is instantiated, so the unary use site maps the other way.
+private function hUnaryOpOf( byval op as integer ) as integer
+	select case op
+	case AST_OP_SUB
+		function = AST_OP_NEG
+	case AST_OP_ADD
+		function = AST_OP_PLUS
+	case AST_OP_MUL
+		function = AST_OP_DEREF
+	case else
+		function = op
+	end select
+end function
+
+'' rdtype = FB_DATATYPE_INVALID for a unary operator: astNewUOP() and the
+'' '*' / '->' overloads on a UDT (astBuildMultiDeref, cMemberDeref) call this
+'' with the one operand, and hTryOneGlobalOp() then only instantiates a generic
+'' declared with exactly one parameter.
 sub genTryInstantiateGlobalOp _
 	( _
 		byval op as integer, _
@@ -1988,11 +2012,17 @@ sub genTryInstantiateGlobalOp _
 	)
 
 	dim as FB_GENOP ptr g = genGetGenericOps( )
+	dim as integer isunary = (rdtype = FB_DATATYPE_INVALID)
 
 	'' the fast path, and the overwhelmingly common one: no generic operators
 	'' were ever declared, so every BOP in the module costs one NULL test
 	while( g )
-		if( g->op = op ) then
+		dim as integer gop = g->op
+		if( isunary ) then
+			gop = hUnaryOpOf( gop )
+		end if
+
+		if( gop = op ) then
 			hTryOneGlobalOp( g->gensym, ldtype, lsubtype, rdtype, rsubtype )
 		end if
 		g = g->nxt

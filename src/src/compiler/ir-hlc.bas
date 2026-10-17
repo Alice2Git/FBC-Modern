@@ -536,6 +536,15 @@ private function hNeedAlias( byval proc as FBSYMBOL ptr ) as integer
 	end select
 end function
 
+'' Is this a NAKED procedure emitted as a C function with
+'' __attribute__((naked)), rather than as a bare asm label?  See _emitProcBegin.
+private function hIsNakedCFunc( byval proc as FBSYMBOL ptr ) as integer
+	if( symbIsNaked( proc ) = FALSE ) then
+		return FALSE
+	end if
+	function = symbIsPrivate( proc ) orelse symbIsWeak( proc )
+end function
+
 private function hEmitProcHeader _
 	( _
 		byval proc as FBSYMBOL ptr, _
@@ -575,6 +584,11 @@ private function hEmitProcHeader _
 		'' costs one copy per module rather than one per program.
 		if( symbIsPrivate( proc ) orelse symbIsWeak( proc ) ) then
 			ln += "static "
+		end if
+
+		'' see _emitProcBegin
+		if( hIsNakedCFunc( proc ) ) then
+			ln += "__attribute__((naked, used)) "
 		end if
 	end if
 
@@ -628,12 +642,19 @@ private function hEmitProcHeader _
 	'' Parameter list
 	ln += "( "
 
+	'' A NAKED body has no parameter or result variables -- its asm reaches
+	'' the arguments itself -- but a C definition needs parameter names.
+	dim as integer nakeddef = ((options and EMITPROC_ISPROTO) = 0) andalso hIsNakedCFunc( proc )
+
 	'' If returning a struct, there's an extra parameter
 	dim as FBSYMBOL ptr hidden = NULL
 	if( symbProcReturnsOnStack( proc ) ) then
-		if( options and EMITPROC_ISPROTO ) then
+		if( ((options and EMITPROC_ISPROTO) <> 0) orelse nakeddef ) then
 			hidden = symbGetSubType( proc )
 			ln += hEmitType( typeAddrOf( symbGetType( hidden ) ), hidden )
+			if( nakeddef ) then
+				ln += " naked$res"
+			end if
 		else
 			hidden = proc->proc.ext->res
 			ln += hEmitType( typeAddrOf( symbGetType( hidden ) ), symbGetSubtype( hidden ) )
@@ -646,6 +667,7 @@ private function hEmitProcHeader _
 	end if
 
 	var param = symbGetProcLastParam( proc )
+	dim as integer nakedidx = 0
 
 	if( (hidden = NULL) and (param = NULL) ) then
 		ln += "void"
@@ -664,7 +686,10 @@ private function hEmitProcHeader _
 				ln += hEmitType( dtype, subtype )
 			end if
 
-			if( (options and EMITPROC_ISPROTO) = 0 ) then
+			if( nakeddef ) then
+				ln += " naked$" & (symbGetProcParams( proc ) - nakedidx)
+				nakedidx += 1
+			elseif( (options and EMITPROC_ISPROTO) = 0 ) then
 				ln += " " + *symbGetMangledName( symbGetParamVar( param ) )
 			end if
 		end if
@@ -4103,7 +4128,29 @@ private sub _emitProcBegin _
 
 	'' NAKED procedure? Use inline asm, since gcc doesn't support
 	'' __attribute__((naked)) on x86
+	''
+	'' (gcc does since 8, and a module-private one -- PRIVATE, or WEAK, which
+	'' hEmitProcHeader also makes 'static' -- needs it.  As a bare label it
+	'' cannot be module-private: C only has a prototype for it, gcc warns
+	'' "'F' used but never defined" about a 'static' one and then treats it
+	'' as extern anyway, and on PE/COFF it marks every extern it references
+	'' '.scl 2' (external) at the end of the file, label or no '.globl'.  Two
+	'' modules including the same header then fail to link with 'multiple
+	'' definition'.  So it is a real 'static' C function, naked, whose body
+	'' is the same basic __asm__ statements -- the only thing gcc allows in a
+	'' naked function.  Its section is not begun, so _emitAsmLine still sees
+	'' a NAKED body.  'used' keeps it out of IPA: gcc must not give a local
+	'' function a register calling convention the asm does not expect.)
 	if( symbIsNaked( proc ) ) then
+		if( hIsNakedCFunc( proc ) ) then
+			if( hNeedAlias( proc ) ) then
+				hWriteLine( hEmitProcHeader( proc, EMITPROC_ISPROTO ) + ";" )
+			end if
+			hWriteLine( hEmitProcHeader( proc, 0 ) )
+			hWriteLine( "{" )
+			exit sub
+		end if
+
 		mangled = hGetMangledNameForASM( proc, TRUE )
 		hWriteLine( "__asm__( "".text"" );" )
 		hWriteLine( "__asm__( "".globl " + mangled + """ );" )
@@ -4150,6 +4197,11 @@ private sub _emitProcEnd _
 	'' NAKED procedure? Use inline asm, since gcc doesn't support
 	'' __attribute__((naked)) on x86
 	if( symbIsNaked( proc ) ) then
+		if( hIsNakedCFunc( proc ) ) then
+			hWriteLine( "}" )
+			exit sub
+		end if
+
 		'' Emit .size like ASM backend, for Linux
 		if( env.clopt.target = FB_COMPTARGET_LINUX ) then
 			mangled = hGetMangledNameForASM( proc, TRUE )

@@ -1,0 +1,12 @@
+=== unary - on a type no generic - fits: plain type mismatch ===
+	error 20: Type mismatch
+=== deref * on a type no generic * fits: expected pointer ===
+	error 28: Expected pointer
+=== -> on a type no generic -> fits: expected pointer ===
+	error 28: Expected pointer, before '->'
+=== -> fits, the member does not exist ===
+	error 18: Element not defined, nosuch
+=== - fits, its body does not compile for the argument: the chain ===
+	error 20: Type mismatch
+  in instantiation of 'operator -( of P )'
+  required from generic-unary-operator-errors.bas(N)

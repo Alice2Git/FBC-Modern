@@ -1,0 +1,23 @@
+# TEST_MODE : MULTI_MODULE_OK
+
+# PRIVATE NAKED procedures across SEPARATELY COMPILED modules.
+#
+# -gen gcc emitted every naked procedure as a '.globl' asm label with only a
+# C prototype, 'static' for a private one -- so gcc warned "'F' used but
+# never defined", and two modules including the same header with a private
+# naked procedure failed to link:
+#
+#     multiple definition of `NAKEDINC'
+#
+# Dropping the '.globl' alone is not enough on PE/COFF: gcc marks every
+# extern function a module references '.scl 2' (external), and an undefined
+# 'static' one becomes extern after the warning.  A private (or weak) naked
+# procedure is now a real 'static' C function with __attribute__((naked)), so
+# it is module-private, as it already was with -gen gas64.  A public one stays
+# a '.globl' label (NakedPublicDouble, defined in module A and called from the
+# driver).  A single-module test cannot see this, which is why this is a .bmk.
+#
+# Reported by xSmartPtr as b03.
+
+MAIN := naked-private-mm-main.bas
+SRCS := naked-private-mm-a.bas

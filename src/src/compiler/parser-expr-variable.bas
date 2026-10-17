@@ -610,6 +610,10 @@ function cMemberDeref _
 				'' UdtMember
 				varexpr = cUdtMember( dtype, subtype, varexpr, check_array )
 			else
+				'' a generic 'operator ->' first has to be instantiated for this UDT
+				genTryInstantiateGlobalOp( AST_OP_FLDDEREF, astGetFullType( varexpr ), astGetSubtype( varexpr ), _
+				                           FB_DATATYPE_INVALID, NULL )
+
 				'' check op overloading
 				if( symb.globOpOvlTb(AST_OP_FLDDEREF).head = NULL ) then
 					errReport( FB_ERRMSG_EXPECTEDPOINTER, TRUE )

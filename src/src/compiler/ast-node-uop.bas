@@ -8,6 +8,7 @@
 #include once "ir.bi"
 #include once "rtl.bi"
 #include once "ast.bi"
+#include once "parser.bi"
 
 '' Need to use replacement function for sgn(longint) constant evaluation,
 '' because the built-in sgn(longint) was bugged in older fbc versions.
@@ -98,6 +99,11 @@ function astNewUOP _
 	if( o = NULL ) then
 		exit function
 	end if
+
+	'' A generic global operator is in globOpOvlTb only once instantiated, the
+	'' same as for a BOP (see hDoGlobOpOverload).  Silent if nothing fits.
+	genTryInstantiateGlobalOp( op, astGetFullType( o ), astGetSubtype( o ), _
+	                           FB_DATATYPE_INVALID, NULL )
 
 	'' check op overloading
 	if( symb.globOpOvlTb(op).head <> NULL ) then

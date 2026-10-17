@@ -9,6 +9,7 @@
 #include once "ast.bi"
 #include once "lex.bi"
 #include once "rtl.bi"
+#include once "parser.bi"
 
 ''
 '' vars
@@ -764,6 +765,10 @@ function astBuildMultiDeref _
 
 	do while( cnt > 0 )
 		if( typeIsPtr( dtype ) = FALSE ) then
+			'' a generic 'operator *' first has to be instantiated for this UDT
+			genTryInstantiateGlobalOp( AST_OP_DEREF, astGetFullType( expr ), astGetSubtype( expr ), _
+			                           FB_DATATYPE_INVALID, NULL )
+
 			if( symb.globOpOvlTb(AST_OP_DEREF).head = NULL ) then
 				errReport( FB_ERRMSG_EXPECTEDPOINTER, TRUE )
 				exit do
