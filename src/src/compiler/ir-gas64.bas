@@ -3916,6 +3916,13 @@ private sub _setvregdatatype(byval v as IRVREG ptr,byval dtype as integer,byval 
 	asm_info("dtype/subtype="+typedumpToStr(dtype,subtype))
 	asm_info("dtype/subtype="+typedumpToStr(v->dtype,v->subtype))
 	dim as IRVREG ptr temp0 = Any
+	'' Only the CONST bits differ (e.g. cdbl() on a CONST DOUBLE): same layout,
+	'' nothing to convert, just retype.  Going through _EmitConvert here made
+	'' 'const double -> double' a single -> double conversion (TestKit b02).
+	if( (typeGetDtAndPtrOnly( v->dtype ) = typeGetDtAndPtrOnly( dtype )) and (v->subtype = subtype) ) then
+		v->dtype = dtype
+		exit sub
+	end if
 	if( (v->dtype <> dtype) or (v->subtype <> subtype) ) then
 		temp0 = irhlAllocVreg( dtype, subtype )
 		_EmitConvert( temp0, v )
@@ -5618,7 +5625,24 @@ private sub _emitconvert( byval v1 as IRVREG ptr, byval v2 as IRVREG ptr )
 	If( typeGetClass( v1dtype ) = FB_DATACLASS_FPOINT ) then ''convert to float
 		if( typeGetClass( v2dtype ) = FB_DATACLASS_FPOINT ) then  '' float to float (single <-> double)
 
-			if v1dtype=FB_DATATYPE_DOUBLE then  'Single to double
+			if v1dtype=v2dtype then 'Same float type, only a copy
+				asm_info("float to same float")
+				if v1dtype=FB_DATATYPE_DOUBLE then
+					if v2->typ=IR_VREGTYPE_REG then
+						asm_code("movq xmm0, "+op2)
+					else
+						asm_code("movsd xmm0, "+op2)
+					end if
+					asm_code("movq "+op1+", xmm0")
+				else
+					if v2->typ=IR_VREGTYPE_REG then
+						asm_code("movd xmm0, "+op2)
+					else
+						asm_code("movss xmm0, "+op2)
+					end if
+					asm_code("movd "+op1+", xmm0")
+				end if
+			elseif v1dtype=FB_DATATYPE_DOUBLE then  'Single to double
 				asm_info("single to double")
 				if v2->typ=IR_VREGTYPE_REG then
 					asm_code("movd xmm0, "+op2)

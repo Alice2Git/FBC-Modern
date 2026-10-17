@@ -234,6 +234,14 @@ Version 1.20.0
   naked procedure is now a static C function with __attribute__((naked)) --
   module-private, as with -gen gas64 -- which needs gcc 8 or newer on x86.
   Public naked procedures are emitted as before.
+- Generics: type-argument inference failed for a ZSTRING PTR argument (error 58
+  at parameter 1 of __FBGENPROC()). The string-literal rule that infers STRING
+  rather than ZSTRING ignored the pointer levels, so 'zstring ptr' was taken as
+  STRING too.
+- -gen gas64: CDBL, CSNG or CAST to the same type on a CONST DOUBLE / CONST
+  SINGLE (e.g. a 'byref as const double' parameter) compiled as a single ->
+  double conversion and gave 0 or garbage. A change of CONST bits only is now
+  a retype, with no conversion emitted.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

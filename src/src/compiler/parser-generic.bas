@@ -1900,8 +1900,11 @@ private function hBindPattern _
 	'' actually wrote -- Max( 1, 2.0 ) must fail rather than promote.  Here
 	'' both arguments are string literals and 'string' is the only type the
 	'' author could have meant.
+	''
+	'' typeGet(), not typeGetDtOnly(): the latter drops the pointer levels, and
+	'' a 'zstring ptr' argument then became 'string' too (TestKit b01).
 	if( p.ptrlevels = 0 ) then
-		select case typeGetDtOnly( dtype )
+		select case typeGet( dtype )
 		case FB_DATATYPE_CHAR, FB_DATATYPE_FIXSTR
 			dtype = FB_DATATYPE_STRING
 			subtype = NULL
