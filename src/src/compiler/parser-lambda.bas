@@ -542,6 +542,12 @@ sub lambdaDrainBodies( )
 	dim as FBSYMBOL ptr curns = genCurrentInstNamespc( )
 
 	do
+		'' not once the compile is being abandoned: a replay cut off there
+		'' left its procedure open (see genDrainProcBodies)
+		if( fbShouldContinue( ) = FALSE ) then
+			exit do
+		end if
+
 		dim as FB_LAMBDA ptr p = listGetHead( @lambdactx.list )
 		dim as integer didwork = FALSE
 

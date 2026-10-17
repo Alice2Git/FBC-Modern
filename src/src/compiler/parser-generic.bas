@@ -95,8 +95,10 @@ sub genRestoreState( byref st as FB_PARSERSTATE )
 	'' A replay that opened a compound statement and never closed it would
 	'' leave the caller's stack skewed, and the failure would surface far away
 	'' from the cause.  The stack nodes are pooled, so the same depth always
-	'' means the same top-of-stack pointer.
-	assert( parser.stmt.stk.tos = st.stmttos )
+	'' means the same top-of-stack pointer.  The one exception is a replay
+	'' cut off by -maxerr (or a restart): cProgram() returns from wherever it
+	'' stood, and the compile stops at the next statement boundary.
+	assert( (parser.stmt.stk.tos = st.stmttos) orelse (fbShouldContinue( ) = FALSE) )
 end sub
 
 '' An instantiation is built as if at module level, whatever the parser was in
@@ -888,6 +890,19 @@ sub genDrainProcBodies( )
 	dim as integer maxwork = env.clopt.maxinstdepth * 1024
 
 	do
+		'' Nothing more once the compile is being abandoned (-maxerr reached,
+		'' or a restart).  A body whose replay stopped there was cut off in
+		'' mid-procedure: its procedure and the member's parent type are still
+		'' open on the symbol nest stack, ABOVE the instantiation's namespace,
+		'' so hReplayProcBody's symbNestEnd pops the procedure and leaves the
+		'' namespace nested.  Replaying the next body nests that namespace a
+		'' second time, its hash table goes into the nested-hash list twice and
+		'' the list turns into a cycle: every later lookup spins forever, after
+		'' "Too many errors, exiting" was already printed.
+		if( fbShouldContinue( ) = FALSE ) then
+			exit do
+		end if
+
 		dim as FB_GENPENDING ptr p = listGetHead( @genctx2.pending )
 		dim as integer didwork = FALSE
 
