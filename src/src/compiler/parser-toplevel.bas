@@ -220,8 +220,9 @@ sub cProgram()
 		'' hand: nothing open on the compound-statement stack, and not inside a
 		'' procedure body -- this same loop parses those.  Nor inside a lambda
 		'' header replay, whose statement boundaries sit in the middle of the
-		'' user's expression (see FB_LAMBDACTX.inheader).
-		if( (stackGetTOS( @parser.stmt.stk ) = NULL) andalso (lambdaInHeaderReplay( ) = FALSE) ) then
+		'' user's expression (see FB_LAMBDACTX.inheader).  Nor while a broken
+		'' replay is being closed, with messages muted (see hReplayUnwind).
+		if( (stackGetTOS( @parser.stmt.stk ) = NULL) andalso (lambdaInHeaderReplay( ) = FALSE) andalso (genReplayUnwinding( ) = FALSE) ) then
 			genDrainProcBodies( )
 			lambdaDrainBodies( )
 		end if
@@ -238,7 +239,7 @@ sub cProgram()
 
 	'' Last chance: a generic instantiated by the final statement of the module
 	'' still owes its member bodies, and the loop above exited before draining.
-	if( env.includerec = 0 ) then
+	if( (env.includerec = 0) andalso (genReplayUnwinding( ) = FALSE) ) then
 		genDrainProcBodies( )
 		lambdaDrainBodies( )
 	end if

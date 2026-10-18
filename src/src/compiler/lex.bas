@@ -1710,7 +1710,16 @@ private function readId( byref t as FBTOKEN, byval flags as LEXCHECK ) as intege
 		return TRUE
 	end if
 
-	if( t.sym_chain ) then
+	'' Nor while replaying a captured generic or lambda body.  The capture
+	'' already ran the preprocessor over it -- every macro defined at that
+	'' point is expanded in the captured tokens, and the #directives were
+	'' executed there -- so expanding again here would only pick up macros
+	'' defined AFTER the generic (or redefined since), between the declaration
+	'' and the instantiation.  A '#macro TEST( a, b )' placed after a generic
+	'' then broke its method 'Test( byref v as const T )' at every
+	'' instantiation.  The body is bound where it was written, as C++
+	'' templates are.
+	if( (t.sym_chain <> NULL) andalso (lex.ctx->kind <> LEX_TKCTX_CONTEXT_GENERIC) ) then
 		'' define? (defines can't have dups nor be part of namespaces)
 		if( symbGetClass( t.sym_chain->sym ) = FB_SYMBCLASS_DEFINE ) then
 			'' restart..

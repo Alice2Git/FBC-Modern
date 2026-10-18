@@ -1252,6 +1252,7 @@ declare function genReplayBegin _
 	) as integer
 
 declare sub genReplayEnd( byref st as FB_PARSERSTATE )
+declare function genReplayUnwinding( ) as integer
 
 '' The name of a closure struct's call operator. Shared so the call site in
 '' parser-expr-unary.bas can find it.

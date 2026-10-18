@@ -526,6 +526,24 @@ sub errHideFurtherErrors( )
 	errctx.hide_further_messages = TRUE
 end sub
 
+'' Silence (or bring back) every error and warning for a while; returns the
+'' previous state, for the caller to restore.  Silenced messages are not
+'' counted either, so they cannot trip -maxerr.
+function errMute( byval mute as integer ) as integer
+	function = errctx.hide_further_messages
+	errctx.hide_further_messages = mute
+end function
+
+'' Give up on the compile without another message -- what made it impossible
+'' to go on was reported already.  fbShouldContinue( ) is FALSE from here on,
+'' just as after "Too many errors, exiting".
+sub errAbort( )
+	if( errctx.cnt < env.clopt.maxerrors ) then
+		errctx.cnt = env.clopt.maxerrors
+	end if
+	errHideFurtherErrors( )
+end sub
+
 function errGetCount( ) as integer
 	return errctx.cnt
 end function

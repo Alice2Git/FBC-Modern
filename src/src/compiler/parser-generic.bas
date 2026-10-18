@@ -316,7 +316,125 @@ function genReplayBegin _
 	function = TRUE
 end function
 
+'' TRUE while hReplayUnwind is closing what a broken replay left open.
+dim shared as integer genunwinding
+
+function genReplayUnwinding( ) as integer
+	function = genunwinding
+end function
+
+'' The statement that closes the compound statement on top of the stack, or ""
+'' if there is none that can be written as text.
+private function hCloserText( byval stk as FB_CMPSTMTSTK ptr ) as string
+	select case as const stk->id
+	case FB_TK_IF        : function = "end if"
+	case FB_TK_SELECT    : function = "end select"
+	case FB_TK_SCOPE     : function = "end scope"
+	case FB_TK_WITH      : function = "end with"
+	case FB_TK_NAMESPACE : function = "end namespace"
+	case FB_TK_EXTERN    : function = "end extern"
+	case FB_TK_DO        : function = "loop"
+	case FB_TK_WHILE     : function = "wend"
+	case FB_TK_FOR       : function = "next"
+	case FB_TK_FUNCTION
+		select case as const stk->proc.tkn
+		case FB_TK_SUB         : function = "end sub"
+		case FB_TK_FUNCTION    : function = "end function"
+		case FB_TK_CONSTRUCTOR : function = "end constructor"
+		case FB_TK_DESTRUCTOR  : function = "end destructor"
+		case FB_TK_OPERATOR    : function = "end operator"
+		case FB_TK_PROPERTY    : function = "end property"
+		case else              : function = ""
+		end select
+	case else
+		function = ""
+	end select
+end function
+
+'' Close what a replay opened and did not close.
+''
+'' A replayed body that balanced when it was captured can still come out
+'' unbalanced: an error inside it -- 'sub' where a statement was expected,
+'' say, or a macro that expanded into one -- makes the parser drop or misread
+'' the line that would have closed a block, and cProgram( ) runs into the end
+'' of the text with that block, and the procedure around it, still open.  The
+'' error was reported, but the state was not undone: the procedure and the
+'' member's parent type stayed nested ABOVE the instantiation's namespace, so
+'' hReplayProcBody's symbNestEnd popped the procedure and left the namespace
+'' nested.  The next owed body nested it a second time, its hash table went
+'' into the nested-hash list twice, the list became a cycle, and fbc spun
+'' forever after its last message (the -maxerr variant of this is stopped in
+'' genDrainProcBodies).  Without the hang, the open blocks still leaked into
+'' whatever the replay interrupted: "Expected 'END IF'" at the end of the
+'' user's file, or "Illegal inside a NAMESPACE block" in a later lambda.
+''
+'' So the missing terminators are fed to the parser as more replay text, one
+'' at a time, innermost first -- the ordinary END SUB path then ends the
+'' procedure and pops its nests exactly as it would have.  Messages are muted
+'' meanwhile: the real error was already reported, and closing a half-parsed
+'' procedure can only add noise ("Function result was not explicitly set").
+'' Nor are owed bodies drained in between, where their own errors would be
+'' muted too.  If a block cannot be closed this way, or the replay popped more
+'' than it pushed, the compile is abandoned instead: going on from a skewed
+'' stack is what hangs.
+private sub hReplayUnwind( byref st as FB_PARSERSTATE )
+	'' an abandoned compile stops at the next boundary anyway
+	if( fbShouldContinue( ) = FALSE ) then
+		exit sub
+	end if
+
+	if( parser.stmt.stk.tos = st.stmttos ) then
+		exit sub
+	end if
+
+	'' only what the replay pushed itself may be closed
+	dim as TSTACKNODE ptr n = parser.stmt.stk.tos
+	while( (n <> NULL) andalso (n <> st.stmttos) )
+		n = n->prev
+	wend
+	if( n <> st.stmttos ) then
+		errAbort( )
+		exit sub
+	end if
+
+	dim as integer wasmuted = errMute( TRUE )
+	genunwinding += 1
+
+	while( parser.stmt.stk.tos <> st.stmttos )
+		dim as TSTACKNODE ptr before = parser.stmt.stk.tos
+		dim as string text = hCloserText( stackGetTOS( @parser.stmt.stk ) )
+		if( len( text ) = 0 ) then
+			exit while
+		end if
+
+		'' a fresh token ring over the new text, still in the replay's own
+		'' lexer context (and so still with the preprocessor off)
+		dim as integer linenum = lexLineNum( )
+		dim as integer reclevel = lex.ctx->reclevel
+		lexInit( LEX_TKCTX_CONTEXT_GENERIC )
+		lex.ctx->reclevel = reclevel
+		hLoadReplayText( text )
+		lex.ctx->linenum = linenum
+		lex.ctx->replayline = linenum
+
+		cProgram( )
+
+		if( (parser.stmt.stk.tos = before) orelse (fbShouldContinue( ) = FALSE) ) then
+			exit while
+		end if
+	wend
+
+	genunwinding -= 1
+	errMute( wasmuted )
+
+	if( parser.stmt.stk.tos <> st.stmttos ) then
+		errAbort( )
+	end if
+end sub
+
 sub genReplayEnd( byref st as FB_PARSERSTATE )
+	hReplayUnwind( st )
+
 	lex.ctx->reclevel -= 1
 	lexPopCtx( )
 	symbChainpoolPop( )

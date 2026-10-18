@@ -1,0 +1,22 @@
+=== IF, FOR and WHILE left open in a member body ===
+	error 61: Illegal inside functions
+  in instantiation of 'A( of long )'
+  required from generic-replay-unbalanced.bas(N)
+	error 32: Expected 'END IF'
+  in instantiation of 'A( of long )'
+  required from generic-replay-unbalanced.bas(N)
+	error 42: Variable not declared, nosuchvar1
+  in instantiation of 'A( of long )'
+  required from generic-replay-unbalanced.bas(N)
+=== procedure left open in a generic procedure ===
+	error 61: Illegal inside functions
+  in instantiation of 'Twice( of integer )'
+  required from generic-replay-unbalanced.bas(N)
+	error 126: Expected 'END FUNCTION'
+  in instantiation of 'Twice( of integer )'
+  required from generic-replay-unbalanced.bas(N)
+=== later code still compiles, later errors are still reported ===
+	error 42: Variable not declared, nosuchvar2
+	error 42: Variable not declared, nosuchvar3
+=== macro defined after the generic is not expanded in its body ===
+	error 18: Element not defined, nosuchfield

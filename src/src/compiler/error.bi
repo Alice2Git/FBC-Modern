@@ -445,6 +445,8 @@ declare sub errPreInit( )
 declare sub errInit( )
 declare sub errEnd( )
 declare sub errHideFurtherErrors( )
+declare function errMute( byval mute as integer ) as integer
+declare sub errAbort( )
 declare function errGetCount( ) as integer
 
 declare sub errPushParamLocation _
