@@ -253,6 +253,17 @@ Version 1.20.0
   fbc hang after its last message, or report bogus "Expected 'END IF'" errors
   at the end of the file. The blocks the replay left open are now closed, and
   the compile goes on.
+- Lambdas: an error in a capturing lambda's body was reported several lines
+  below the real one (with one capture, a body's first line came out 5 lines
+  on), quoting whatever source line was there; -exx runtime errors named the
+  same wrong lines. Errors in lambdas, capturing or not, inside generic bodies
+  too, now point at their own line.
+- Lambdas: a comment inside a lambda's body was read as code while the body
+  was captured, so an 'end sub' in a comment ended the lambda there and the
+  rest of the body was parsed outside it. Comments are now skipped, as in
+  generic bodies.
+- Generics: a multi-line #macro used in a generic body no longer shifts the
+  line numbers of the errors after it.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
