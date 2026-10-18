@@ -1,0 +1,45 @@
+=== a closure, one capture ===
+lambda-lines.bas(14) error 42: Variable not declared, nothere1 in 'k += nothere1'
+  in instantiation of 'L140F3A7DF321601A_Lt_0002( of long )'
+  required from lambda-lines.bas(15)
+=== a closure, two captures, a continued header, a comment line ===
+lambda-lines.bas(26) error 42: Variable not declared, nothere2 in 'a += x + b + nothere2'
+  in instantiation of 'L140F3A7DF321601A_Lt_0004( of long, long )'
+  required from lambda-lines.bas(27)
+=== a closure, a comment after the header ===
+lambda-lines.bas(35) error 42: Variable not declared, nothere3 in 'k += nothere3'
+  in instantiation of 'L140F3A7DF321601A_Lt_0006( of long )'
+  required from lambda-lines.bas(36)
+=== a one-line closure ===
+lambda-lines.bas(43) error 42: Variable not declared, nothere4 in 'var f = sub[ byref k ]( ) : k += nothere4 : end sub'
+  in instantiation of 'L140F3A7DF321601A_Lt_0008( of long )'
+  required from lambda-lines.bas(43)
+=== a closure header ===
+lambda-lines.bas(51) error 59: Illegal specification, at parameter 1 (x) of __FBINVOKE() in '( byval x as NoSuchType )'
+  in instantiation of 'L140F3A7DF321601A_Lt_000A( of long )'
+  required from lambda-lines.bas(53)
+lambda-lines.bas(51) error 59: Illegal specification, at parameter 1 (x) of __FBINVOKE() in '( byval x as NoSuchType )'
+  in instantiation of 'L140F3A7DF321601A_Lt_000A( of long )'
+  required from lambda-lines.bas(53)
+=== a closure inside a closure ===
+lambda-lines.bas(61) error 42: Variable not declared, nothere5 in 'return k + nothere5'
+  in instantiation of 'L140F3A7DF321601A_Lt_000E( of long )'
+  required from lambda-lines.bas(62)
+=== a lambda without captures ===
+lambda-lines.bas(71) error 42: Variable not declared, nothere6 in 'return x + nothere6'
+=== lambdas inside a generic member body ===
+lambda-lines.bas(86) error 42: Variable not declared, nothere8 in 'return y + nothere8'
+  in instantiation of 'Box( of long )'
+  required from lambda-lines.bas(89)
+lambda-lines.bas(82) error 42: Variable not declared, nothere7 in 'q += nothere7'
+  in instantiation of 'L140F3A7DF321601A_Lt_0012( of long, long )'
+  required from lambda-lines.bas(83)
+=== a closure inside a generic procedure ===
+lambda-lines.bas(95) error 42: Variable not declared, nothere9 in 'return y + a + nothere9'
+  in instantiation of 'L140F3A7DF321601A_Lt_0016( of integer, integer )'
+  required from lambda-lines.bas(96)
+=== a multi-line macro earlier in a generic member body ===
+lambda-lines.bas(112) error 42: Variable not declared, nothere10 in 'print nothere10'
+  in instantiation of 'Twice( of long )'
+  required from lambda-lines.bas(114)
+=== done ===

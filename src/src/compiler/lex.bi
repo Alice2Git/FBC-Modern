@@ -94,6 +94,11 @@ end enum
 '' on top of a live file being parsed, so both inherit its position state.
 #define lexCtxIsInMemory( k ) (((k) = LEX_TKCTX_CONTEXT_EVAL) orelse ((k) = LEX_TKCTX_CONTEXT_GENERIC))
 
+'' Line mark in replay text: LEX_LINEMARK + decimal line + LEX_LINEMARK.  Only a
+'' LEX_TKCTX_CONTEXT_GENERIC lexer reads it, as white space that sets the line
+'' of what follows -- see genLineMark( ).
+const LEX_LINEMARK = 1
+
 type LEX_TKCTX
 	tokenTB(0 to FB_LEX_MAXK) as FBTOKEN
 	k               as integer                  '' look ahead cnt (1..MAXK)

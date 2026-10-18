@@ -57,6 +57,12 @@ dim shared as string pponly_ln
 ''
 '' An LF inside a macro expanded within the body is counted too; a multi-line
 '' #macro used in a generic body therefore shifts the lines after it.
+''
+'' Text the compiler writes around a body (a lambda's header and capture
+'' aliases, a closure's struct) has no source lines of its own.  Where it would
+'' push the body off its lines, the replay text carries a line mark
+'' (genLineMark), which sets replayline outright; the LFs after it count on from
+'' there.
 
 function lexLineNum( ) as integer
 	if( lex.ctx->kind = LEX_TKCTX_CONTEXT_GENERIC ) then
@@ -1853,6 +1859,29 @@ re_read:
 			end if
 
 			lexEatChar( )
+
+		'' a line mark?  only replay text has them (see genLineMark)
+		case LEX_LINEMARK
+			if( lex.ctx->kind <> LEX_TKCTX_CONTEXT_GENERIC ) then
+				if( islinecont = FALSE ) then
+					exit do
+				end if
+				lexEatChar( )
+				continue do
+			end if
+
+			lexEatChar( )
+			dim as integer markline = 0
+			while( (lexCurrentChar( ) >= CHAR_0) andalso (lexCurrentChar( ) <= CHAR_9) )
+				markline = markline * 10 + (lexCurrentChar( ) - CHAR_0)
+				lexEatChar( )
+			wend
+			if( lexCurrentChar( ) = LEX_LINEMARK ) then
+				lexEatChar( )
+			end if
+
+			lex.ctx->replayline = markline
+			t->linenum = markline
 
 		''
 		case else

@@ -316,6 +316,20 @@ private function hCaptureLambdaBody( byval lam as FB_LAMBDA ptr ) as integer
 			errReport( FB_ERRMSG_UNBALANCEDLAMBDABODY )
 			return FALSE
 
+		'' comments are not part of the body, as in the generic capture: an
+		'' 'end sub' inside one must not end it, and the replay text puts the
+		'' body's first line after a ':' when it starts on the header's line,
+		'' where a comment would swallow the rest
+		case FB_TK_COMMENT, FB_TK_REM
+			do
+				lexSkipToken( LAMTOK_FLAGS )
+				select case lexGetToken( LAMTOK_FLAGS )
+				case FB_TK_EOL, FB_TK_EOF
+					exit do
+				end select
+			loop
+			continue do
+
 		'' 'exit sub' / 'exit function' name the kind without opening one, so
 		'' both tokens are recorded together and the second is never examined
 		case FB_TK_EXIT
@@ -395,6 +409,76 @@ private function hKeyword( byval kindtk as integer ) as string
 	function = "function"
 end function
 
+'' Source lines in the replay texts below.
+''
+'' A replay counts lines from the LFs in its text (see lexLineNum), and the text
+'' around a lambda's tokens is the compiler's own: the procedure's name, the
+'' closure struct, the capture aliases.  Every LF of that used to push the body
+'' down -- with one capture, an error on the lambda's second line was reported
+'' five lines further on.  So the header line starts with a line mark of the
+'' header's first line, the capture aliases share the header's last line, and
+'' the body starts from a line mark of its own first line.
+
+'' The header's line mark, at the start of the line the header is pasted into.
+private function hHeaderLineMark( byval lam as FB_LAMBDA ptr ) as string
+	function = genLineMark( lam->hdrhead->linenum )
+end function
+
+'' One BYREF alias per capture, appended to the header line with ':' -- they
+'' have no source line of their own, and an error in one is the capture's,
+'' which the header line shows.
+private function hCaptureAliases( byval lam as FB_LAMBDA ptr ) as string
+	dim as string res
+
+	for i as integer = 0 to lam->capcount-1
+		with lam->caps( i )
+			if( .isref ) then
+				res += " : dim byref as typeof( *this." + .fld + " ) " + _
+				       .id + " = *this." + .fld
+			else
+				res += " : dim byref as typeof( this." + .fld + " ) " + _
+				       .id + " = this." + .fld
+			end if
+		end with
+	next
+
+	function = res
+end function
+
+'' The body and the terminator, to follow the header line.  A body that starts
+'' on the header's own line ('sub( ) : n += 1 : end sub') stays on it.
+private function hBodyText( byval lam as FB_LAMBDA ptr ) as string
+	dim as string kw = hKeyword( lam->kindtk )
+	dim as integer firstline = any
+	dim as string body = genFlattenTokens( lam->tokhead, firstline )
+	dim as string res
+
+	if( lam->tokhead = NULL ) then
+		return LFCHAR + "end " + kw
+	end if
+
+	if( firstline <= lam->hdrtail->linenum ) then
+		'' the header line's own EOL (after a comment) needs no ':'
+		if( *lam->tokhead->text = LFCHAR ) then
+			res = " " + body
+		else
+			res = " : " + body
+		end if
+	else
+		res = LFCHAR + genLineMark( firstline ) + body
+	end if
+
+	'' the terminator on a line of its own, even after a one-line body: an error
+	'' skips the rest of its line, and must not skip the terminator with it
+	if( *lam->toktail->text = LFCHAR ) then
+		res += "end " + kw
+	else
+		res += LFCHAR + "end " + kw
+	end if
+
+	function = res
+end function
+
 '' Replay one lambda's body at module level. Called at a statement boundary,
 '' where a procedure could legitimately have been written by hand.
 private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
@@ -422,27 +506,14 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 		''
 		'' typeof( ) avoids needing the captured type as text a second time, and
 		'' works for UDTs, strings and containers alike -- measured.
-		text = kw + " " + *symbGetName( lam->clo ) + "." + FB_INVOKE_NAME + " " + _
-		       genFlattenTokens( lam->hdrhead, firstline ) + LFCHAR
-
-		for i as integer = 0 to lam->capcount-1
-			with lam->caps( i )
-				if( .isref ) then
-					text += "dim byref as typeof( *this." + .fld + " ) " + _
-					        .id + " = *this." + .fld + LFCHAR
-				else
-					text += "dim byref as typeof( this." + .fld + " ) " + _
-					        .id + " = this." + .fld + LFCHAR
-				end if
-			end with
-		next
-
-		text += genFlattenTokens( lam->tokhead, firstline ) + LFCHAR + "end " + kw
+		text = hHeaderLineMark( lam ) + _
+		       kw + " " + *symbGetName( lam->clo ) + "." + FB_INVOKE_NAME + " " + _
+		       genFlattenTokens( lam->hdrhead, firstline ) + _
+		       hCaptureAliases( lam ) + hBodyText( lam )
 	else
-		text = kw + " " + *symbGetName( lam->sym ) + " " + _
-		       genFlattenTokens( lam->hdrhead, firstline ) + LFCHAR + _
-		       genFlattenTokens( lam->tokhead, firstline ) + LFCHAR + _
-		       "end " + kw
+		text = hHeaderLineMark( lam ) + _
+		       kw + " " + *symbGetName( lam->sym ) + " " + _
+		       genFlattenTokens( lam->hdrhead, firstline ) + hBodyText( lam )
 	end if
 
 
@@ -722,8 +793,7 @@ private function hBuildClosure _
 	( _
 		byval lam as FB_LAMBDA ptr, _
 		byref cloid as zstring, _
-		byref hdr as string, _
-		byref body as string _
+		byref hdr as string _
 	) as integer
 
 	dim as FB_PARSERSTATE st
@@ -805,30 +875,22 @@ private function hBuildClosure _
 		end with
 	next
 
-	text += "declare " + kw + " " + FB_INVOKE_NAME + " " + hdr + LFCHAR
+	'' the header's own line, for an error in it (the struct's other lines have
+	'' none in the source; they are never wrong)
+	text += hHeaderLineMark( lam ) + "declare " + kw + " " + FB_INVOKE_NAME + " " + hdr + LFCHAR
 	text += "end type" + LFCHAR
 
 	'' The member body goes in the SAME replay, as an out-of-line body of the
 	'' generic. The generics machinery then owns it -- captured with the
 	'' generic, replayed once per instantiation -- so lambdas no longer queue
-	'' capturing bodies on their own pending list at all.
-	text += kw + " " + cloid + "( of " + params + " )." + FB_INVOKE_NAME + " " + hdr + LFCHAR
-
+	'' capturing bodies on their own pending list at all.  The capture keeps the
+	'' lines the marks below give it, and genFlattenTokens( ) puts them back.
+	''
 	'' One BYREF alias per capture, so the body is replayed unchanged and
 	'' FreeBASIC's own scoping decides what a colliding local means.
-	for i as integer = 0 to lam->capcount-1
-		with lam->caps( i )
-			if( .isref ) then
-				text += "dim byref as typeof( *this." + .fld + " ) " + _
-				        .id + " = *this." + .fld + LFCHAR
-			else
-				text += "dim byref as typeof( this." + .fld + " ) " + _
-				        .id + " = this." + .fld + LFCHAR
-			end if
-		end with
-	next
-
-	text += body + LFCHAR + "end " + kw
+	text += hHeaderLineMark( lam ) + _
+	        kw + " " + cloid + "( of " + params + " )." + FB_INVOKE_NAME + " " + hdr + _
+	        hCaptureAliases( lam ) + hBodyText( lam )
 
 	genEnterGlobalScope( gs, NULL, TRUE )
 
@@ -971,9 +1033,8 @@ function cLambdaExpr( ) as ASTNODE ptr
 		end if
 
 		dim as string hdr = genFlattenTokens( lam->hdrhead, firstline )
-		dim as string bdy = genFlattenTokens( lam->tokhead, firstline )
 
-		if( hBuildClosure( lam, id, hdr, bdy ) = FALSE ) then
+		if( hBuildClosure( lam, id, hdr ) = FALSE ) then
 			return NULL
 		end if
 
@@ -1050,7 +1111,8 @@ function cLambdaExpr( ) as ASTNODE ptr
 	'' Replay the HEADER now, as a declaration, so this expression has a real
 	'' FBSYMBOL to take the address of. The body cannot be parsed here -- there
 	'' is already a procedure open -- so only the prototype is created.
-	text = "declare " + kw + " " + id + " " + genFlattenTokens( lam->hdrhead, firstline )
+	text = hHeaderLineMark( lam ) + "declare " + kw + " " + id + " " + _
+	       genFlattenTokens( lam->hdrhead, firstline )
 
 	'' hidelocals = TRUE: a DECLARATION replay creates no locals of its own, and
 	'' the call site's locals must not be visible to it.

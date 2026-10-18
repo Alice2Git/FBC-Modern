@@ -1272,6 +1272,7 @@ declare function genFlattenTokens _
 		byval tokhead as FB_GENTOK ptr, _
 		byref firstline as integer _
 	) as string
+declare function genLineMark( byval linenum as integer ) as string
 
 '' One out-of-line member body belonging to a generic, e.g.
 ''     sub Stack( of T ).Push( byval x as T ) ... end sub

@@ -1094,6 +1094,13 @@ end function
 '' token is a continuation, and is padded with '_' so it stays one statement --
 '' padding it with a bare newline is what used to split a parameter list written
 '' in the house style across lines, and the error surfaced only at instantiation.
+''
+'' A token whose line number is BEHIND the emitted text cannot be padded to.
+'' That happens when the chain was captured from replay text the compiler wrote
+'' itself -- a closure's member body, whose capture aliases sit on the header's
+'' line and whose body was moved back onto its own lines by a line mark -- or
+'' after an LF that a multi-line macro put into the chain.  The token is then
+'' preceded by a line mark of its own line (genLineMark).
 function genFlattenTokens _
 	( _
 		byval tokhead as FB_GENTOK ptr, _
@@ -1114,6 +1121,11 @@ function genFlattenTokens _
 	curline = n->linenum
 
 	while( n )
+		if( n->linenum < curline ) then
+			res += genLineMark( n->linenum )
+			curline = n->linenum
+		end if
+
 		while( curline < n->linenum )
 			if( preveol = FALSE ) then
 				res += "_"
@@ -1137,4 +1149,12 @@ function genFlattenTokens _
 	wend
 
 	function = res
+end function
+
+'' A line mark for replay text: what follows it is on source line 'linenum',
+'' and the LFs after it count on from there (see lexNextToken).  It reads as
+'' white space, so it goes wherever a space could -- but never inside a token,
+'' and never right after one that the lexer could extend with what follows.
+function genLineMark( byval linenum as integer ) as string
+	function = chr( LEX_LINEMARK ) + str( linenum ) + chr( LEX_LINEMARK )
 end function
