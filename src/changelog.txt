@@ -242,6 +242,17 @@ Version 1.20.0
   SINGLE (e.g. a 'byref as const double' parameter) compiled as a single ->
   double conversion and gave 0 or garbage. A change of CONST bits only is now
   a retype, with no conversion emitted.
+- Generics: a macro defined AFTER a generic was expanded in the generic's body
+  at each instantiation -- '#macro TEST( a, b )' broke a method named Test
+  ("Argument count mismatch, expanding: TEST"). The body was already
+  preprocessed where it was written, and is no longer expanded a second time
+  when it is replayed: it sees the macros of its declaration, as C++ templates
+  do. Lambda bodies likewise.
+- Generics: an error that left a replayed generic body unbalanced (e.g. 'sub'
+  inside a member body, which hides the END IF / WEND / END SUB after it) made
+  fbc hang after its last message, or report bogus "Expected 'END IF'" errors
+  at the end of the file. The blocks the replay left open are now closed, and
+  the compile goes on.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
