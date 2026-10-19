@@ -264,6 +264,13 @@ Version 1.20.0
   generic bodies.
 - Generics: a multi-line #macro used in a generic body no longer shifts the
   line numbers of the errors after it.
+- USTRING: a CONST STRING, ZSTRING, STRING * N or USTRING * N -- a field of a
+  'byref as const' UDT, a CONST local -- passed to a 'byref as const ustring'
+  parameter failed with 'error 181: Invalid assignment/conversion, at
+  parameter 1', reported on the procedure's END SUB/END FUNCTION line instead
+  of the call. The argument goes through a temp ustring, which was copied back
+  after the call even though the parameter is CONST, and that copy-back into a
+  CONST argument is what failed. A CONST parameter no longer copies back.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
