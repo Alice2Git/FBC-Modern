@@ -648,7 +648,15 @@ private function hCheckUStrParam _
 	'' argument with a CALL, and testing astIsCALL() afterwards would always
 	'' say "function result, nothing to write back to" and silently disable
 	'' copy-back for every converted argument.
-	if( symbGetParamMode( param ) = FB_PARAMMODE_BYREF ) then
+	''
+	'' A BYREF AS CONST USTRING parameter gets no copy-back: the callee cannot
+	'' change the temp, so there is nothing to write back. Writing back was not
+	'' just wasted work: for a CONST argument (a field of a BYREF AS CONST UDT,
+	'' a CONST local) the write-back assignment, built only when the procedure
+	'' is emitted, failed the CONST check and reported error 181 on the
+	'' procedure's END SUB/END FUNCTION line.
+	if( (symbGetParamMode( param ) = FB_PARAMMODE_BYREF) and _
+	    (typeIsConst( symbGetFullType( param ) ) = FALSE) ) then
 		'' Only the VAR-LEN form is excluded, because only it is passed as-is
 		'' below and so needs no write-back. A USTRING * N goes through a temp
 		'' like any other converted argument and must be copied back -- testing
