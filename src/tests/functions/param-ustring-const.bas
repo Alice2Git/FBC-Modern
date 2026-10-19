@@ -36,7 +36,7 @@ end sub
 type T
 	as string txt
 	as zstring * 8 z
-	as string * 7 f    '' not * 8: see the note at the end
+	as string * 8 f
 	as wstring * 8 w
 	as ustring * 8 uf
 end type
@@ -45,7 +45,7 @@ end type
 sub FromConstUdt( byref c as const T )
 	UseU( c.txt ) : assert_( seen = "txt" )
 	UseU( c.z )   : assert_( seen = "zst" )
-	UseU( c.f )   : assert_( seen = "fix    " )
+	UseU( c.f )   : assert_( seen = "fix     " )
 	UseU( c.w )   : assert_( seen = "wst" )
 	UseU( c.uf )  : assert_( seen = "ufx" )
 end sub
@@ -70,7 +70,7 @@ x.uf = "ufx"
 FromConstUdt( x )
 assert_( x.txt = "txt" )
 assert_( x.z = "zst" )
-assert_( x.f = "fix    " )
+assert_( x.f = "fix     " )
 assert_( x.w = "wst" )
 assert_( x.uf = "ufx" )
 
@@ -92,8 +92,4 @@ end scope
 x.txt = "low"
 x.f = "fix"
 UseUMut( x.txt ) : assert_( x.txt = "LOW" )
-UseUMut( x.f )   : assert_( x.f = "FIX    " )
-
-'' The field is STRING * 7 rather than * 8 because of a separate gas64 bug: a
-'' STRING * 8 next to a STRING (field or variable) makes the program crash or
-'' lose the STRING's value there, with or without USTRING involved.
+UseUMut( x.f )   : assert_( x.f = "FIX     " )

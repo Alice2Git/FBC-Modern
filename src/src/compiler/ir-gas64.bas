@@ -7690,13 +7690,15 @@ private sub _emitmem(byval op as integer,byval v1 as IRVREG ptr,byval v2 as IRVR
 						dim as ulongint fill4 = (fillchar and 255)
 						fill4 or= fill4 shl 8
 						fill4 or= fill4 shl 16
+						''two stores through the same register: no optimization, otherwise
+						''the lea is merged into the first store and the second one uses a stale register
 						if v1->typ=IR_VREGTYPE_REG then
-							asm_code("mov DWORD PTR ["+op1+"], " + str(fill4))
-							asm_code("mov DWORD PTR 4["+op1+"], " + str(fill4))
+							asm_code("mov DWORD PTR ["+op1+"], " + str(fill4),KNOOPTIM)
+							asm_code("mov DWORD PTR 4["+op1+"], " + str(fill4),KNOOPTIM)
 						else
 							asm_code(instruc+"rax, "+op1)
-							asm_code("mov DWORD PTR [rax], " + str(fill4))
-							asm_code("mov DWORD PTR 4[rax], " + str(fill4))
+							asm_code("mov DWORD PTR [rax], " + str(fill4),KNOOPTIM)
+							asm_code("mov DWORD PTR 4[rax], " + str(fill4),KNOOPTIM)
 						end if
 					end if
 			end select
