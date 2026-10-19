@@ -271,6 +271,12 @@ Version 1.20.0
   of the call. The argument goes through a temp ustring, which was copied back
   after the call even though the parameter is CONST, and that copy-back into a
   CONST argument is what failed. A CONST parameter no longer copies back.
+- -gen gas64: a STRING * 8 (a variable or a UDT field) declared next to
+  another variable could overwrite it while being filled with spaces: a STRING
+  before it crashed the program or lost its value. The two 4-byte stores of
+  the fill went through one register, and the peephole optimizer folded the
+  register's LEA into the first store, so the second store used a stale
+  address. Only the size 8 took this path.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
