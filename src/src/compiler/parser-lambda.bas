@@ -118,6 +118,7 @@ private function hAddTok _
 	n->text = ZstrAllocate( len( *text ) )
 	*n->text = *text
 	n->linenum = linenum
+	n->glued = (lexGetAfterSpace( ) = FALSE)
 	n->prev = tail
 	n->next = NULL
 

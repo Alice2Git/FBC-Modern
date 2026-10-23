@@ -825,6 +825,7 @@ type FB_GENTOK
 		textw       as wstring ptr
 	end union
 	linenum         as integer
+	glued           as integer                  '' written right against the token before it (see genFlattenTokens)
 	prev            as FB_GENTOK ptr
 	next            as FB_GENTOK ptr
 end type

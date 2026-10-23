@@ -1882,6 +1882,7 @@ re_read:
 
 			lex.ctx->replayline = markline
 			t->linenum = markline
+			t->after_space = TRUE
 
 		''
 		case else

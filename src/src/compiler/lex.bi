@@ -320,6 +320,8 @@ declare function hMatch _
 
 #define lexGetLiteralHasSuffix( ) lex.ctx->head->hassuffix
 
+#define lexGetAfterSpace( ) lex.ctx->head->after_space
+
 #define lexGetHead( ) lex.ctx->head
 
 #define lexCurrLineGet( ) lex.ctx->currline.data

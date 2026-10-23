@@ -93,6 +93,7 @@ private function hAddTokTo _
 	n->text = ZstrAllocate( len( *text ) )
 	*n->text = *text
 	n->linenum = linenum
+	n->glued = (lexGetAfterSpace( ) = FALSE)
 	n->next = NULL
 	n->prev = tail
 
@@ -1039,8 +1040,10 @@ function cGenericOpDecl( byval tk as integer ) as integer
 	d->srcline = startline
 	d->op = op
 
-	'' the operator token leads the header, standing in for the name
-	hAddTokTo( d->hdrhead, d->hdrtail, strptr( optext ), startline )
+	'' the operator token leads the header, standing in for the name (it was
+	'' read long ago, so the lexer's spacing is not its own)
+	dim as FB_GENTOK ptr optok = hAddTokTo( d->hdrhead, d->hdrtail, strptr( optext ), startline )
+	optok->glued = FALSE
 
 	hCaptureProcHeader( d )
 
@@ -1078,7 +1081,13 @@ end function
 '' Flatten a captured chain back into source text.
 ''
 '' Tokens are separated by a single space, which is always safe because they
-'' were produced by the lexer in the first place.
+'' were produced by the lexer in the first place -- except between two tokens
+'' written right against each other (FB_GENTOK.glued), which stay that way.
+'' The capture lexes with LEXCHECK_NOSUFFIX, so a suffix is a token of its own:
+'' '&hFFFFFFFFul' is '&hFFFFFFFF' 'ul', 'chr$' is 'chr' '$'.  A space between
+'' them made the replay read 'ul' as an identifier ("Expected ')', found
+'' 'ul'"), and '$' as an operator.  Keeping the source's spacing makes the
+'' replay lex as the source did, suffixes and all.
 ''
 '' Line structure comes from two sources that must be reconciled, or the replayed
 '' text drifts out of step with the source it is blamed on:
@@ -1135,7 +1144,6 @@ function genFlattenTokens _
 		wend
 
 		res += *n->text
-		res += " "
 
 		'' only an EOL token carries a bare newline as its text
 		if( *n->text = LFCHAR ) then
@@ -1143,6 +1151,16 @@ function genFlattenTokens _
 			preveol = TRUE
 		else
 			preveol = FALSE
+		end if
+
+		'' no space before a glued token -- unless a line mark or padding
+		'' has to go between them
+		dim as integer glue = FALSE
+		if( n->next ) then
+			glue = n->next->glued andalso (n->next->linenum = curline)
+		end if
+		if( glue = FALSE ) then
+			res += " "
 		end if
 
 		n = n->next
