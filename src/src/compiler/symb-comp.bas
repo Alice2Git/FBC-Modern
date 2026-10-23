@@ -726,6 +726,21 @@ sub symbUdtDeclareDefaultMembers _
 			'' because there is no way to explicitly define the deleting dtor
 			assert( udt->udt.ext->dtor0 = NULL )
 
+			'' Virtual if the base's is.  It overrides the base's dtor either
+			'' way, but only a VIRTUAL one can be overridden in turn: a type
+			'' derived from this one would otherwise get a dtor of its own that
+			'' the vtable never calls, and DELETE through a base pointer would
+			'' skip the derived fields.
+			dim as FB_PROCATTRIB virtattrib = FB_PROCATTRIB_NONE
+			if( udt->udt.base ) then
+				dim as FBSYMBOL ptr basedtor = symbGetCompDtor1( udt->udt.base->subtype )
+				if( basedtor ) then
+					if( symbIsVirtual( basedtor ) ) then
+						virtattrib = FB_PROCATTRIB_VIRTUAL
+					end if
+				end if
+			end if
+
 			'' Complete dtor
 			default.dtor1 = hDeclareProc _
 				( _
@@ -733,7 +748,7 @@ sub symbUdtDeclareDefaultMembers _
 					INVALID, _
 					FB_DATATYPE_INVALID, _
 					FB_SYMBATTRIB_INTERNAL, _
-					FB_PROCATTRIB_DESTRUCTOR1, _
+					FB_PROCATTRIB_DESTRUCTOR1 or virtattrib, _
 					mode _
 				)
 
@@ -746,7 +761,7 @@ sub symbUdtDeclareDefaultMembers _
 						INVALID, _
 						FB_DATATYPE_INVALID, _
 						FB_SYMBATTRIB_INTERNAL, _
-						FB_PROCATTRIB_DESTRUCTOR0, _
+						FB_PROCATTRIB_DESTRUCTOR0 or virtattrib, _
 						mode _
 					)
 			end if

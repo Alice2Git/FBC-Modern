@@ -704,6 +704,77 @@ SUITE( fbc_tests.virtual_.virtual_ )
 		END_TEST
 	END_TEST_GROUP
 
+	'' an implicit dtor overriding a virtual one is virtual itself, so the
+	'' dtors of types derived from it override it in turn
+	TEST_GROUP( implicitDtorOverriddenInTurn )
+		dim shared as integer callsA, callsFB, callsD
+
+		type A extends object
+			declare virtual destructor( )
+		end type
+
+		destructor A( )
+			callsA += 1
+		end destructor
+
+		type FB
+			dummy as integer
+			declare destructor( )
+		end type
+
+		destructor FB( )
+			callsFB += 1
+		end destructor
+
+		'' no dtor of its own and no fields with one: the implicit dtor
+		'' only calls A's
+		type B extends A
+			i as integer
+		end type
+
+		'' implicit dtor, for the field
+		type C extends B
+			f as FB
+		end type
+
+		'' explicit dtor, not declared VIRTUAL
+		type D extends B
+			declare destructor( )
+		end type
+
+		destructor D( )
+			callsD += 1
+		end destructor
+
+		'' two levels down from the implicit one
+		type E extends C
+			f2 as FB
+		end type
+
+		TEST( default )
+			#macro check( stmt, a, fb, d )
+				callsA = 0
+				callsFB = 0
+				callsD = 0
+				scope
+					stmt
+				end scope
+				CU_ASSERT_EQUAL( callsA, a )
+				CU_ASSERT_EQUAL( callsFB, fb )
+				CU_ASSERT_EQUAL( callsD, d )
+			#endmacro
+
+			check( dim p as A ptr = new C : delete p, 1, 1, 0 )
+			check( dim p as B ptr = new C : delete p, 1, 1, 0 )
+			check( dim p as A ptr = new D : delete p, 1, 0, 1 )
+			check( dim p as B ptr = new D : delete p, 1, 0, 1 )
+			check( dim p as A ptr = new E : delete p, 1, 2, 0 )
+			check( dim p as B ptr = new E : delete p, 1, 2, 0 )
+			check( dim p as C ptr = new E : delete p, 1, 2, 0 )
+			check( dim x as E, 1, 2, 0 )
+		END_TEST
+	END_TEST_GROUP
+
 	'' virtuals reuse vtable slots #1
 	TEST_GROUP( vtableSlotsReused1 )
 		'' For both ABSTRACTs and VIRTUALs, the overrides should use the same
