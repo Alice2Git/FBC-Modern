@@ -277,6 +277,30 @@ Version 1.20.0
   the fill went through one register, and the peephole optimizer folded the
   register's LEA into the first store, so the second store used a stale
   address. Only the size 8 took this path.
+- Generics, lambdas: a literal with a suffix in a generic or lambda body
+  ('&hFFFFFFFFul', '123ul', '1.5f', '42&', 'chr$( 65 )') failed with 'error
+  7: Expected ')', found 'ul'' at every instantiation. The body is captured
+  with the suffix as a token of its own, and the replay text put a space
+  before it. Tokens written right against each other in the source now stay
+  that way in the replay.
+- A DELETE through a base pointer skipped the destructors of the derived
+  fields -- and an explicit destructor of the derived type -- when a type in
+  between had no destructor of its own: its implicit destructor overrode the
+  base's virtual one without being VIRTUAL itself, so the destructors below it
+  never got into the vtable. An implicit destructor is now VIRTUAL when the
+  base's is. Explicitly declared overrides are unchanged (not implicitly
+  VIRTUAL, as before).
+- Lambdas: a capturing lambda held in a field could not be called with
+  'this.fn( )', 'x.fn( )', 'p->fn( )' or '.fn( )' inside WITH ('error 10:
+  Expected '='' as a statement); only '( this.fn )( )' worked. Calls after a
+  member access now go to the closure's invoke, as calls through a variable
+  do.
+- Generics: inferring R from a parameter 'byval fn as function( ) as R' bound
+  R to the whole procedure pointer type of the argument; the call compiled
+  with two warnings and returned garbage. R now binds to the argument's
+  result type ('function( ) as R ptr', 'byref as R' and calling conventions
+  included); the procedure type's own parameters bind nothing, and a
+  capturing lambda (not a procedure pointer) is refused with error 340.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
