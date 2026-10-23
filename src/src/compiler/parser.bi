@@ -750,6 +750,14 @@ declare function cCtorCall _
 		byval sym as FBSYMBOL ptr _
 	) as ASTNODE ptr
 
+declare function cClosureInvoke( byval clo as FBSYMBOL ptr ) as FBSYMBOL ptr
+
+declare function cClosureCall _
+	( _
+		byval inv as FBSYMBOL ptr, _
+		byval expr as ASTNODE ptr _
+	) as ASTNODE ptr
+
 declare function cUdtMember _
 	( _
 		byval dtype as integer, _

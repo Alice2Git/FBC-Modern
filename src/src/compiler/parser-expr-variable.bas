@@ -222,6 +222,39 @@ private function hFieldAccess _
 	function = varexpr
 end function
 
+'' A capturing lambda's value is a closure STRUCT, and calling it means calling
+'' its __FBINVOKE, so both lambda kinds are called the same way from source.
+'' The invoke of 'clo', or NULL if it is not a closure.
+function cClosureInvoke( byval clo as FBSYMBOL ptr ) as FBSYMBOL ptr
+	if( clo = NULL ) then
+		return NULL
+	end if
+	if( symbIsClosure( clo ) = FALSE ) then
+		return NULL
+	end if
+
+	function = symbLookupByNameAndClass( clo, FB_INVOKE_NAME, FB_SYMBCLASS_PROC, FALSE )
+end function
+
+'' Call a closure: 'expr' is the closure object, 'inv' its cClosureInvoke( ),
+'' and the current token is the '('.  NULL for a SUB, as from cProcCall( ).
+''
+'' Dispatched on the invoke's KIND. cFunctionCall( ) returns NULL for a SUB, so
+'' a bare 'f( 3 )' statement fell through to 'error 17: Syntax error';
+'' cProcCall( ) yields no value for a FUNCTION even with FB_PARSEROPT_ISFUNC,
+'' so 'print f( 5 )' printed nothing. Each kind needs its own entry point.
+function cClosureCall _
+	( _
+		byval inv as FBSYMBOL ptr, _
+		byval expr as ASTNODE ptr _
+	) as ASTNODE ptr
+
+	if( symbGetType( inv ) = FB_DATATYPE_VOID ) then
+		return cProcCall( NULL, inv, NULL, expr, TRUE, 0 )
+	end if
+	function = cFunctionCall( NULL, inv, NULL, expr, 0 )
+end function
+
 '':::::
 '' MemberId       =   ID ArrayIdx?
 ''
@@ -358,6 +391,18 @@ function cUdtMember _
 			end if
 
 			varexpr = hFieldAccess( varexpr, fld, dtype, subtype, check_array )
+
+			'' a capturing lambda kept in a field, called: 'this.fn( )'.
+			'' Without this the '(' was left after the field, and a statement
+			'' 'this.fn( )' reported "error 10: Expected '='".
+			if( (typeGetDtAndPtrOnly( dtype ) = FB_DATATYPE_STRUCT) andalso _
+			    (lexGetToken( ) = CHAR_LPRNT) andalso _
+			    (astIsNIDXARRAY( varexpr ) = FALSE) ) then
+				dim as FBSYMBOL ptr inv = cClosureInvoke( subtype )
+				if( inv ) then
+					return cClosureCall( inv, varexpr )
+				end if
+			end if
 
 			'' Only continue if the field was an UDT and there's a '.' following
 			if( (typeGetDtAndPtrOnly( dtype ) <> FB_DATATYPE_STRUCT) or _
@@ -1214,18 +1259,9 @@ function cVariableEx overload _
 	'' directly without ever calling cStrIdxOrMemberDeref( ), so a hook there is
 	'' unreachable for the one spelling that matters.
 	if( isclosurecall ) then
-		dim as FBSYMBOL ptr inv = symbLookupByNameAndClass( symbGetSubtype( sym ), _
-		                          FB_INVOKE_NAME, FB_SYMBCLASS_PROC, FALSE )
-		if( inv <> NULL ) then
-			'' Dispatched on the invoke's KIND. cFunctionCall( ) returns NULL
-			'' for a SUB, so a bare 'f( 3 )' statement fell through to
-			'' 'error 17: Syntax error'; cProcCall( ) yields no value for a
-			'' FUNCTION even with FB_PARSEROPT_ISFUNC, so 'print f( 5 )' printed
-			'' nothing. Each kind needs its own entry point.
-			if( symbGetType( inv ) = FB_DATATYPE_VOID ) then
-				return cProcCall( NULL, inv, NULL, varexpr, TRUE, 0 )
-			end if
-			return cFunctionCall( NULL, inv, NULL, varexpr, 0 )
+		dim as FBSYMBOL ptr inv = cClosureInvoke( symbGetSubtype( sym ) )
+		if( inv ) then
+			return cClosureCall( inv, varexpr )
 		end if
 	end if
 

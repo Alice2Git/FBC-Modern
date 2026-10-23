@@ -174,17 +174,9 @@ function cStrIdxOrMemberDeref _
 		'' kinds are called the same way from source: a non-capturing lambda is
 		'' a plain procptr and already worked.
 		case CHAR_LPRNT
-			if( symbIsClosure( subtype ) ) then
-				dim as FBSYMBOL ptr inv = symbLookupByNameAndClass( subtype, _
-				                          FB_INVOKE_NAME, FB_SYMBCLASS_PROC, FALSE )
-				if( inv <> NULL ) then
-					'' cProcCall( ) handles a SUB as well as a FUNCTION;
-					'' ISFUNC only when there is a result to keep
-					if( symbGetType( inv ) = FB_DATATYPE_VOID ) then
-						return cProcCall( NULL, inv, NULL, expr, TRUE, 0 )
-					end if
-					return cFunctionCall( NULL, inv, NULL, expr, 0 )
-				end if
+			dim as FBSYMBOL ptr inv = cClosureInvoke( subtype )
+			if( inv ) then
+				return cClosureCall( inv, expr )
 			end if
 		end select
 
