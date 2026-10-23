@@ -1640,6 +1640,11 @@ type FB_GENPARAMPAT
 	ptrlevels       as integer                  '' 'T ptr ptr' -> 2
 	matched         as integer                  '' pattern understood at all?
 
+	'' A procedure pointer type, 'sub|function( ... ) ...' (see hScanProcType).
+	'' paramidx/ptrlevels then describe the FUNCTION's result, and the
+	'' argument's result type is what binds.
+	isproc          as integer
+
 	'' A nested position, 'G( of T )'.  Needed by generic global operators,
 	'' whose parameters are almost always of that shape -- there is no way to
 	'' write explicit type arguments at an operator's use site, so a nested
@@ -1747,6 +1752,104 @@ private function hScanNested _
 	function = w
 end function
 
+'' 'sub|function [callconv] ( ... ) [as [byref] [const] R]' at the current
+'' header token -- a parameter whose type is a procedure pointer.
+''
+'' Without this the scan below took the type after the LAST 'as' at depth 1,
+'' which for 'byval fn as function( ) as R' is the result: R was bound to the
+'' whole procptr type of the argument, 'function( ) as string', and the
+'' instantiation compiled with two warnings and returned garbage.
+''
+'' Only the result is modelled: 'function( ... ) as R' binds R to the result
+'' type of the argument.  The parameter list is skipped; a type parameter used
+'' only there binds nothing, and inference asks for explicit type arguments.
+'' Returns the last token taken (the result's type name, or the ')' of the
+'' parameter list); the caller carries on after it, so a 'ptr' after the
+'' result counts towards ptrlevels.
+private function hScanProcType _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byval n as FB_GENTOK ptr, _
+		byref p as FB_GENPARAMPAT _
+	) as FB_GENTOK ptr
+
+	dim as integer isfunc = (ucase( *n->text ) = "FUNCTION")
+	dim as FB_GENTOK ptr w = n
+
+	p.isproc = TRUE
+	p.matched = FALSE
+	p.paramidx = -1
+
+	'' an optional calling convention, then the '('
+	do
+		if( w->next = NULL ) then
+			return w
+		end if
+		select case ucase( *w->next->text )
+		case "CDECL", "STDCALL", "PASCAL", "THISCALL"
+			w = w->next
+		case "("
+			exit do
+		case else
+			return w
+		end select
+	loop
+
+	'' the parameter list, balanced
+	dim as integer depth = 0
+	do
+		w = w->next
+		select case *w->text
+		case "("
+			depth += 1
+		case ")"
+			depth -= 1
+		end select
+		if( (depth = 0) orelse (w->next = NULL) ) then
+			exit do
+		end if
+	loop
+
+	if( isfunc = FALSE ) then
+		return w
+	end if
+
+	'' [byref] 'as' [byref] [const] R -- 'function( ) byref as R' is how a
+	'' procptr type returns BYREF
+	if( w->next = NULL ) then
+		return w
+	end if
+	if( ucase( *w->next->text ) = "BYREF" ) then
+		w = w->next
+		if( w->next = NULL ) then
+			return w
+		end if
+	end if
+	if( ucase( *w->next->text ) <> "AS" ) then
+		return w
+	end if
+	w = w->next
+
+	while( w->next <> NULL )
+		select case ucase( *w->next->text )
+		case "BYREF", "CONST"
+			w = w->next
+		case else
+			exit while
+		end select
+	wend
+
+	if( w->next = NULL ) then
+		return w
+	end if
+	w = w->next
+
+	p.paramidx = hTypeParamIndex( gensym, w->text )
+	p.matched = (p.paramidx >= 0)
+
+	function = w
+end function
+
 '' Walk the captured header and describe each parameter's declared type.
 ''
 '' Returns the number of parameters found.  Tokens look like
@@ -1778,6 +1881,7 @@ private function hScanParamPatterns _
 	pat( 0 ).ptrlevels = 0
 	pat( 0 ).matched = FALSE
 	pat( 0 ).nestedcount = 0
+	pat( 0 ).isproc = FALSE
 
 	while( n )
 		dim as string t = *n->text
@@ -1802,6 +1906,7 @@ private function hScanParamPatterns _
 			pat( count ).ptrlevels = 0
 			pat( count ).matched = FALSE
 			pat( count ).nestedcount = 0
+			pat( count ).isproc = FALSE
 			sawas = FALSE
 		elseif( depth = 1 ) then
 			if( ucase( t ) = "AS" ) then
@@ -1811,6 +1916,7 @@ private function hScanParamPatterns _
 				pat( count ).ptrlevels = 0
 				pat( count ).matched = FALSE
 				pat( count ).nestedcount = 0
+				pat( count ).isproc = FALSE
 			elseif( sawas ) then
 				select case ucase( t )
 				case "PTR", "POINTER"
@@ -1819,8 +1925,20 @@ private function hScanParamPatterns _
 					end if
 				case "CONST"
 					'' ignore; CONST-ness does not participate
+				case "SUB", "FUNCTION"
+					'' a procedure pointer type -- only as the type's first token
+					if( (pat( count ).paramidx = -1) andalso (pat( count ).nestedcount = 0) andalso _
+					    (pat( count ).isproc = FALSE) ) then
+						n = hScanProcType( gensym, n, pat( count ) )
+					else
+						pat( count ).matched = FALSE
+					end if
 				case else
-					if( (pat( count ).paramidx = -1) andalso (pat( count ).nestedcount = 0) ) then
+					if( pat( count ).isproc ) then
+						'' after a procedure type: whatever it is, it is not
+						'' modelled (a 'ptr' was handled above)
+						pat( count ).matched = FALSE
+					elseif( (pat( count ).paramidx = -1) andalso (pat( count ).nestedcount = 0) ) then
 						dim as integer idx = hTypeParamIndex( gensym, strptr( t ) )
 						if( idx >= 0 ) then
 							pat( count ).paramidx = idx
@@ -1941,6 +2059,20 @@ private function hBindPattern _
 
 	dim as integer dtype = argdtype
 	dim as FBSYMBOL ptr subtype = argsubtype
+
+	'' 'function( ... ) as R' -- the argument has to be a procedure pointer,
+	'' and R binds to its result.  A capturing lambda is a closure struct, not
+	'' a procptr, and does not fit.
+	if( p.isproc ) then
+		if( typeGetDtAndPtrOnly( dtype ) <> typeAddrOf( FB_DATATYPE_FUNCTION ) ) then
+			return FALSE
+		end if
+		if( subtype = NULL ) then
+			return FALSE
+		end if
+		dtype = symbGetFullType( subtype )
+		subtype = symbGetSubtype( subtype )
+	end if
 
 	'' 'T ptr' binds T to the pointee
 	for k as integer = 1 to p.ptrlevels
