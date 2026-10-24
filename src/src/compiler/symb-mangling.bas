@@ -932,6 +932,26 @@ private sub hMangleVariable( byval sym as FBSYMBOL ptr )
 		docpp = hDoCppMangling( sym )
 	end if
 
+	'' A variable can land in a generic instantiation's synthetic namespace:
+	'' the temporary that typeof( f( ) ) creates while the instance's header is
+	'' replayed (a result with a destructor, -exx, a result returned through a
+	'' hidden pointer).  hMangleNamespace skips that namespace, so with the
+	'' generic at toplevel nothing wraps the id, and its length prefix made it
+	'' '6TMP$4$' / '7LT_0004' -- no C or asm name.  The id goes out bare then,
+	'' as it does for any other module-level temporary.  (Not docpp = FALSE:
+	'' the backends still emit the symbol as a global, and the asm backend
+	'' would name a non-static local after the frame register.)
+	dim as integer bareid = FALSE
+	if( docpp andalso (symbGetMangling( sym ) <> FB_MANGLING_CPP) ) then
+		if( (sym->attrib and (FB_SYMBATTRIB_PUBLIC or FB_SYMBATTRIB_EXTERN or _
+		                      FB_SYMBATTRIB_SHARED or FB_SYMBATTRIB_COMMON or _
+		                      FB_SYMBATTRIB_STATIC)) = 0 ) then
+			if( symbIsGenericScope( symbGetNamespace( sym ) ) ) then
+				bareid = (hIsNested( sym ) = FALSE)
+			end if
+		end if
+	end if
+
 	'' prefix
 	'' public global/static?
 	if( sym->attrib and (FB_SYMBATTRIB_PUBLIC or FB_SYMBATTRIB_EXTERN or _
@@ -1107,7 +1127,7 @@ private sub hMangleVariable( byval sym as FBSYMBOL ptr )
 
 	if( len( id ) > 0 ) then
 		'' id length (C++ only) followed by the id itself
-		if( docpp ) then
+		if( docpp andalso (bareid = FALSE) ) then
 			mangled += str( len( id ) )
 		end if
 		mangled += id
