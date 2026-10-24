@@ -160,6 +160,17 @@ When two arguments would bind the same parameter to different types, inference
 does not pick a winner -- it reports error 340 and asks for the arguments to be
 written out. An implicit promotion is not a match.
 
+An argument whose parameter has a default may be left out of an inferred call,
+at the end or in the middle, as in any call; it binds nothing and the default
+is used. A type parameter that only an omitted argument mentions stays unbound,
+which is error 340 again:
+
+    function Scale( of T )( byval x as T, byval n as long = 0 ) as T
+    function Zero( of T )( byval x as T = 0 ) as T
+    print Scale( 4 )                        '' T from x; n = 0
+    print Zero( 5 )                         '' T from the argument written out
+    print Zero( )                           '' error 340: nothing binds T
+
 A generic procedure may call another generic procedure, and a generic type's
 member may call a generic procedure.
 

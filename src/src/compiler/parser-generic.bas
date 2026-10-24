@@ -1658,6 +1658,10 @@ type FB_GENPARAMPAT
 	nestedcount     as integer
 	nestedname      as string
 	nestedidx       ( 0 to FB_MAXGENERICARGS-1 ) as integer
+
+	'' 'as T = expr' -- the parameter has a default and the argument may be
+	'' omitted at an inferred call; an omitted one binds nothing.
+	hasdefault      as integer
 end type
 
 '' Which type parameter does this name refer to?  -1 if none.
@@ -1866,6 +1870,7 @@ private function hScanParamPatterns _
 	dim as FB_GENTOK ptr n = hdr
 	dim as integer depth = 0, count = 0
 	dim as integer sawas = FALSE
+	dim as integer indefault = FALSE
 
 	'' skip to just inside the opening '('
 	while( n andalso (*n->text <> "(") )
@@ -1882,6 +1887,7 @@ private function hScanParamPatterns _
 	pat( 0 ).matched = FALSE
 	pat( 0 ).nestedcount = 0
 	pat( 0 ).isproc = FALSE
+	pat( 0 ).hasdefault = FALSE
 
 	while( n )
 		dim as string t = *n->text
@@ -1907,9 +1913,16 @@ private function hScanParamPatterns _
 			pat( count ).matched = FALSE
 			pat( count ).nestedcount = 0
 			pat( count ).isproc = FALSE
+			pat( count ).hasdefault = FALSE
 			sawas = FALSE
-		elseif( depth = 1 ) then
-			if( ucase( t ) = "AS" ) then
+			indefault = FALSE
+		elseif( (depth = 1) andalso (indefault = FALSE) ) then
+			if( sawas andalso (t = "=") ) then
+				'' 'as T = expr' -- the type ends here; the default's tokens
+				'' up to the next ',' are not part of it
+				pat( count ).hasdefault = TRUE
+				indefault = TRUE
+			elseif( ucase( t ) = "AS" ) then
 				sawas = TRUE
 				'' a fresh type starts here; forget anything seen before
 				pat( count ).paramidx = -1
@@ -1917,6 +1930,7 @@ private function hScanParamPatterns _
 				pat( count ).matched = FALSE
 				pat( count ).nestedcount = 0
 				pat( count ).isproc = FALSE
+				pat( count ).hasdefault = FALSE
 			elseif( sawas ) then
 				select case ucase( t )
 				case "PTR", "POINTER"
@@ -2408,15 +2422,22 @@ function cGenericProcInferredCall _
 				return NULL
 			end if
 
-			dim as ASTNODE ptr e = cExpression( )
-			if( e = NULL ) then
-				errReport( FB_ERRMSG_EXPECTEDEXPRESSION )
-				return NULL
+			'' an omitted argument, 'f( x, , z )' -- its parameter must have
+			'' a default, checked below
+			dim as ASTNODE ptr e = NULL
+			if( (lexGetToken( ) <> CHAR_COMMA) andalso (lexGetToken( ) <> CHAR_RPRNT) ) then
+				e = cExpression( )
+				if( e = NULL ) then
+					errReport( FB_ERRMSG_EXPECTEDEXPRESSION )
+					return NULL
+				end if
 			end if
 
 			argexpr( argcount ) = e
-			argdtype( argcount ) = astGetFullType( e )
-			argsubtype( argcount ) = astGetSubtype( e )
+			if( e ) then
+				argdtype( argcount ) = astGetFullType( e )
+				argsubtype( argcount ) = astGetSubtype( e )
+			end if
 			argcount += 1
 
 			if( lexGetToken( ) <> CHAR_COMMA ) then
@@ -2438,14 +2459,26 @@ function cGenericProcInferredCall _
 
 	paramcount = hScanParamPatterns( gensym, body->hdrhead, pat() )
 
-	if( paramcount <> argcount ) then
+	if( (paramcount < argcount) orelse (paramcount > FB_MAXGENERICARGS) ) then
 		errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
 		return NULL
 	end if
 
-	for i as integer = 0 to argcount-1
-		if( hBindPattern( pat( i ), argdtype( i ), argsubtype( i ), _
-		                  bounddtype(), boundsubtype(), isbound() ) = FALSE ) then
+	'' Arguments left out at the end are omitted ones too.  An omitted
+	'' argument binds nothing, so a type parameter that only its parameter
+	'' mentions stays unbound, and is reported below.
+	for i as integer = argcount to paramcount-1
+		argexpr( i ) = NULL
+	next
+
+	for i as integer = 0 to paramcount-1
+		if( argexpr( i ) = NULL ) then
+			if( pat( i ).hasdefault = FALSE ) then
+				errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
+				return NULL
+			end if
+		elseif( hBindPattern( pat( i ), argdtype( i ), argsubtype( i ), _
+		                      bounddtype(), boundsubtype(), isbound() ) = FALSE ) then
 			errReportEx( FB_ERRMSG_CANTINFERTYPEARGS, genGenericName( gensym ) )
 			return NULL
 		end if
@@ -2465,10 +2498,11 @@ function cGenericProcInferredCall _
 	end if
 
 	'' Build the call from the arguments already parsed.  Same sequence
-	'' cProcArgList uses for its pre-defined args.
+	'' cProcArgList uses for its pre-defined args; a NULL one takes the
+	'' parameter's default, as for an ordinary call.
 	dim as ASTNODE ptr procexpr = astNewCALL( proc, NULL )
 
-	for i as integer = 0 to argcount-1
+	for i as integer = 0 to paramcount-1
 		if( astNewARG( procexpr, argexpr( i ) ) = NULL ) then
 			astDelTree( procexpr )
 			return astBuildFakeCall( proc )
