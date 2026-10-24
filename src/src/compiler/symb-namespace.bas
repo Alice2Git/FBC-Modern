@@ -280,6 +280,47 @@ end function
 '' that list -- which lives inside the hash table -- through itself, so the node
 '' points at itself and the next lookup miss spins forever.  Same hazard the
 '' generic scope switch documents for symbNestBegin().
+''
+'' NS's own imports come along, as they do when the parser enters NS
+'' (symbNestBegin's hInsertImported) and when a USING imports it
+'' (symbNamespaceImportEx recurses into them).  A non-explicit ENUM declared in
+'' NS is one of them -- its constants live in the enum's own hash table and NS
+'' only imports it -- so without this a generic declared in NS could see NS's
+'' CONSTs but not its enum constants once instantiated from outside NS:
+''
+''     namespace NS
+''         enum E : CODE_A = 7 : end enum
+''         function F( of T )( byval x as T ) as long : return CODE_A + x : end function
+''     end namespace
+''     print NS.F( 1l )                  '' CODE_A not declared
+''
+'' (fb/optional.bi tripped on this with FB_RTERROR_* from fberror.bi.)  Pop
+'' walks the same import list, which a replay cannot change: it is parsed in the
+'' global namespace, so any USING or ENUM it declares lands there, not in NS.
+private sub hSearchImports _
+	( _
+		byval ns as FBSYMBOL ptr, _
+		byval ispush as integer _
+	)
+
+	dim as FBSYMBOL ptr imp_ = symbGetCompImportHead( ns )
+	do while( imp_ <> NULL )
+		dim as FBSYMBOL ptr imp_ns = symbGetImportNamespc( imp_ )
+
+		'' NULL once the USING's scope closed (symbNamespaceRemove)
+		if( imp_ns <> NULL ) then
+			if( ispush ) then
+				hAddToHashTbList( imp_ns )
+			else
+				hDelFromHashTbList( imp_ns )
+			end if
+		end if
+
+		imp_ = symbGetImportNext( imp_ )
+	loop
+
+end sub
+
 sub symbNamespaceSearchPush _
 	( _
 		byval ns as FBSYMBOL ptr _
@@ -297,6 +338,7 @@ sub symbNamespaceSearchPush _
 	end if
 
 	hAddToHashTbList( ns )
+	hSearchImports( ns, TRUE )
 
 end sub
 
@@ -316,6 +358,7 @@ sub symbNamespaceSearchPop _
 	'' Push allocates it, so a missing ext means an unmatched Pop
 	assert( symbGetCompExt( ns ) <> NULL )
 
+	hSearchImports( ns, FALSE )
 	hDelFromHashTbList( ns )
 
 end sub
