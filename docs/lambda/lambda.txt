@@ -34,7 +34,10 @@ TWO KINDS, AND THE DIFFERENCE MATTERS
 
 A NON-CAPTURING lambda lowers to a plain module-level procedure plus its
 address. It is type-identical to '@myproc', converts to any matching procptr,
-and is what every Win32-style callback wants.
+and is what every Win32-style callback wants. The procedure is PRIVATE to its
+module, like a generic instantiation's procedures: a lambda in a generic body
+in a header is compiled once per module that instantiates it, and two public
+copies would not link.
 
 A CAPTURING lambda cannot be a procptr -- it has state and a procptr has
 nowhere to put it:

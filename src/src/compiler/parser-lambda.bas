@@ -512,7 +512,16 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 		       genFlattenTokens( lam->hdrhead, firstline ) + _
 		       hCaptureAliases( lam ) + hBodyText( lam )
 	else
-		text = hHeaderLineMark( lam ) + _
+		'' PRIVATE: nothing outside this module can name a lambda, and a
+		'' public one collides at link time when its name is not unique to
+		'' the module.  hModuleTag( ) hashes env.inf.name, which is the
+		'' HEADER's name when the lambda sits in a generic body declared in
+		'' one -- a replay parses in the generic's own file -- so two modules
+		'' instantiating it the same way produced the same name:
+		''     multiple definition of `L51B1FEBCEBAAF5CD_LT_0003'
+		'' Module-private like a generic instantiation's procedures.  The
+		'' prototype stays a plain 'declare': a PRIVATE body completes it.
+		text = hHeaderLineMark( lam ) + "private " + _
 		       kw + " " + *symbGetName( lam->sym ) + " " + _
 		       genFlattenTokens( lam->hdrhead, firstline ) + hBodyText( lam )
 	end if

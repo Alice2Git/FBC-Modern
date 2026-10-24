@@ -1,0 +1,17 @@
+# TEST_MODE : MULTI_MODULE_OK
+
+# Lambdas in the body of a generic declared in a HEADER, instantiated by two
+# separately compiled modules.
+#
+# A lambda's name hashes env.inf.name, and a generic body is replayed in the
+# generic's own file -- the header -- so both modules named their lambda the
+# same, and it was a public symbol:
+#
+#     multiple definition of `L51B1FEBCEBAAF5CD_LT_0003'
+#
+# Lambda procedures are module-private now, like a generic instantiation's
+# procedures.  The modules are the same shape on purpose, so the counters
+# match.
+
+MAIN := lambda-generic-mm-main.bas
+SRCS := lambda-generic-mm-a.bas lambda-generic-mm-b.bas
