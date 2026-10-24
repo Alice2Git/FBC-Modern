@@ -496,6 +496,10 @@ private function hGenericProcSymbol _
 	else
 		expr = cGenericProcInferredCall( base_parent, gensym, options )
 
+		'' 'Run( f ).Wait( )' -- a member access on the result, as cProcCall( )
+		'' allows on the explicit form; NULL after a SUB method call
+		expr = cStrIdxOrMemberDeref( expr )
+
 		'' a SUB used as a statement, or a FUNCTION whose result is discarded
 		if( expr <> NULL ) then
 			if( cMaybeIgnoreCallResult( expr ) ) then

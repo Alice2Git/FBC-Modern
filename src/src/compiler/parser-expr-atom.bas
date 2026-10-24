@@ -329,7 +329,10 @@ private function hFindId _
 						return cFunctionCall( base_parent, proc, NULL, NULL, options )
 					end if
 
-					return cGenericProcInferredCall( base_parent, sym, options )
+					'' 'MakeBox( 2 ).v' -- the member access, index or call
+					'' after the result, as cFunctionCall( ) allows on the
+					'' explicit form
+					return cStrIdxOrMemberDeref( cGenericProcInferredCall( base_parent, sym, options ) )
 				end if
 
 			case FB_SYMBCLASS_VAR
