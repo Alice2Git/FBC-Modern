@@ -301,6 +301,32 @@ Version 1.20.0
   result type ('function( ) as R ptr', 'byref as R' and calling conventions
   included); the procedure type's own parameters bind nothing, and a
   capturing lambda (not a procedure pointer) is refused with error 340.
+- Generics, -gen gcc: a non-generic type extending an instantiation inside a
+  namespace ('namespace N : type C extends G( of long )') failed to compile:
+  C's RTTI named G( of long )'s before it was declared ('_ZTSN1GIiEE'
+  undeclared). The vtable and RTTI of every type with an instantiation in its
+  base chain are now declared first and defined after, as an instantiation's
+  own already were.
+- Generics: a member access straight on the result of a call with inferred
+  type arguments ('MakeBox( 2 ).v', 'Run( f ).Wait( )') failed with error 20
+  in an expression and error 24 or 3 as a statement; only the explicit form
+  'MakeBox( of long )( 2 ).v' worked. The inferred form now takes '.', '->',
+  '[' and calls on its result the same way.
+- Lambdas: a capturing lambda after an argument that needs a temporary with a
+  destructor, in the same call ('Use( src.Val_, function[ byval k ]( ... ) )'),
+  destroyed that temporary BEFORE the call, on uninitialised memory, and not
+  after it: heap corruption (0xC0000374) on gas64 and gcc -O 2. The statements
+  that fill the closure no longer flush the statement's temporaries.
+- Generics: typeof( call ) in a generic procedure's result type, when the call
+  needs a temporary (a result with a destructor, any call under -exx, a result
+  returned through a hidden pointer on fbc32), declared that temporary with a
+  length-prefixed name ('struct $5PUNCT 6TMP$4$;' in C, '.lcomm 7LT_0004,32'
+  in asm) that neither gcc nor as accepted. The name is now a plain one.
+- Lambdas: a lambda in the body of a generic declared in a header was a public
+  symbol named from the header's file name, so two modules instantiating the
+  generic the same way failed to link ('multiple definition of
+  `L..._LT_0003''); so did xShared( of T ) from xSmartPtr. Lambda procedures
+  are now private to their module, like a generic instantiation's procedures.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
