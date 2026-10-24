@@ -955,10 +955,22 @@ end sub
 ''     '_ZTSN4RootIu7INTEGEREE' undeclared here
 '' -- while gas64, which does not care about declaration order, links fine.
 ''
+'' A NON-generic type extending an instantiation is caught the same way when it
+'' sits in a namespace:
+''
+''     namespace N
+''         type C extends G( of long )
+''
+'' G( of long )'s synthetic namespace goes into the GLOBAL symbol table, after N,
+'' so C's RTTI -- emitted with N -- names G's before G's is declared.  So the
+'' tables of every type with an instantiation anywhere in its base chain are
+'' split too.
+''
 '' Ordinary FreeBASIC cannot reach this position: a base must be declared before
 '' it can be extended.  That is why the existing two-pass scheme covers only
-'' PUBLIC/EXTERN/COMMON, and why this stays confined to generic instantiations --
-'' every other program's emitted C is unchanged, byte for byte.
+'' PUBLIC/EXTERN/COMMON, and why this stays confined to generic instantiations
+'' and their descendants -- every other program's emitted C is unchanged, byte
+'' for byte.
 private function hNeedsSplitDecl( byval sym as FBSYMBOL ptr ) as integer
 	if( (symbGetStats( sym ) and (FB_SYMBSTATS_RTTITABLE or FB_SYMBSTATS_VTABLE)) = 0 ) then
 		return FALSE
@@ -966,11 +978,20 @@ private function hNeedsSplitDecl( byval sym as FBSYMBOL ptr ) as integer
 
 	'' the table lives inside its UDT, so the UDT is its namespace
 	dim as FBSYMBOL ptr udt = symbGetNamespace( sym )
-	if( udt = NULL ) then
-		return FALSE
-	end if
+	while( udt <> NULL )
+		if( symbIsGenericInst( udt ) ) then
+			return TRUE
+		end if
+		if( symbIsStruct( udt ) = FALSE ) then
+			exit while
+		end if
+		if( udt->udt.base = NULL ) then
+			exit while
+		end if
+		udt = symbGetSubtype( udt->udt.base )
+	wend
 
-	function = symbIsGenericInst( udt )
+	function = FALSE
 end function
 
 private sub hMaybeEmitGlobalVar( byval sym as FBSYMBOL ptr )
