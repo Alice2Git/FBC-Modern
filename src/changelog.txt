@@ -327,6 +327,14 @@ Version 1.20.0
   generic the same way failed to link ('multiple definition of
   `L..._LT_0003''); so did xShared( of T ) from xSmartPtr. Lambda procedures
   are now private to their module, like a generic instantiation's procedures.
+- Generics: a call with inferred type arguments could not leave out an
+  argument whose parameter has a default ('Run( f )' for 'Run( of F )( byref
+  f as F, byref t as const Tok = tsk_none )'): error 340, although the omitted
+  parameter mentions no type parameter. Such arguments may now be left out at
+  the end or in the middle ('f( x, , z )'); they bind nothing and take the
+  default. A type parameter that only an omitted argument mentions is still
+  error 340. An argument written out for an 'as T = ...' parameter now binds
+  T, as for a parameter without a default.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
