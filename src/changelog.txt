@@ -335,6 +335,14 @@ Version 1.20.0
   default. A type parameter that only an omitted argument mentions is still
   error 340. An argument written out for an 'as T = ...' parameter now binds
   T, as for a parameter without a default.
+- Generics: the body of a generic declared in a namespace could not name a
+  constant of a non-explicit ENUM of that namespace when the generic was
+  instantiated from outside it (error 42, 'Variable not declared'), although a
+  CONST declared in the same place was found. FB.Optional and FB.Result
+  (fb/optional.bi, fb/result.bi) hit this with FB_RTERROR_ILLEGALFUNCTIONCALL
+  and did not compile without 'using FB'. The replay now sees the declaring
+  namespace's imports (the non-explicit enums, and USINGs written inside it),
+  as code written inside that namespace does.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
