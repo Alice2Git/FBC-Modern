@@ -1058,6 +1058,20 @@ function cLambdaExpr( ) as ASTNODE ptr
 		'' emitted from its DECL node, so without this the generated C used the
 		'' temp without declaring it:
 		''     error: 'TMP$3$1' undeclared (first use in this function)
+		''
+		'' These astAdd( )s run in the MIDDLE of the statement being parsed,
+		'' and an astAdd( ) normally flushes the dtor list -- that is, the
+		'' temporaries of everything parsed so far in this statement.  A
+		'' temporary with a destructor in an earlier argument was then
+		'' destroyed HERE, before the call that fills it, and never after it:
+		''     Use( src.Val_, function[ byval k ]( ... ) ... )
+		'' called Cutie's destructor on uninitialised stack -- a heap
+		'' corruption (0xC0000374) on gas64 and gcc -O 2, a leak with luck.
+		'' Those temporaries belong to the end of the statement; leave them
+		'' registered.
+		dim as integer savedflush = ast.flushdtorlist
+		ast.flushdtorlist = FALSE
+
 		astAdd( astNewDECL( tmp, TRUE ) )
 
 		'' Fill the captures. These are emitted BEFORE the statement being
@@ -1068,6 +1082,7 @@ function cLambdaExpr( ) as ASTNODE ptr
 				dim as FBSYMBOL ptr fld = symbLookupByNameAndClass( lam->clo, _
 				                          .fld, FB_SYMBCLASS_FIELD, FALSE )
 				if( fld = NULL ) then
+					ast.flushdtorlist = savedflush
 					return NULL
 				end if
 
@@ -1103,6 +1118,8 @@ function cLambdaExpr( ) as ASTNODE ptr
 				astAdd( astNewASSIGN( dst, src ) )
 			end with
 		next
+
+		ast.flushdtorlist = savedflush
 
 		return astNewVAR( tmp )
 	end if
