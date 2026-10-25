@@ -179,8 +179,8 @@ private sub hProcFlushAll _
 		_
 	)
 
-	dim as ASTNODE ptr n = any
-	dim as integer doemit = any
+	dim as ASTNODE ptr n = any, nxt = any
+	dim as integer doemit = any, flushed = any
 	dim as FBSYMBOL ptr sym = any
 
 	'' procs should be sorted by include file
@@ -189,34 +189,57 @@ private sub hProcFlushAll _
 	'' because the ctors/dtors could be private and not called yet)
 	hGenGlobalInstancesCtor( )
 
+	'' A private proc that isn't called yet stays in the list: emitting the
+	'' others can still call it.  The dtor wrappers of a private proc's
+	'' static locals are only built when that proc is emitted (see
+	'' hProcFlush()), so the implicit dtor of a UDT used only by such a
+	'' static is called for the first time from here.  Repeat until no proc
+	'' is emitted, then drop the private procs that are still not called.
+	do
+		flushed = FALSE
+
+		n = ast.proc.head
+		do while( n <> NULL )
+			nxt = n->next
+			sym = n->sym
+
+			'' fully parsed?
+			if( symbGetIsParsed( sym ) ) then
+				doemit = TRUE
+				'' private?
+				if( symbIsPrivate( sym ) ) then
+					'' not called (yet)? keep it for later
+					if( symbGetIsAccessed( sym ) = FALSE ) then
+						n = nxt
+						continue do
+
+					'' module-level?
+					elseif( symbGetIsModLevelProc( sym ) ) then
+						doemit = (hModLevelIsEmpty( n ) = FALSE)
+					end if
+				end if
+
+			else
+				doemit = FALSE
+			end if
+
+			'' only removes n (and the dtor wrappers it adds and flushes
+			'' itself) from the list, nxt stays valid
+			hProcFlush( n, doemit )
+			flushed = TRUE
+
+			n = nxt
+		loop
+	loop while( flushed )
+
+	'' the private procs that were never called
 	do
 		n = ast.proc.head
 		if( n = NULL ) then
 			exit do
 		end if
 
-		sym = n->sym
-
-		'' fully parsed?
-		if( symbGetIsParsed( sym ) ) then
-			doemit = TRUE
-			'' private?
-			if( symbIsPrivate( sym ) ) then
-				'' never called? skip
-				if( symbGetIsAccessed( sym ) = FALSE ) then
-					doemit = FALSE
-
-				'' module-level?
-				elseif( symbGetIsModLevelProc( sym ) ) then
-					doemit = (hModLevelIsEmpty( n ) = FALSE)
-				end if
-			end if
-
-		else
-			doemit = FALSE
-		end if
-
-		hProcFlush( n, doemit )
+		hProcFlush( n, FALSE )
 	loop
 
 end sub
