@@ -343,6 +343,17 @@ Version 1.20.0
   and did not compile without 'using FB'. The replay now sees the declaring
   namespace's imports (the non-explicit enums, and USINGs written inside it),
   as code written inside that namespace does.
+- The implicit destructor of a UDT whose only use was a STATIC local of a
+  PRIVATE procedure was not emitted: 'undefined reference' to the destructor at
+  link time, on every backend. The static's dtor wrapper is built when its
+  procedure is emitted, and the private destructor had already been dropped as
+  never called by then. Private procedures not called yet are now checked again
+  after the others are emitted.
+- FB.Optional (fb/optional.bi): HasValue( ) and ValueOr( ) are const methods, so
+  they work on a const Optional, such as a field read through a container's
+  'const operator [] byref as const T' (error 276 before). ValueOr( ) takes a
+  'byref as const T' default and returns a copy instead of a reference; write
+  through Value( ), which is unchanged and stays non-const.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
