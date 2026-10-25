@@ -313,12 +313,14 @@ declare function FindFirstEven( byval a as long, byval b as long, byval c as lon
 		assert_( o.Value( ) = 2 )
 		assert_( o.HasValue( ) )
 
-		'' ValueOr( ) on an engaged Optional aliases the stored value too
+		'' ValueOr( ) returns a copy: writing to it changes neither the
+		'' stored value nor the default
 		dim as long d = -1
-		dim byref as long r2 = o.ValueOr( d )
+		dim as long r2 = o.ValueOr( d )
 		r2 = 3
-		assert_( o.Value( ) = 3 )
+		assert_( o.Value( ) = 2 )
 		assert_( d = -1 )
+		o.Value( ) = 3
 
 		'' direct assignment through the byref result
 		o.Value( ) = 4

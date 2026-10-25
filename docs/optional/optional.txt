@@ -44,9 +44,9 @@ or nothing".
 MEMBERS
 -------
 
-    HasValue( ) as boolean                    O(1)
-    Value( ) byref as T                       O(1)   RAISES if empty
-    ValueOr( byref dflt as T ) byref as T     O(1)   never raises
+    const HasValue( ) as boolean                      O(1)
+    Value( ) byref as T                               O(1)   RAISES if empty
+    const ValueOr( byref dflt as const T ) as T       O(1)   never raises
     Clear( )                                  O(1)   becomes empty
 
 and two FREE PROCEDURES, not constructors:
@@ -111,9 +111,21 @@ ValueOr( ) is the branch-free alternative and never raises:
 
     print o.ValueOr( fallback )
 
-Both return BYREF. ValueOr( ) therefore aliases either the stored value or the
-CALLER'S default, so passing a temporary gives a reference that dies at the end
-of the statement -- the same hazard as any byref return, not an Optional one.
+ValueOr( ) returns a COPY of the stored value or of the default; Value( )
+returns BYREF. Writing goes through Value( ).
+
+HasValue( ) and ValueOr( ) are CONST methods, so they work on a const Optional,
+for example a field read through a container's const accessor:
+
+    sub Show( byref people as const Array( of Person ) )
+        if( people[0].Email.HasValue( ) ) then
+            print people[0].Email.ValueOr( "" )
+        end if
+    end sub
+
+Value( ) is not const: it hands out a writable reference to the stored value,
+and a const method cannot be overloaded with a non-const one of the same name
+(error 4). On a const Optional, read the value with ValueOr( ).
 
 Value( ) IS usable as an assignment target, and writes through to the stored
 value:
@@ -252,7 +264,8 @@ TESTS
 src/tests/generics/container-optional.bas is exhaustive: every member, both
 states, both free constructors, all four assignment transitions between the
 states, self-assignment, copy independence in both directions, byref mutation
-through Value( ) and ValueOr( ), element types long / double / string / a UDT
+through Value( ), ValueOr( ) returning a copy, HasValue( ) and ValueOr( ) on a
+const Optional, element types long / double / string / a UDT
 with no operators / a nested Array / a nested Optional, an Optional as a return
 value, and destructor balance with a counting element type -- asserted for the
 engaged case and for the never-engaged case separately.

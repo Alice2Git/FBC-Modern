@@ -42,6 +42,14 @@
 '' stored slot, which is always a real default-constructed T.  ValueOr( ) is the
 '' branch-free alternative and never raises.
 ''
+'' CONST.  HasValue( ) and ValueOr( ) are const, so they work on a const
+'' Optional -- a field read through a const accessor such as a container's
+'' 'operator [] byref as const T'.  Value( ) is not: it returns BYREF T so that
+'' it can be written through, and a const method cannot hand out a writable
+'' reference to its own field.  A const method cannot be overloaded with a
+'' non-const one of the same name either (error 4), so on a const Optional
+'' the value is read with ValueOr( ).
+''
 '' NOT ITERABLE.  No GetIterator( ), so 'for each' over an Optional is a
 '' compile error rather than a zero-or-one loop.  A maybe-value is not a
 '' sequence, and pretending it is makes the absence easy to skip silently.
@@ -59,13 +67,13 @@ type Optional( of T )
 	as T v
 	as boolean has
 
-	declare function HasValue( ) as boolean
+	declare const function HasValue( ) as boolean
 	declare function Value( ) byref as T
-	declare function ValueOr( byref dflt as T ) byref as T
+	declare const function ValueOr( byref dflt as const T ) as T
 	declare sub Clear( )
 end type
 
-function Optional( of T ).HasValue( ) as boolean
+const function Optional( of T ).HasValue( ) as boolean
 	return this.has
 end function
 
@@ -88,10 +96,10 @@ function Optional( of T ).Value( ) byref as T
 	return this.v
 end function
 
-'' Never raises.  Returns BYREF, so the result aliases either the stored value
-'' or the caller's default -- passing a temporary as dflt gives a reference that
-'' dies at the end of the statement, the same hazard as any byref return.
-function Optional( of T ).ValueOr( byref dflt as T ) byref as T
+'' Never raises.  Returns a COPY of the stored value or of the default, so it
+'' works on a const Optional and dflt may be a const or a temporary.  To write
+'' through, use Value( ).
+const function Optional( of T ).ValueOr( byref dflt as const T ) as T
 	if( this.has = FALSE ) then
 		return dflt
 	end if
