@@ -5997,86 +5997,35 @@ private sub _emitconvert( byval v1 as IRVREG ptr, byval v2 as IRVREG ptr )
 
 end sub
 private sub emitStoreStruct(byval v1 as IRVREG ptr, byval v2 as IRVREG ptr,byref op1 as string,byref op3 as string)
-	dim as string dest
-	dim as integer lgtv1=v1->sym->lgt ,ofsv2=v2->ofs
-	dim as FB_STRUCT_INREG retin2regs=v2->subtype->udt.retin2regs
+	'' Store a struct returned in 2 registers (Linux) into op1, a destination
+	'' of any shape: local or static variable, field, array element or pointer.
+	''
+	'' The data is copied from memory, never from rax/rdx/xmm0/xmm1: the call
+	'' that produced v2 already saved both halves to its 16 byte stack slot
+	'' (see _emitcall), and the code computing the destination address -- an
+	'' array index, a pointer load -- runs after the call and may reuse those
+	'' registers.  rdx in particular is allocatable.
+	''
+	'' The size is that of the struct being stored, not v1->sym->lgt: v1 has no
+	'' symbol when the destination is reached through a pointer, and when it
+	'' does have one it can be the enclosing array or UDT rather than the struct.
+	dim as string src
+
+	if v2->typ<>IR_VREGTYPE_VAR then
+		asm_error("emitStoreStruct: source vreg type not handled")
+		exit sub
+	end if
+	if v2->sym=0 then
+		src=str(v2->ofs)+"[rbp]"
+	elseif symbIsStatic(v2->sym) Or symbisshared(v2->sym) then
+		src=*symbGetMangledName(v2->sym)+"[rip+"+str(v2->ofs)+"]"
+	else
+		src=str(v2->ofs)+"[rbp]"
+	end if
 
 	if op3<>"" then emitop3_op4(op3)
 
-	''the data is already in either rax/rdx or xmm0/xmm1 or the 2 other combinations
-	''moving 8 first bytes
-	select case retin2regs
-	case FB_STRUCT_RR
-		asm_code("mov "+op1+", rax")
-	case FB_STRUCT_RX
-		asm_code("mov "+op1+", rax")
-		asm_code("movq rdx, xmm0")
-	case FB_STRUCT_XX
-		asm_code("movq "+op1+", xmm0")
-		asm_code("movq rdx, xmm1")
-	case FB_STRUCT_XR
-		asm_code("movq "+op1+", xmm0")
-		asm_code("movq rdx, rax")
-	case else
-		'' should never happen because hGetReturnTypeGas64Linux() shouldn't
-		'' return FB_DATATYPE_STRUCT unless struct is actually returned in
-		'' 2 registers and _emitstore() checks hIsStructIn2Regs() before
-		'' calling emitStoreStruct() even though udt.retin2regs may contain
-		'' FB_STRUCT_X or FB_STRUCT_R.
-		assert( 0 )
-	end select
-
-	''moving the rest (1 to 8 bytes), assuming rdx not already used
-	if op1[0]=asc("-") and (lgtv1=9 or lgtv1= 10 or lgtv1=12 or lgtv1=16) then
-		''shortcut for move at address -xxx[rbp] + 8
-		op1=str(valint(left(op1,instr(op1,"[rbp]")-1))+8)+"[rbp]"
-
-		select case as const lgtv1
-			case 9
-				dest="dl"
-			case 10
-				dest="dx"
-			case 12
-				dest="edx"
-			case 16
-				dest="rdx"
-		end select
-
-		asm_code("mov "+op1+", "+dest)
-		exit sub
-	end if
-
-	asm_code("lea rax, "+op1)
-	asm_code("add rax, 8")
-
-	select case as const lgtv1
-		case 9
-			asm_code("mov [rax], dl")
-		case 10
-			asm_code("mov [rax], dx")
-		case 11
-			asm_code("mov [rax], dx")
-			asm_code("shr rdx, 2")
-			asm_code("mov [rax+2], dl")
-		case 12
-			asm_code("mov [rax], edx")
-		case 13
-			asm_code("mov [rax], edx")
-			asm_code("shr rdx, 4")
-			asm_code("mov [rax+4], dl")
-		case 14
-			asm_code("mov [rax], edx")
-			asm_code("shr rdx, 4")
-			asm_code("mov [rax+4], dx")
-		case 15
-			asm_code("mov [rax], edx")
-			asm_code("shr rdx, 4")
-			asm_code("mov [rax+4], dx")
-			asm_code("shr rdx, 2")
-			asm_code("mov [rax+6], dl")
-		case 16
-			asm_code("mov [rax], rdx")
-	end select
+	memcopy(v2->subtype->lgt,src,op1,KUSE_LEA,KUSE_LEA)
 end sub
 private function hIsStructIn2Regs( byval v1 as IRVREG ptr ) as integer
 	'' test if the VREG is for a struct that would be returned in 2 registers
@@ -6172,13 +6121,14 @@ private sub _emitstore( byval v1 as IRVREG ptr, byval v2 as IRVREG ptr )
 
 	if( hIsStructIn2Regs( v2 ) ) then
 		'' for Linux structures can be returned in 2 registers so needs a special handling
-		if ( v1->sym->stats and FB_SYMBSTATS_IMPLICIT ) then
-			asm_info("Replacing  "+str(v1->sym->ofs)+" by "+str(v2->ofs))
-			v1->sym->ofs=v2->ofs
-			asm_info("v1="+vregdumpfull(v1))
-		else
-			emitStoreStruct(v1,v2,op1,op3)
-		end if
+		''
+		'' Always a real copy.  This used to re-point an implicit destination
+		'' at the call's stack slot (v1->sym->ofs=v2->ofs) instead of copying,
+		'' which is wrong as soon as the symbol is stored more than once:
+		'' fb$result in a function with several 'return Call( )' statements
+		'' was moved to each call's slot in turn, so every return but the
+		'' textually last one returned whatever was in the last slot.
+		emitStoreStruct(v1,v2,op1,op3)
 		exit sub
 	end if
 

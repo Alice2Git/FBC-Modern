@@ -739,10 +739,36 @@ private function hGetReturnTypeGas64SystemV( byval sym as FBSYMBOL ptr ) as inte
 			case KSTRUCT_R ''only integers in RAX
 				'' don't set retin2regs, it's handled by datatype only
 				'' sym->udt.retin2regs = FB_STRUCT_R
-				return FB_DATATYPE_LONGINT
+				''
+				'' The result is stored with the width of this dtype, so it
+				'' must be exactly the size of the struct: a LONGINT for a 4
+				'' byte struct writes 4 bytes past it, over whatever is next
+				'' on the caller's stack.
+				select case as const sym->lgt
+					case 1
+						return FB_DATATYPE_BYTE
+					case 2
+						return FB_DATATYPE_SHORT
+					case 4
+						return FB_DATATYPE_LONG
+					case 8
+						return FB_DATATYPE_LONGINT
+					case else
+						'' 3, 5, 6 or 7 bytes: no integer type of that size.
+						'' Still returned in RAX as the ABI says, but through
+						'' the struct path, which saves RAX (and the unused
+						'' RDX) to a stack slot and copies exactly sym->lgt
+						'' bytes from there to the destination.
+						sym->udt.retin2regs = FB_STRUCT_RR
+						return FB_DATATYPE_STRUCT
+				end select
 			case KSTRUCT_X ''only floats in XMM0
 				'' don't set retin2regs, it's handled by datatype only
 				'' sym->udt.retin2regs = FB_STRUCT_X
+				'' same width rule as above: a lone SINGLE is 4 bytes
+				if( sym->lgt <= typeGetSize( FB_DATATYPE_SINGLE ) ) then
+					return FB_DATATYPE_SINGLE
+				end if
 				return FB_DATATYPE_DOUBLE
 			case KSTRUCT_RR ''only integers in RAX/RDX
 				sym->udt.retin2regs = FB_STRUCT_RR

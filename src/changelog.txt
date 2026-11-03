@@ -172,6 +172,31 @@ Version 1.20.0
   'inc/fb/hash.bi'.
 
 [fixed]
+- gas64 on linux-x86_64 / FreeBSD: UDT results returned in registers were
+  stored wrongly. A 9..16 byte result (RAX/RDX/XMM0/XMM1) stored through a
+  pointer, a BYREF parameter or into an array element CRASHED fbc (null
+  symbol in _emitstore) -- which is why any program including fb/chrono.bi
+  failed to compile under -gen gas64 -- and into a field or array element it
+  wrote its second half at a wrong address, including over the caller's
+  return address. It also read the second half from RDX after the
+  destination's address computation could have reused it, and packed sizes
+  11/13/14/15 shifted by bytes where bits were meant. The result is now
+  copied from the stack slot the call already saves it to, with the size of
+  the struct, not of the destination symbol.
+- gas64 on linux-x86_64 / FreeBSD: a UDT of 1..8 bytes was returned as a
+  LONGINT (or DOUBLE) whatever its size, so storing the result wrote past it
+  -- a 4-byte LocalDate overwrote the next 4 bytes of the caller's stack, in
+  chrono a neighbouring STRING or USTRING descriptor. Sizes 1/2/4/8 now use
+  BYTE/SHORT/LONG/LONGINT and a lone SINGLE uses SINGLE, as the Windows path
+  already did; 3/5/6/7 bytes still come back in RAX but go through the struct
+  path above and are copied exactly.
+- gas64 on linux-x86_64 / FreeBSD: a function with several 'return Call( )'
+  statements returning a 9..16 byte UDT returned the textually last call's
+  slot from every one of them. An implicit destination such as fb$result was
+  re-pointed at the call's stack slot instead of being copied into, once per
+  store. It is now always a copy.
+  Windows targets are not affected by any of the three: their output is
+  byte-identical before and after.
 - Generics: a variable named after a type parameter at the INSTANTIATION SITE
   shadowed it, so a local named 't' broke every 'of T' generic --
   'error 14: Expected identifier, found T' -- and fbc then HUNG rather than
