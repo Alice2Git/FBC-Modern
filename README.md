@@ -531,6 +531,7 @@ Everything below is in this repository. There is no documentation website.
 | **[`USTRING` reference](docs/ustring/ustring.txt)** | The type, conversions, code units, I/O, the fixed-length form |
 | **[Implementation notes](docs/ustring/implementation-notes.md)** | Design decisions **and the mistakes** — several bugs here compiled cleanly and produced plausible output |
 | **[Test baseline & gate protocol](tests/BASELINE.md)** | How to reproduce every number on this page |
+| **[Known bugs](docs/KNOWN_BUGS.md)** | Open compiler bugs (in Romanian), each with a minimal repro, the exact message, the workaround and where the fix belongs |
 | **[FreeBASIC manual](https://www.freebasic.net/wiki/DocToc)** | The language itself, unchanged by this project. `src/doc/manual/` is a local mirror of that wiki and is regenerated from it rather than edited here. |
 | **Compiler internals** | [The architecture section](#-compiler-architecture) above, and the *How it works* part of the generics reference. |
 
