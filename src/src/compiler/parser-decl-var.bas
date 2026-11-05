@@ -881,8 +881,12 @@ private sub hValidateGlobalVarInit( byval sym as FBSYMBOL ptr, byref initree as 
 	end if
 
 	'' Disallow initialization of global dynamic strings
-	'' (not implemented - requires executing code)
-	if( (symbGetType( sym ) = FB_DATATYPE_STRING) and (not symbIsRef( sym )) ) then
+	'' (not implemented - requires executing code).  A dynamic USTRING is the
+	'' same descriptor-plus-heap shape; it used to slip past this check and
+	'' reach the backend as a static initializer, which gcc rejected and the
+	'' gas backends emitted as garbage.
+	if( ((symbGetType( sym ) = FB_DATATYPE_STRING) or (symbGetType( sym ) = FB_DATATYPE_USTRING)) _
+	    and (not symbIsRef( sym )) ) then
 		errReport( FB_ERRMSG_CANTINITDYNAMICSTRINGS, TRUE )
 		astDelTree( initree )
 		initree = NULL

@@ -393,6 +393,14 @@ Version 1.20.0
   as it does for STRING. That broke 'for each s in a' over an
   xArray( of ustring ), whose iterator returns BYREF AS CONST T. The rtlib
   assign now gets the destination without its CONST bit, as STRING's does.
+- USTRING in static data with an initializer: a dynamic 'dim shared as ustring
+  s = "x"' (or STATIC) was accepted and reached the backend, where gcc rejected
+  the C and gas/gas64 emitted garbage; it now gives error 87, as a dynamic
+  STRING does. A 'ustring * N' initialized from a literal compiled on gas and
+  gas64 but packed the bytes two to a code unit ("abc" read back as two wrong
+  characters) and did not compile on gcc; the literal is now converted to
+  UTF-16 at compile time and emitted unit by unit on every backend, with
+  warning 9 when it does not fit, as for a local.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

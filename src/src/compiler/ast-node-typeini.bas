@@ -871,6 +871,54 @@ function astTypeIniFlush overload _
 	function = astTypeIniFlush( astNewVAR( target ), initree, update_typeinicount, assignoptions )
 end function
 
+'' A USTRING * N initialized from a string literal, in static data.
+''
+'' The literal becomes UTF-16 code units at compile time, through the same
+'' conversion a ustring literal in an expression gets (astNewUStrLiteral), and
+'' each unit is emitted as a 16-bit integer, the terminator included.  Neither
+'' string emitter fits: VARINISTR writes bytes, so 'abc' was packed two
+'' characters per unit (gas, gas64) or rejected as a narrow literal for a
+'' uint16 array (gcc); VARINIWSTR writes wchar_t, which is 4 bytes on Linux.
+private sub hLoadUstrLiteralIni _
+	( _
+		byval sym as FBSYMBOL ptr, _
+		byval litsym as FBSYMBOL ptr, _
+		byval edtype as integer _
+	)
+
+	dim as integer n = any
+	dim as ushort ptr units = any
+
+	if( edtype = FB_DATATYPE_WCHAR ) then
+		units = hHostWstrToUstr( hUnescapeW( symbGetVarLitTextW( litsym ) ), n )
+	else
+		units = hUtf8ToUstr( hUnescape( symbGetVarLitText( litsym ) ), n )
+	end if
+
+	'' capacity in units, without the terminator
+	dim as longint cap = symbGetUstrLength( sym )
+	if( n > cap ) then
+		errReportWarn( FB_WARNINGMSG_LITSTRINGTOOBIG )
+		n = cap
+	end if
+
+	irEmitVARINISCOPEBEGIN( sym, TRUE )
+
+	for i as integer = 0 to n - 1
+		irEmitVARINIi( sym, units[i] )
+	next
+
+	'' the terminator, then zeros up to the declared size
+	irEmitVARINIi( sym, 0 )
+	if( cap > n ) then
+		irEmitVARINIPAD( (cap - n) * typeGetSize( FB_DATATYPE_FIXUSTR ), 0 )
+	end if
+
+	irEmitVARINISCOPEEND( )
+
+	UstrFree( units )
+end sub
+
 private sub hFlushExprStatic( byval n as ASTNODE ptr, byval basesym as FBSYMBOL ptr )
 	'' Get lhs symbol: maybe a field (in case of TYPEINI_ASSIGN in a struct),
 	'' or the basesym (in case of TYPEINI_ASSIGN to global var).
@@ -938,8 +986,12 @@ private sub hFlushExprStatic( byval n as ASTNODE ptr, byval basesym as FBSYMBOL 
 		end if
 	'' literal string..
 	else
+		'' USTRING * N?
+		if( sdtype = FB_DATATYPE_FIXUSTR ) then
+			hLoadUstrLiteralIni( sym, litsym, edtype )
+
 		'' not a wstring?
-		if( sdtype <> FB_DATATYPE_WCHAR ) then
+		elseif( sdtype <> FB_DATATYPE_WCHAR ) then
 			'' convert?
 			if( edtype <> FB_DATATYPE_WCHAR ) then
 				'' symbGetStrLength() returns length
