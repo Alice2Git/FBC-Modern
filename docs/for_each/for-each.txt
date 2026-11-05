@@ -88,6 +88,13 @@ so an iterator with a destructor is destroyed on normal exit, on EXIT FOR, and
 on anything else that leaves the scope. x is declared inside the body's scope,
 so it is constructed and destructed per iteration for types that need it.
 
+A collection that is a TEMPORARY -- 'for each x in f( )' with f returning it by
+value, or 'for each x in MyList( 1, 2, 3 )' -- lives until the loop ends, like
+C++'s range-for, and is destroyed once on every way out: the normal end, EXIT
+FOR, RETURN. Before, it died right after GetIterator( ) and the iterator read
+freed memory. A collection given as a variable or as a BYREF result is used in
+place, not copied, so writes through 'for each byref' reach it.
+
 An array or a string becomes an ordinary FOR over a hidden counter with the
 element bound at the top of the body. No iterator object is materialised, and
 the emitted code is what the hand-written index loop emits -- FOR EACH over an
@@ -181,3 +188,6 @@ Five fail-tests and five golden diagnostic files cover the errors.
 tests/generics/foreach-inherited.bas covers protocol members inherited from a
 base type -- plain, generic and virtual -- and errors/foreach-iterator-not-type
 a GetIterator( ) that returns something other than an iterator TYPE.
+tests/generics/foreach-temporary.bas covers temporary collections: a function
+result, a constructor call, nesting, EXIT FOR, CONTINUE FOR, RETURN from the
+body, a BYREF result written through, and FB.Array( of string ).

@@ -379,6 +379,14 @@ Version 1.20.0
   'const operator [] byref as const T' (error 276 before). ValueOr( ) takes a
   'byref as const T' default and returns a copy instead of a reference; write
   through Value( ), which is unchanged and stays non-const.
+- FOR EACH over a temporary collection -- 'for each x in F( )' with F returning
+  the collection by value, or 'for each x in T( ... )' -- destroyed the
+  temporary at the end of the FOR EACH statement, right after GetIterator( ), so
+  an iterator pointing into it read freed memory: no iterations, empty strings
+  or a crash depending on the backend. The temporaries of the collection
+  expression now live until the loop ends, as WITH's do, and are destroyed once
+  on every way out (normal end, EXIT FOR, RETURN). A collection given as a
+  variable or a BYREF result is not copied.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

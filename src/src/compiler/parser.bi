@@ -477,6 +477,10 @@ declare sub cEndStatement( )
 declare sub cContinueStatement( )
 declare sub cWithStmtBegin( )
 declare sub cWithStmtEnd( )
+
+'' Turn the temporaries in a scope into ordinary locals of that scope, so they
+'' live until it closes (WITH, FOR EACH; body in parser-compound-with.bas).
+declare function hExtendTempLifeTime( byval scp as FBSYMBOL ptr ) as ASTNODE ptr
 declare sub cScopeStmtBegin( )
 declare sub cScopeStmtEnd( )
 

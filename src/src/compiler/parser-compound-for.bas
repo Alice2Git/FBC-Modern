@@ -1476,6 +1476,28 @@ sub cForEachStmtBegin( )
 			exit sub
 		end if
 
+		'' A collection that is a temporary -- a function returning it by value,
+		'' a TYPE<>( ... ) -- must live as long as the loop.  It used to die at
+		'' the end of this statement, right after GetIterator, so an iterator
+		'' that points into the collection read freed memory: no iterations,
+		'' empty strings or a crash, depending on the backend.  Same fix as
+		'' WITH: the outer scope was opened before the expression was parsed,
+		'' so every temporary the expression made belongs to it; turning them
+		'' into ordinary locals of that scope destroys them when the loop ends,
+		'' on EXIT FOR and on anything else that leaves the scope, like C++'s
+		'' range-for.  Nothing has been astAdd()ed since the scope opened, so
+		'' the dtor list still holds them.
+		if( astIsCALL( srcexpr ) ) then
+			srcexpr = astBuildCallResultUdt( srcexpr )
+		end if
+		srcexpr = astTypeIniUpdate( srcexpr )
+		if( outerscopenode <> NULL ) then
+			dim as ASTNODE ptr tempdecls = hExtendTempLifeTime( outerscopenode->sym )
+			if( tempdecls <> NULL ) then
+				astAdd( tempdecls )
+			end if
+		end if
+
 		'' The collection expression is evaluated EXACTLY ONCE: GetIterator is
 		'' called on it here, before the loop, and never mentioned again.
 		dim as ASTNODE ptr getcall = astBuildCall( getit, srcexpr, NULL, NULL )

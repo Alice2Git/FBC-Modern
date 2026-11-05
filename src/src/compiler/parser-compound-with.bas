@@ -14,7 +14,10 @@
 '' * remove them from the AST dtor list (so they won't be automatically
 ''   destroyed at the next astAdd() anymore)
 '' * build DECL nodes for them (for the C backend)
-private function hExtendTempLifeTime( byval scp as FBSYMBOL ptr ) as ASTNODE ptr
+''
+'' Also used by FOR EACH, whose collection expression may be a temporary that
+'' has to outlive the statement (parser-compound-for.bas).
+function hExtendTempLifeTime( byval scp as FBSYMBOL ptr ) as ASTNODE ptr
 	dim as ASTNODE ptr t = NULL
 
 	assert( symbIsScope( scp ) )

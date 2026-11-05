@@ -7,7 +7,7 @@ dreptul lui, pe linux-x86_64, cu toolchain-ul `toolchains/fbc-modern-linux` de l
 
 | # | Bug | Gravitate | Stare |
 |---|---|---|---|
-| 1 | `for each` peste un container întors de o funcție: memorie eliberată | **mare** (crash / date greșite) | nereparat; ocolit în kit-uri |
+| 1 | `for each` peste un container întors de o funcție: memorie eliberată | **mare** (crash / date greșite) | **reparat** în sursă și în compilatoarele Windows; `fbc` Linux nereconstruit încă |
 | 2 | `FB.Array` instanțiat într-un namespace cu nume de o literă (`K`, `I`...) | medie | nereparat; ocolit |
 | 3 | `extern ... alias` într-un namespace e tot decorat cu namespace-ul | medie | nereparat; ocolit |
 | 4 | gas64: obiectele n-au secțiunea `.note.GNU-stack` (avertisment `ld`) | mică | nereparat; ocolit |
@@ -24,7 +24,13 @@ declarată înainte („Duplicated definition”); `for each` nu merge peste o l
 
 ## 1. `for each` peste un container întors de o funcție — memorie eliberată
 
-**Ce se întâmplă.** În `for each x in F( )`, unde `F` întoarce un container prin valoare (de exemplu
+**Reparat** (noiembrie 2026): temporarele din expresia colecției trăiesc acum până la sfârșitul
+buclei, ca la `WITH` (`parser-compound-for.bas`, `hExtendTempLifeTime`). Test de regresie:
+`src/tests/generics/foreach-temporary.bas`. Compilatoarele Windows sunt reconstruite; `fbc` de Linux
+din `toolchains/fbc-modern-linux` încă nu, deci pe Linux ocolirea de mai jos rămâne necesară până
+la reconstruire. Descrierea de mai jos e păstrată ca istoric.
+
+**Ce se întâmpla.** În `for each x in F( )`, unde `F` întoarce un container prin valoare (de exemplu
 `FB.Array( of string )`), obiectul temporar întors de `F` e distrus **înainte** de buclă. Iteratorul
 lucrează apoi pe memorie eliberată: crash (segmentation fault) sau date greșite.
 
