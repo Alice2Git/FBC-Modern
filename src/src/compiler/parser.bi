@@ -1237,11 +1237,14 @@ type FB_GENSCOPE
 	hidelocals       as integer                  '' did this entry bump symb.hidelocals?
 end type
 
+'' declns: the namespace to keep visible when there is no gensym to take it
+'' from (a lambda replay passes the namespace the lambda was written in)
 declare sub genEnterGlobalScope _
 	( _
 		byref gs as FB_GENSCOPE, _
 		byval gensym as FBSYMBOL ptr, _
-		byval hidelocals as integer _
+		byval hidelocals as integer, _
+		byval declns as FBSYMBOL ptr = NULL _
 	)
 
 declare sub genLeaveGlobalScope( byref gs as FB_GENSCOPE )

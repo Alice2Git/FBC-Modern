@@ -791,6 +791,13 @@ type FBS_NAMESPACE
 
 	cnt             as integer                  '' times this ns was re-opened
 	last_tail       as FBSYMBOL_ ptr            '' point to last tail
+
+	'' A generic instantiation's synthetic namespace (GENERICSCOPE) only: the
+	'' namespace the generic was DECLARED in, or NULL for the global one.  The
+	'' synthetic namespace itself always sits in the global namespace, so this
+	'' is what the mangler emits in its place -- NS.Twice( of long ) and
+	'' Twice( of long ) must not get the same external name.
+	declns          as FBSYMBOL_ ptr
 end type
 
 '' namespace import (USING)
@@ -843,6 +850,12 @@ type FBS_GENERIC
 	instances       as THASH ptr                '' instantiation cache: canonical type-arg key -> FBSYMBOL ptr
 	srcline         as integer                  '' where the generic itself was declared, for the
 	srcfile         as zstring ptr              '' "in instantiation of" chain
+
+	'' The namespace whose names the replayed bodies see, when it is not the
+	'' one the generic is declared in: a capturing lambda's closure generic is
+	'' declared in the global namespace, but its body was written wherever the
+	'' lambda was.  NULL = the declaring namespace (see genEnterGlobalScope).
+	lexns           as FBSYMBOL_ ptr
 end type
 
 ''

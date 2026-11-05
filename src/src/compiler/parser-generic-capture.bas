@@ -365,6 +365,7 @@ sub cGenericTypeDecl _
 	sym->gen.tokhead = NULL
 	sym->gen.toktail = NULL
 	sym->gen.instances = NULL
+	sym->gen.lexns = NULL
 	sym->gen.srcline = startline
 	'' A private copy in the file's ORIGINAL case.  env.inf.incfile is interned
 	'' and may be up-cased, which would make every diagnostic from an instantiated
@@ -895,6 +896,7 @@ function cGenericProcDeclNew( byval tk as integer ) as integer
 	sym->gen.tokhead = NULL
 	sym->gen.toktail = NULL
 	sym->gen.instances = NULL
+	sym->gen.lexns = NULL
 	sym->gen.srcline = startline
 	sym->gen.srcfile = ZstrAllocate( len( env.inf.name ) )
 	*sym->gen.srcfile = env.inf.name
@@ -1027,6 +1029,7 @@ function cGenericOpDecl( byval tk as integer ) as integer
 	sym->gen.tokhead = NULL
 	sym->gen.toktail = NULL
 	sym->gen.instances = NULL
+	sym->gen.lexns = NULL
 	sym->gen.srcline = startline
 	sym->gen.srcfile = ZstrAllocate( len( env.inf.name ) )
 	*sym->gen.srcfile = env.inf.name

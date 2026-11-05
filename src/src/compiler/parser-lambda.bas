@@ -56,6 +56,12 @@ type FB_LAMBDA
 	'' lambdaDrainBodies( ).
 	instns          as FBSYMBOL ptr
 
+	'' The namespace the lambda is WRITTEN in.  Every replay of it is parsed at
+	'' module level in the global namespace, so this is pushed onto the search
+	'' chain for the replay, as a generic's declaring namespace is; without it
+	'' a lambda body inside 'namespace NS' could not see NS's CONSTs and ENUMs.
+	declns          as FBSYMBOL ptr
+
 	'' capturing lambdas only
 	clo             as FBSYMBOL ptr             '' the synthesised closure struct
 	capcount        as integer
@@ -551,7 +557,7 @@ private sub hReplayLambdaBody( byval lam as FB_LAMBDA ptr )
 		nested = TRUE
 	end if
 
-	genEnterGlobalScope( gs, NULL, FALSE )
+	genEnterGlobalScope( gs, NULL, FALSE, lam->declns )
 
 	lambdactx.inreplay += 1
 	if( genReplayBegin( st, text, lam->srcline, lam->srcfile ) ) then
@@ -902,7 +908,7 @@ private function hBuildClosure _
 	        kw + " " + cloid + "( of " + params + " )." + FB_INVOKE_NAME + " " + hdr + _
 	        hCaptureAliases( lam ) + hBodyText( lam )
 
-	genEnterGlobalScope( gs, NULL, TRUE )
+	genEnterGlobalScope( gs, NULL, TRUE, lam->declns )
 
 	'' see the note in cLambdaExpr: widen the top entry, never empty the stack
 	dim as FB_CMPSTMTSTK ptr stk = stackGetTOS( @parser.stmt.stk )
@@ -934,6 +940,10 @@ private function hBuildClosure _
 		return FALSE
 	end if
 
+	'' The closure generic lives in the global namespace, but its INVOKE body is
+	'' the lambda's, written in lam->declns: its replays must see that one.
+	gensym->gen.lexns = lam->declns
+
 	'' Instantiate it with the captured variables' ACTUAL types, taken straight
 	'' off their symbols -- never named, never printed, never re-parsed.
 	for i as integer = 0 to lam->capcount-1
@@ -947,7 +957,7 @@ private function hBuildClosure _
 		argsubtype( lam->capcount + i ) = symbGetSubtype( outer( i ) )
 	next
 
-	genEnterGlobalScope( gs, NULL, TRUE )
+	genEnterGlobalScope( gs, NULL, TRUE, lam->declns )
 	lam->clo = genInstantiateType( gensym, argdtype(), argsubtype(), argcount )
 	genLeaveGlobalScope( gs )
 
@@ -992,6 +1002,7 @@ function cLambdaExpr( ) as ASTNODE ptr
 	lam->srcline = startline
 	lam->done    = TRUE
 	lam->instns  = genCurrentInstNamespc( )
+	lam->declns  = symbGetCurrentNamespc( )
 	lam->clo     = NULL
 	lam->capcount = 0
 	lam->srcfile = ZstrAllocate( len( env.inf.name ) )
@@ -1143,7 +1154,7 @@ function cLambdaExpr( ) as ASTNODE ptr
 
 	'' hidelocals = TRUE: a DECLARATION replay creates no locals of its own, and
 	'' the call site's locals must not be visible to it.
-	genEnterGlobalScope( gs, NULL, TRUE )
+	genEnterGlobalScope( gs, NULL, TRUE, lam->declns )
 
 	'' genEnterGlobalScope( ) moves the PARSE to module level, but the
 	'' compound-statement stack still holds whatever is open at the call site --

@@ -51,6 +51,22 @@ declare function hAbbrevAdd _
 	) as FB_MANGLEABBR ptr
 declare sub hMangleTemplateArgs( byref mangled as string, byval sym as FBSYMBOL ptr )
 
+'' The namespace a mangled name continues with, going outwards from ns.
+''
+'' A generic instantiation's synthetic namespace is never emitted itself, and
+'' it always sits in the global namespace, wherever the generic was declared.
+'' Its place is taken by the DECLARING namespace (FBS_NAMESPACE.declns), as a
+'' C++ template in a namespace mangles: otherwise NS.Twice( of long ) and a
+'' global Twice( of long ) got one external name between them.
+private function hMangleParentNs( byval ns as FBSYMBOL ptr ) as FBSYMBOL ptr
+	if( symbIsGenericScope( ns ) ) then
+		if( ns->nspc.declns <> NULL ) then
+			return ns->nspc.declns
+		end if
+	end if
+	function = symbGetNamespace( ns )
+end function
+
 '' inside a namespace or class?
 ''
 '' The synthetic namespace wrapping a generic instantiation does not count:
@@ -62,7 +78,7 @@ private function hIsNested( byval s as FBSYMBOL ptr ) as integer
 		if( symbIsGenericScope( ns ) = FALSE ) then
 			exit while
 		end if
-		ns = symbGetNamespace( ns )
+		ns = hMangleParentNs( ns )
 	wend
 	function = (ns <> @symbGetGlobalNamespc( ))
 end function
@@ -701,7 +717,7 @@ sub symbMangleType _
 			if( symbIsGenericScope( ns ) = FALSE ) then
 				exit while
 			end if
-			ns = symbGetNamespace( ns )
+			ns = hMangleParentNs( ns )
 		wend
 
 		if( ns = @symbGetGlobalNamespc( ) ) then
@@ -875,7 +891,7 @@ private sub hMangleNamespace _
 		'' the one that does get emitted.
 		dim as FBSYMBOL ptr h = ns
 		while( (h <> NULL) andalso symbIsGenericScope( h ) )
-			h = symbGetNamespace( h )
+			h = hMangleParentNs( h )
 		wend
 
 		if( (h <> NULL) andalso (h <> @symbGetGlobalNamespc( )) ) then
@@ -895,7 +911,7 @@ private sub hMangleNamespace _
 			tos += 1
 			nsStk(tos) = ns
 		end if
-		ns = symbGetNamespace( ns )
+		ns = hMangleParentNs( ns )
 	loop until( ns = @symbGetGlobalNamespc( ) )
 
 	'' nothing left to emit?

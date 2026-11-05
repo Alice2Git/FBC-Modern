@@ -174,15 +174,20 @@ sub genEnterGlobalScope _
 	( _
 		byref gs as FB_GENSCOPE, _
 		byval gensym as FBSYMBOL ptr, _
-		byval hidelocals as integer _
+		byval hidelocals as integer, _
+		byval declns as FBSYMBOL ptr _
 	)
 
 	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
 
 	'' captured before the switch, so the pop in genLeaveGlobalScope is exact
-	gs.declns = NULL
+	gs.declns = declns
 	if( gensym <> NULL ) then
-		gs.declns = symbGetNamespace( gensym )
+		if( gensym->gen.lexns <> NULL ) then
+			gs.declns = gensym->gen.lexns
+		else
+			gs.declns = symbGetNamespace( gensym )
+		end if
 	end if
 
 	gs.scope     = parser.scope
@@ -1061,6 +1066,54 @@ end sub
 '' itself produce the same text, so they share one instantiation rather than
 '' silently producing two incompatible types.  The same call is what
 '' symbAddArrayDescriptorType() uses to key array descriptor types.
+'' The id of an instantiation's synthetic namespace: the canonical key, prefixed
+'' with the namespace the generic was DECLARED in, with the characters that are
+'' not legal in an identifier folded to '$'.
+''
+'' The synthetic namespace is always created in the global namespace (the
+'' caller has entered it), so without the declaring namespace in its id,
+'' 'Twice( of long )' and 'NS.Twice( of long )' reopened ONE namespace: the
+'' second instantiation found the first one's prototype instead of its own and
+'' the call failed with 'Expected expression' -- or, in a PRINT, printed an
+'' empty line.  Same for two same-named generic TYPEs.  Still deterministic,
+'' which the comment in genInstantiateType says it must be.
+private function hInstNamespaceId _
+	( _
+		byval gensym as FBSYMBOL ptr, _
+		byref id as const string _
+	) as string
+
+	dim as FBSYMBOL ptr glob = @symbGetGlobalNamespc( )
+	dim as FBSYMBOL ptr ns = symbGetNamespace( gensym )
+	dim as string key = id, nspid = "$gen$"
+
+	do while( (ns <> NULL) andalso (ns <> glob) )
+		key = *symbGetName( ns ) + "." + key
+		ns = symbGetNamespace( ns )
+	loop
+
+	for i as integer = 1 to len( key )
+		select case key[i-1]
+		case asc( "<" ), asc( ">" ), asc( "," ), asc( "$" ), asc( "." )
+			nspid += "$"
+		case else
+			nspid += chr( key[i-1] )
+		end select
+	next
+
+	function = nspid
+end function
+
+'' Record the generic's declaring namespace on the synthetic one, for the
+'' mangler (see FBS_NAMESPACE.declns): a generic declared in NS mangles as a
+'' member of NS, as a C++ template there does.
+private sub hTagInstNamespace( byval nsp as FBSYMBOL ptr, byval gensym as FBSYMBOL ptr )
+	dim as FBSYMBOL ptr declns = symbGetNamespace( gensym )
+	if( declns <> @symbGetGlobalNamespc( ) ) then
+		nsp->nspc.declns = declns
+	end if
+end sub
+
 private function hArgKey _
 	( _
 		byval gensym as FBSYMBOL ptr, _
@@ -1202,21 +1255,14 @@ function genInstantiateType _
 	'' the request came from.
 	genEnterGlobalScope( gs, gensym, TRUE )
 
-	nspid = "$gen$"
-	for i as integer = 1 to len( id )
-		select case id[i-1]
-		case asc( "<" ), asc( ">" ), asc( "," ), asc( "$" )
-			nspid += "$"
-		case else
-			nspid += chr( id[i-1] )
-		end select
-	next
+	nspid = hInstNamespaceId( gensym, id )
 	nsp = symbAddNamespace( strptr( nspid ), NULL )
 	if( nsp = NULL ) then
 		genLeaveGlobalScope( gs )
 		return NULL
 	end if
 	nsp->attrib or= FB_SYMBATTRIB_GENERICSCOPE
+	hTagInstNamespace( nsp, gensym )
 
 	symbNestBegin( nsp, FALSE )
 	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns
@@ -1443,15 +1489,7 @@ function genInstantiateProc _
 
 	genEnterGlobalScope( gs, gensym, TRUE )
 
-	nspid = "$gen$"
-	for i as integer = 1 to len( id )
-		select case id[i-1]
-		case asc( "<" ), asc( ">" ), asc( "," ), asc( "$" )
-			nspid += "$"
-		case else
-			nspid += chr( id[i-1] )
-		end select
-	next
+	nspid = hInstNamespaceId( gensym, id )
 
 	nsp = symbAddNamespace( strptr( nspid ), NULL )
 	if( nsp = NULL ) then
@@ -1459,6 +1497,7 @@ function genInstantiateProc _
 		return NULL
 	end if
 	nsp->attrib or= FB_SYMBATTRIB_GENERICSCOPE
+	hTagInstNamespace( nsp, gensym )
 
 	symbNestBegin( nsp, FALSE )
 	dim as FBSYMBOL ptr savedinstns = genctx2.curinstns

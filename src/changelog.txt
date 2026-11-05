@@ -401,6 +401,24 @@ Version 1.20.0
   characters) and did not compile on gcc; the literal is now converted to
   UTF-16 at compile time and emitted unit by unit on every backend, with
   warning 9 when it does not fit, as for a local.
+- TYPEOF / SIZEOF / LEN of a call to a namespace-qualified function,
+  'typeof( N.F( 1 ) )', failed with error 42 (Variable not declared, F): the
+  type attempt consumed 'N.' and the namespace prefix was kept for the
+  expression retry only for CONSTs, variables and fields, not procedures.
+- Lambdas: a lambda written inside a NAMESPACE could not see that namespace's
+  names (CONST, ENUM, procedures, types in its header), error 42. Every lambda
+  is replayed at module level; the namespace it was written in is now pushed
+  onto the search chain for the replay, as a generic's declaring namespace is,
+  for capturing lambdas too.
+- Generics: a generic in a namespace and a global one with the same name,
+  instantiated with the same type arguments, collided -- 'NS.Twice( @f )'
+  after 'Twice( @f )' failed with 'Expected expression' (or PRINTed an empty
+  line), and NS.Box( of long ) after Box( of long ) was not a type. Both
+  instantiations shared one synthetic namespace and one external name. The
+  synthetic namespace's id now includes the declaring namespace, and an
+  instantiation of a generic declared in a namespace mangles as a member of
+  that namespace, as a C++ template there does (NS::Twice<...>). Generics
+  declared at global level mangle exactly as before.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

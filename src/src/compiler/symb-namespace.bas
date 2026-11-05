@@ -61,6 +61,7 @@ function symbAddNamespace _
 	s->nspc.ns.ext = NULL
 	s->nspc.cnt = 0
 	s->nspc.last_tail = NULL
+	s->nspc.declns = NULL
 
 	function = s
 

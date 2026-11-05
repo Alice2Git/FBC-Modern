@@ -794,10 +794,14 @@ function cSymbolType _
 				'' cTypeOrExpression() will expect that the namespace prefix
 				'' will be preserved if we abort and retry as an expression.
 				'' Eventually namespace prefix gets used in cIdentifier()
+				'' A PROC too: 'typeof( N.F( 1 ) )' consumed 'N.' here, and
+				'' without the saved chain the expression retry started at a
+				'' bare 'F' -- error 42, Variable not declared, F.
 				if( options and FB_SYMBTYPEOPT_SAVENSPREFIX ) then
 					assert( parser.nsprefix = NULL )
 					select case symbGetClass( chain_->sym )
-					case FB_SYMBCLASS_CONST, FB_SYMBCLASS_VAR, FB_SYMBCLASS_FIELD
+					case FB_SYMBCLASS_CONST, FB_SYMBCLASS_VAR, FB_SYMBCLASS_FIELD, _
+					     FB_SYMBCLASS_PROC
 						parser.nsprefix = chain_
 					end select
 				end if
