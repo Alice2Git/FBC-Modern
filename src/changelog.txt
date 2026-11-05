@@ -387,6 +387,12 @@ Version 1.20.0
   expression now live until the loop ends, as WITH's do, and are destroyed once
   on every way out (normal end, EXIT FOR, RETURN). A collection given as a
   variable or a BYREF result is not copied.
+- USTRING: a CONST variable could not be initialized -- 'dim as const ustring
+  s = "x"' failed with error 181 at parameter 1, and so did 'var s = f( )' with
+  f returning BYREF AS CONST USTRING, because VAR keeps the initializer's CONST
+  as it does for STRING. That broke 'for each s in a' over an
+  xArray( of ustring ), whose iterator returns BYREF AS CONST T. The rtlib
+  assign now gets the destination without its CONST bit, as STRING's does.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

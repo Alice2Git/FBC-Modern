@@ -661,7 +661,12 @@ function rtlUStrAssign _
 	'' length is derived from. Same rule as the narrow builders.
 	dlgt = rtlCalcStrLen( dst, ddtype )
 
-	if( astNewARG( proc, dst ) = NULL ) then exit function
+	'' The destination goes in with its CONST bit dropped, as rtlStrAssign does:
+	'' an initializer is the one assignment a CONST variable receives, and the
+	'' parser has already refused any other assignment to it.  Passing the full
+	'' type made 'dim as const ustring s = ...', and 'var s = f( )' with f
+	'' returning BYREF AS CONST USTRING, fail with error 181 at parameter 1.
+	if( astNewARG( proc, dst, ddtype ) = NULL ) then exit function
 	if( astNewARG( proc, astNewCONSTi( dlgt ) ) = NULL ) then exit function
 
 	slgt = rtlCalcStrLen( src, sdtype )
