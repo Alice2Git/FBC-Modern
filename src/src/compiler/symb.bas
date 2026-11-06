@@ -405,6 +405,16 @@ function symbCanDuplicate _
 					exit function
 				end if
 
+			'' A local (a procedure's, a parameter, a SCOPE block's) may have
+			'' the name of a namespace and hides it while in scope, as in C++:
+			'' 'namespace K' used to make every 'dim k' in every procedure an
+			'' error, a library's generic body included.  At module level,
+			'' in the namespace's own scope, it is still a duplicate.
+			case FB_SYMBCLASS_NAMESPACE
+				if( s->scope = head_sym->scope ) then
+					exit function
+				end if
+
 			'' and other vars if they have different suffixes -- if any
 			'' with suffix exist, a suffix-less will not be accepted (and vice-versa)
 			case FB_SYMBCLASS_VAR, FB_SYMBCLASS_RESERVED

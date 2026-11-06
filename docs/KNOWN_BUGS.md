@@ -8,7 +8,7 @@ dreptul lui, pe linux-x86_64, cu toolchain-ul `toolchains/fbc-modern-linux` de l
 | # | Bug | Gravitate | Stare |
 |---|---|---|---|
 | 1 | `for each` peste un container întors de o funcție: memorie eliberată | **mare** (crash / date greșite) | **reparat** în sursă și în compilatoarele Windows; `fbc` Linux nereconstruit încă |
-| 2 | `FB.Array` instanțiat într-un namespace cu nume de o literă (`K`, `I`...) | medie | nereparat; ocolit |
+| 2 | `FB.Array` instanțiat într-un namespace cu nume de o literă (`K`, `I`...) | medie | **reparat** în sursă și în compilatoarele Windows; `fbc` Linux nereconstruit încă |
 | 3 | `extern ... alias` într-un namespace e tot decorat cu namespace-ul | medie | nereparat; ocolit |
 | 4 | gas64: obiectele n-au secțiunea `.note.GNU-stack` (avertisment `ld`) | mică | nereparat; ocolit |
 | 5 | `-gen gcc -O 2 -exx`: avertismente false `-Wmaybe-uninitialized` | mică | nereparat; ocolit |
@@ -59,7 +59,15 @@ buclei), cum face C++ cu range-for. Grav pentru că pare cod corect și merge un
 
 ## 2. `FB.Array` instanțiat într-un namespace cu nume de o literă
 
-**Ce se întâmplă.** Corpurile generice din `fb/array.bi` folosesc variabile locale `k`, `i`... La
+**Reparat** (noiembrie 2026). Cauza nu era instanțierea, ci o regulă a limbajului: odată declarat
+`namespace K`, nicio variabilă locală nu se putea numi `k` (nici în cod obișnuit). Acum o variabilă
+locală, un parametru sau o variabilă dintr-un bloc `SCOPE` poate avea numele unui namespace și îl
+ascunde cât e în scope, ca în C++; `K.membru` rămâne accesibil când variabila locală nu e UDT. O
+variabilă la nivel de modul cu numele namespace-ului rămâne „Duplicated definition”. Teste:
+`src/tests/namespace/local-hides-namespace.bas` și `local-hides-namespace-modlevel.bas`. `fbc` de
+Linux nu e încă reconstruit. Descrierea de mai jos e păstrată ca istoric.
+
+**Ce se întâmpla.** Corpurile generice din `fb/array.bi` folosesc variabile locale `k`, `i`... La
 instanțiere, un namespace al apelantului cu același nume (FreeBASIC nu ține cont de litere mari / mici)
 le ascunde, iar instanțierea pică.
 

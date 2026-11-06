@@ -284,6 +284,26 @@ function cIdentifier _
 			end if
 		end if
 
+		'' 'K.v' where a local 'k' hides namespace K (symbCanDuplicate): a
+		'' variable that is not a UDT has no members, so a '.' after it can only
+		'' mean the namespace.  A UDT variable keeps the '.', as member access.
+		if( (parent = NULL) andalso (symbGetClass( sym ) = FB_SYMBCLASS_VAR) ) then
+			if( typeGetDtAndPtrOnly( symbGetType( sym ) ) <> FB_DATATYPE_STRUCT ) then
+				if( lexGetLookAhead( 1, LEXCHECK_NOPERIOD ) = CHAR_DOT ) then
+					dim as FBSYMBOL ptr nsdup = sym->hash.next
+					while( nsdup <> NULL )
+						if( symbGetClass( nsdup ) = FB_SYMBCLASS_NAMESPACE ) then
+							exit while
+						end if
+						nsdup = nsdup->hash.next
+					wend
+					if( nsdup <> NULL ) then
+						sym = nsdup
+					end if
+				end if
+			end if
+		end if
+
 		select case as const symbGetClass( sym )
 		case FB_SYMBCLASS_NAMESPACE, FB_SYMBCLASS_CLASS, FB_SYMBCLASS_ENUM
 
@@ -334,6 +354,31 @@ function cIdentifier _
 			'' this last namespace id manually (like any other id),
 			'' because for them, this is not a syntax error.
 			if( symbGetClass( sym ) = FB_SYMBCLASS_NAMESPACE ) then
+				'' Not followed by '.', so the name cannot mean the namespace.
+				'' A local declared with the same name hides it, as in C++:
+				'' 'namespace K' made every 'dim k' / 'for k as long' / use of
+				'' such a k fail, in plain code and in a library's generic body
+				'' alike.  Only for an unqualified name, never for 'A.K'.
+				if( parent = NULL ) then
+					'' another symbol with this name (the local), further on?
+					dim as FBSYMCHAIN ptr other = symbChainGetNext( chain_ )
+					while( other <> NULL )
+						if( symbGetClass( other->sym ) <> FB_SYMBCLASS_NAMESPACE ) then
+							exit while
+						end if
+						other = symbChainGetNext( other )
+					wend
+					if( other <> NULL ) then
+						chain_ = other
+						exit do
+					end if
+
+					'' nothing else: a declaration of a new name
+					if( (options and FB_IDOPT_ISDECL) <> 0 ) then
+						return NULL
+					end if
+				end if
+
 				if( (options and FB_IDOPT_SHOWERROR) <> 0 ) then
 					'' skip id
 					lexSkipToken( LEXCHECK_NOPERIOD or LEXCHECK_POST_SUFFIX )
@@ -525,6 +570,15 @@ function cParentId _
 
 		'' '.'?
 		if( lexGetLookAhead( 1, LEXCHECK_NOPERIOD ) <> CHAR_DOT ) then
+			'' A variable being declared with the name of a namespace hides the
+			'' namespace (see cIdentifier): no parent, and the id is left for
+			'' the caller to declare.
+			if( (symbGetClass( sym ) = FB_SYMBCLASS_NAMESPACE) andalso _
+			    (parent = NULL) andalso ((options and FB_IDOPT_ISVAR) <> 0) ) then
+				sym = NULL
+				exit do
+			end if
+
 			'' skip id
 			lexSkipToken( LEXCHECK_NOPERIOD )
 

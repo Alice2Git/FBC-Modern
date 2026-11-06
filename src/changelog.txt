@@ -419,6 +419,15 @@ Version 1.20.0
   instantiation of a generic declared in a namespace mangles as a member of
   that namespace, as a C++ template there does (NS::Twice<...>). Generics
   declared at global level mangle exactly as before.
+- Namespaces: a local may have the name of a namespace and hides it while in
+  scope, as in C++. With 'namespace K' declared, every 'dim k', 'for k as
+  long', parameter 'k' and 'var k' failed (Expected period / Duplicated
+  definition), which broke a library's generic body too: FB.Array( of T ) in
+  a namespace named K failed on fb/array.bi's own 'for k as long'. A local
+  of a procedure, a parameter or a SCOPE block's local may now share the
+  name; 'K.member' still reaches the namespace when the local is not a UDT. A
+  module-level variable in the namespace's own scope is still a duplicate.
+  Only code that did not compile before is affected.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was
