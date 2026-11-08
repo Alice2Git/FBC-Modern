@@ -428,6 +428,11 @@ Version 1.20.0
   name; 'K.member' still reaches the namespace when the local is not a UDT. A
   module-level variable in the namespace's own scope is still a duplicate.
   Only code that did not compile before is affected.
+- END: an exit code starting with a keyword that is a built-in function --
+  'end iif( ... )', 'end len( s )', 'end cint( x )' -- failed with error 33,
+  Illegal 'END': every 'END <keyword>' was taken for the end of a block. A
+  keyword followed by '(' is now parsed as the exit code; no block-ending
+  keyword is followed by '('.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

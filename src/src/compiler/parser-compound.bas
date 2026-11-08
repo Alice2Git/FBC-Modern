@@ -509,9 +509,17 @@ private sub cCompoundEnd( )
 		cEndStatement( )
 
 	case else
-		errReport( FB_ERRMSG_ILLEGALEND )
-		'' error recovery: skip stmt
-		hSkipStmt( )
+		'' 'END IIF( ... )', 'END LEN( s )', 'END CINT( x )': a keyword that
+		'' is a built-in function, so the exit code is an expression.  The
+		'' caller sends every 'END <keyword>' here, which made these "Illegal
+		'' END"; no block-ending keyword is followed by '('.
+		if( lexGetLookAhead( 2 ) = CHAR_LPRNT ) then
+			cEndStatement( )
+		else
+			errReport( FB_ERRMSG_ILLEGALEND )
+			'' error recovery: skip stmt
+			hSkipStmt( )
+		end if
 	end select
 end sub
 

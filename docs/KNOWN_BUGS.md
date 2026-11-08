@@ -12,7 +12,7 @@ dreptul lui, pe linux-x86_64, cu toolchain-ul `toolchains/fbc-modern-linux` de l
 | 3 | `extern ... alias` într-un namespace e tot decorat cu namespace-ul | medie | nereparat; ocolit |
 | 4 | gas64: obiectele n-au secțiunea `.note.GNU-stack` (avertisment `ld`) | mică | nereparat; ocolit |
 | 5 | `-gen gcc -O 2 -exx`: avertismente false `-Wmaybe-uninitialized` | mică | nereparat; ocolit |
-| 6 | `end iif( ... )` dă „Illegal END” | foarte mică | nereparat |
+| 6 | `end iif( ... )` dă „Illegal END” | foarte mică | **reparat** în sursă și în compilatoarele Windows; `fbc` Linux nereconstruit încă |
 | 7 | test instabil `chrono/clocks.bas:227` | test, nu compilator | nereparat |
 | 8 | gas64 Linux: structuri întoarse în registre stocate greșit | **mare** | **reparat** (PR #2) |
 
@@ -134,6 +134,10 @@ fbc -w all -gen gcc -O 2 -exx -c -i NetKit NetKit/tests/test_netkit.bas
 Un program mic nu le-a reprodus. **Ocolire:** configurația `-O 2` din teste rulează fără `-exx`.
 
 ## 6. `end iif( ... )` dă „Illegal END”
+
+**Reparat** (noiembrie 2026): după `END`, un cuvânt-cheie urmat de `(` e acum începutul codului de
+ieșire, nu sfârșitul unui bloc; merg și `end len( s )`, `end cint( x )`. Test:
+`src/tests/compound/end-keyword-function.bas`. Descrierea de mai jos e păstrată ca istoric.
 
 ```basic
 end iif( 1 = 1, 0, 1 )        '' error 33: Illegal 'END'
