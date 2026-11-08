@@ -357,6 +357,29 @@ function cTypeOrExpression _
 		'' Parse as type
 		assert( parser.nsprefix = NULL )
 		if( cSymbolType( dtype, subtype, lgt, is_fixlenstr, FB_SYMBTYPEOPT_SAVENSPREFIX ) ) then
+			'' 'T.S( )' with S a method of the UDT T: a call, so an expression.
+			'' The '.' after a name keeps it a type candidate ('NS.T', a nested
+			'' type, and 'sizeof( T.field )', which the caller completes with
+			'' cUdtTypeMember), so the type attempt read 'T' and stopped there:
+			'' len( T.S( ) ) and sizeof( T.S( ) ) failed with Expected ')'.
+			'' Decided here, AFTER the type, because peeking past '.' before it
+			'' disturbed the lexer for a later expression parse of 'T'.
+			if( (typeGetDtOnly( dtype ) = FB_DATATYPE_STRUCT) andalso (lexGetToken( ) = CHAR_DOT) ) then
+				if( lexGetLookAheadClass( 1 ) = FB_TKCLASS_IDENTIFIER ) then
+					dim as string memb = ucase( *lexGetLookAheadText( 1 ) )
+					dim as FBSYMCHAIN ptr mc = symbLookupAt( subtype, strptr( memb ), FALSE, FALSE )
+					if( mc <> NULL ) then
+						if( symbIsProc( mc->sym ) ) then
+							parser.nsprefix = NULL
+							'' '.'
+							lexSkipToken( LEXCHECK_NOPERIOD )
+							'' ID ( args ), then '.member' / '[i]' on the result
+							return cStrIdxOrMemberDeref( cFunctionEx( subtype, mc->sym ) )
+						end if
+					end if
+				end if
+			end if
+
 			'' Successful -- it's a type, not an expression
 			ambigioussizeof.maybeWarn( tk, TRUE )
 			parser.nsprefix = NULL
