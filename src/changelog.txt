@@ -439,6 +439,13 @@ Version 1.20.0
   stopped after 'T'. After the type, a '.' followed by a method of the UDT
   now makes it a call; fields ('sizeof( T.field )') still go through the type
   path.
+- gas64: a function returning a UDT of 64 bytes or more crashed when an
+  argument had to be computed first -- another such call's result passed
+  byref, or a float expression like 'x * 0.5'. The result's temporary is
+  cleared with memset; when its address was in rcx, rdx or r8 (rdi, rsi or
+  rdx on SysV) it was moved to another register, but memset still got the old
+  one, which the peephole optimizer had stopped writing. The destination now
+  follows its register.
 
 [changed]
 - tests: the 'ustring' macro in tests/udt-wstring and tests/udt-zstring was

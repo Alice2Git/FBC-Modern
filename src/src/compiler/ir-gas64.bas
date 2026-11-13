@@ -2523,11 +2523,14 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 			reg_allowed(false)
 			if ctx.systemv then
 				''if rdi, rsi or rdx are used moved to another register
+				'' when the destination itself is in a moved register, use the new register:
+				'' the old one is free now and the peephole optimizer may drop its last write
 				if reghandle(KREG_RDI)<>KREGFREE and reghandle(KREG_RDI)<>KREGLOCK then
 					vreg=reghandle(KREG_RDI)
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_RDI)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RDI))
+					if regdst=*regstrq(KREG_RDI) then regdst=*regstrq(tempreg)
 				end if
 
 				if reghandle(KREG_RSI)<>KREGFREE and reghandle(KREG_RSI)<>KREGLOCK then
@@ -2535,6 +2538,7 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_RSI)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RSI))
+					if regdst=*regstrq(KREG_RSI) then regdst=*regstrq(tempreg)
 				end if
 
 				if reghandle(KREG_RDX)<>KREGFREE and reghandle(KREG_RDX)<>KREGLOCK then
@@ -2542,6 +2546,7 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_RDX)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RDX))
+					if regdst=*regstrq(KREG_RDX) then regdst=*regstrq(tempreg)
 				end if
 
 				asm_code("mov rdi, "+regdst)
@@ -2549,11 +2554,13 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 				asm_code("mov rdx, "+Str(nbbytes),KNOALL)
 			else
 				''if rcx, rdx or r8 are used moved to another register
+				'' (and the destination follows its register, see the systemv case)
 				if reghandle(KREG_RCX)<>KREGFREE and reghandle(KREG_RCX)<>KREGLOCK then
 					vreg=reghandle(KREG_RCX)
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_RCX)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RCX))
+					if regdst=*regstrq(KREG_RCX) then regdst=*regstrq(tempreg)
 				end if
 
 				if reghandle(KREG_RDX)<>KREGFREE and reghandle(KREG_RDX)<>KREGLOCK then
@@ -2561,6 +2568,7 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_RDX)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RDX))
+					if regdst=*regstrq(KREG_RDX) then regdst=*regstrq(tempreg)
 				end if
 
 				if reghandle(KREG_R8)<>KREGFREE and reghandle(KREG_R8)<>KREGLOCK then
@@ -2568,6 +2576,7 @@ private sub memfill(byval bytestofill as Integer,byref dst as string,byval dtyp 
 					tempreg=reg_findfree(vreg)
 					reghandle(KREG_R8)=KREGFREE
 					asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_R8))
+					if regdst=*regstrq(KREG_R8) then regdst=*regstrq(tempreg)
 				end if
 
 				asm_code("mov rcx, "+regdst)
@@ -7523,6 +7532,8 @@ private sub _emitmem(byval op as integer,byval v1 as IRVREG ptr,byval v2 as IRVR
 						asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_RDX))
 					end if
 
+					'' the destination register may have been moved just above
+					if v1->typ=IR_VREGTYPE_REG then op1=*regstrq(reg_findreal(v1->reg))
 
 					if op1<>"rdi" then
 						asm_code("mov rdi, "+op1)
@@ -7564,6 +7575,9 @@ private sub _emitmem(byval op as integer,byval v1 as IRVREG ptr,byval v2 as IRVR
 						reghandle(KREG_R8)=KREGFREE
 						asm_code("mov "+*regstrq(tempreg)+", "+*regstrq(KREG_R8))
 					end if
+
+					'' the destination register may have been moved just above
+					if v1->typ=IR_VREGTYPE_REG then op1=*regstrq(reg_findreal(v1->reg))
 
 					if op1<>"rcx" then
 						asm_code("mov rcx, "+op1)
